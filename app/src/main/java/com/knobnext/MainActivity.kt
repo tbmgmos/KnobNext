@@ -18,7 +18,7 @@ import com.knobnext.ui.SetupState
 
 class MainActivity : ComponentActivity() {
 
-    private var setup by mutableStateOf(SetupState(restricted = Restricted.NOT_APPLICABLE, serviceEnabled = false, playerAccess = false, batteryUnrestricted = true))
+    private var setup by mutableStateOf(SetupState(restricted = Restricted.NOT_APPLICABLE, serviceEnabled = false, playerAccess = false, batteryUnrestricted = true, serviceRunning = true))
 
     private var stopObserving: () -> Unit = {}
 
@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
         setup = SetupState(
             restricted = Setup.restrictedState(this),
             serviceEnabled = Setup.accessibilityEnabled(this) || isServiceRunning(),
+            serviceRunning = isServiceRunning(),
             playerAccess = Media(this).hasAccess(),
             batteryUnrestricted = Setup.batteryUnrestricted(this),
         )

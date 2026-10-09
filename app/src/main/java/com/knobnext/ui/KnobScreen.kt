@@ -61,6 +61,8 @@ data class SetupState(
     val serviceEnabled: Boolean,
     val playerAccess: Boolean,
     val batteryUnrestricted: Boolean,
+    /** Enabled in settings but not bound: the service keeps crashing or the system dropped it. */
+    val serviceRunning: Boolean,
 )
 
 @Composable
@@ -145,6 +147,21 @@ fun KnobScreen(
                 item { SetupCard(setup, actions) }
             } else {
                 item { StatusHero(true, actions.openAccessibility) }
+                if (!setup.serviceRunning) {
+                    item {
+                        InfoCard(
+                            title = stringResource(R.string.not_running_title),
+                            body = stringResource(R.string.not_running_body),
+                            button = stringResource(R.string.open_accessibility),
+                            onClick = actions.openAccessibility,
+                        ) {
+                            ShapeBadge(
+                                MaterialShapes.Pentagon, KnobIcons.Close,
+                                MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.onError, size = 40,
+                            )
+                        }
+                    }
+                }
                 if (!notificationAccess) {
                     item {
                         InfoCard(

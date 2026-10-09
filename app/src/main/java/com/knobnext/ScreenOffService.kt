@@ -22,7 +22,14 @@ class ScreenOffService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // startForeground must always be called after startForegroundService, even if we stop right away.
-        startForegroundWithNotification()
+        // It throws when a background start isn't allowed; that must never take the process
+        // (and the accessibility service living in it) down.
+        try {
+            startForegroundWithNotification()
+        } catch (_: Exception) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!shouldRun(this)) {
             stopSelf()
             return START_NOT_STICKY

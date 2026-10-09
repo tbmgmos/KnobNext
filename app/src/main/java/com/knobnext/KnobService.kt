@@ -57,13 +57,15 @@ class KnobService : AccessibilityService() {
         audio = getSystemService(AudioManager::class.java)
         power = getSystemService(PowerManager::class.java)
         prefs = Prefs(this)
+        log(getString(R.string.log_service_started))
         media = Media(this)
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         volumeWatcher = VolumeWatcher(this, handler, ::doublePressActive, ::onVolumeObserved)
         volumeWatcher.start()
-        ScreenOffService.sync(this)
+        // From the background a foreground service may only start when battery optimization is off.
+        if (Setup.batteryUnrestricted(this)) ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
 
