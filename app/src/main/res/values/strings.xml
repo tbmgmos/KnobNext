@@ -17,7 +17,6 @@
     <string name="toggle_off">Жесты выключены</string>
     <string name="back">Назад</string>
     <string name="tile_keys">Удержание и комбинации · назначено: %1$d</string>
-    <string name="tile_off">Выключено</string>
     <string name="tile_sequences">Работает %1$s</string>
     <string name="mode_always_long">всегда</string>
     <string name="mode_screen_off_long">при выключенном экране</string>
