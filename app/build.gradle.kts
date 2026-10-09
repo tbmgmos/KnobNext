@@ -22,14 +22,8 @@ android {
     // so that build has no network permission at all.
     flavorDimensions += "store"
     productFlavors {
-        create("github") {
-            dimension = "store"
-            resValue("bool", "update_check", "true")
-        }
-        create("rustore") {
-            dimension = "store"
-            resValue("bool", "update_check", "false")
-        }
+        create("github") { dimension = "store" }
+        create("rustore") { dimension = "store" }
     }
 
     signingConfigs {
