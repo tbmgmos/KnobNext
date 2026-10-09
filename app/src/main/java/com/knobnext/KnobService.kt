@@ -25,15 +25,17 @@ class KnobService : AccessibilityService() {
     private lateinit var proximity: ProximityProbe
     private val handler = Handler(Looper.getMainLooper())
 
-    // Without notification access we can't see a paused player, so remember our own last command.
-    private var lastCommandAt = 0L
-
     // ---- Screen on: key events from the accessibility framework ----
 
-    // Volume keys whose DOWN we consumed; their UP must be consumed too.
+    // Volume keys currently held. A consumed DOWN needs its UP consumed too; a passive press was left to
+    // the system (nothing playing) and is tracked only so that pressing the other key can resume playback.
     private val presses = HashMap<Int, Press>()
 
-    private inner class Press(val keyCode: Int, val controller: MediaController?) : Runnable {
+    private inner class Press(
+        val keyCode: Int,
+        val controller: MediaController?,
+        val passive: Boolean = false,
+    ) : Runnable {
         var handled = false
 
         override fun run() {
@@ -102,7 +104,7 @@ class KnobService : AccessibilityService() {
     }
 
     private fun onDown(code: Int, repeatCount: Int): Boolean {
-        if (presses.containsKey(code)) return true
+        presses[code]?.let { return !it.passive }
 
         val other = presses[otherKey(code)]
         val bothAction = prefs.action(Gesture.BOTH)
@@ -119,7 +121,12 @@ class KnobService : AccessibilityService() {
         if (repeatCount > 0) return false
         val hold = prefs.action(if (code == KeyEvent.KEYCODE_VOLUME_UP) Gesture.HOLD_UP else Gesture.HOLD_DOWN)
         if (hold == Action.NONE && bothAction == Action.NONE) return false
-        val target = media.resolve(prefs, lastCommandAt) ?: return false
+        val target = media.resolve(prefs) ?: return false
+
+        if (target.mode == Mode.COMBO_ONLY) {
+            if (bothAction != Action.NONE) presses[code] = Press(code, target.controller, passive = true)
+            return false
+        }
 
         if (prefs.pocketGuard) proximity.arm()
         val press = Press(code, target.controller)
@@ -131,6 +138,7 @@ class KnobService : AccessibilityService() {
     private fun onUp(code: Int): Boolean {
         val press = presses.remove(code) ?: return false
         handler.removeCallbacks(press)
+        if (press.passive) return false
         if (!press.handled) {
             val direction =
                 if (code == KeyEvent.KEYCODE_VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
@@ -182,7 +190,8 @@ class KnobService : AccessibilityService() {
         resetScreenOff()
         val action = prefs.action(if (direction > 0) Gesture.DOUBLE_UP_OFF else Gesture.DOUBLE_DOWN_OFF)
         if (action == Action.NONE) return
-        val target = media.resolve(prefs, lastCommandAt) ?: return
+        val target = media.resolve(prefs) ?: return
+        if (target.mode == Mode.COMBO_ONLY && action != Action.PLAY_PAUSE) return
         if (prefs.pocketGuard && proximity.isCovered()) return
         ignoreVolumeUntil = SystemClock.elapsedRealtime() + IGNORE_OWN_CHANGE_MS
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0)
@@ -199,7 +208,6 @@ class KnobService : AccessibilityService() {
         if (action == Action.NONE) return
         if (prefs.pocketGuard && proximity.isCovered()) return
         media.perform(action, controller)
-        lastCommandAt = SystemClock.elapsedRealtime()
         if (prefs.vibrate) haptics.play(action)
     }
 

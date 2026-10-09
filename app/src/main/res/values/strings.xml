@@ -21,7 +21,7 @@
     <string name="open_app_info">О приложении</string>
 
     <string name="access_title">Подключите плеер</string>
-    <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд, выбирать плееры и возобновлять музыку после паузы. Сами уведомления приложение не читает.</string>
+    <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд и выбирать, в каких плеерах работают жесты. Сами уведомления приложение не читает.</string>
     <string name="access_button">Дать доступ</string>
 
     <string name="update_title">Доступно обновление</string>
@@ -49,7 +49,7 @@
     <string name="settings_title">Настройки</string>
     <string name="pref_enabled">Включено</string>
     <string name="pref_only_when_playing">Только когда играет звук</string>
-    <string name="pref_only_when_playing_hint">Иначе кнопки работают полностью штатно</string>
+    <string name="pref_only_when_playing_hint">Когда ничего не играет, удержание меняет громкость как обычно. Продолжить музыку — «+» и «−» вместе</string>
     <string name="pref_screen_off">При выключенном экране</string>
     <string name="pref_screen_off_hint">Двойное нажатие «+» или «−»</string>
     <string name="pref_headphones">Только с наушниками</string>

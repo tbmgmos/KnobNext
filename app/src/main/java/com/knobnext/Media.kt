@@ -11,8 +11,16 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
 
-/** Whom a gesture should control, or null when gestures must not be intercepted right now. */
-class Target(val controller: MediaController?)
+enum class Mode {
+    /** Something is playing: holds and the combo are intercepted. */
+    FULL,
+
+    /** Nothing is playing: keys behave normally, only "both keys together" is caught (to resume). */
+    COMBO_ONLY,
+}
+
+/** Whom a gesture should control and how much to intercept; null means "don't touch the keys". */
+class Target(val controller: MediaController?, val mode: Mode)
 
 class Media(private val context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -46,29 +54,21 @@ class Media(private val context: Context) {
     fun headphonesConnected(): Boolean =
         audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADPHONE_TYPES }
 
-    /**
-     * Decides whether gestures should be handled now and which player they go to.
-     * [lastCommandAt] is used only without notification access, to allow resuming a player we paused.
-     */
-    fun resolve(prefs: Prefs, lastCommandAt: Long): Target? {
+    /** Decides whether gestures should be handled now and which player they go to. */
+    fun resolve(prefs: Prefs): Target? {
         if (!prefs.enabled || isInCall()) return null
         if (prefs.headphonesOnly && !headphonesConnected()) return null
 
-        if (!hasAccess()) {
-            if (!prefs.onlyWhenPlaying) return Target(null)
-            val recent = SystemClock.elapsedRealtime() - lastCommandAt < RESUME_WINDOW_MS
-            return if (audio.isMusicActive || recent) Target(null) else null
-        }
-
         val all = controllers()
         all.forEach { prefs.rememberPlayer(it.packageName) }
-        val allowed = if (prefs.appFilter) all.filter { it.packageName in prefs.allowedApps } else all
-        val controller = pick(allowed)
+        val filtering = prefs.appFilter && hasAccess()
+        val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all)
+        if (filtering && controller == null) return null
 
-        if (prefs.appFilter && controller == null) return null
-        if (!prefs.onlyWhenPlaying) return Target(controller)
-        if (controller == null) return if (audio.isMusicActive) Target(null) else null
-        return if (controller.isPlaying() || controller.recentlyPaused()) Target(controller) else null
+        // isMusicActive is the ground truth that sound is audible; some players report stale states.
+        val playing = audio.isMusicActive && (!filtering || controller?.isPlaying() == true)
+        val mode = if (playing || !prefs.onlyWhenPlaying) Mode.FULL else Mode.COMBO_ONLY
+        return Target(controller, mode)
     }
 
     fun perform(action: Action, controller: MediaController?) {
@@ -108,7 +108,6 @@ class Media(private val context: Context) {
 
     companion object {
         const val SEEK_STEP_MS = 10_000L
-        const val RESUME_WINDOW_MS = 5 * 60 * 1000L
 
         private val HEADPHONE_TYPES = setOf(
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
@@ -126,11 +125,4 @@ class Media(private val context: Context) {
 fun MediaController.isPlaying(): Boolean = when (playbackState?.state) {
     PlaybackState.STATE_PLAYING, PlaybackState.STATE_BUFFERING -> true
     else -> false
-}
-
-/** Paused recently (by anyone): gestures stay active so playback can be resumed the same way. */
-fun MediaController.recentlyPaused(): Boolean {
-    val state = playbackState ?: return false
-    return state.state == PlaybackState.STATE_PAUSED &&
-        SystemClock.elapsedRealtime() - state.lastPositionUpdateTime < Media.RESUME_WINDOW_MS
 }
