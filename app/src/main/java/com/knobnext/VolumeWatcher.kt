@@ -30,7 +30,8 @@ class VolumeWatcher(
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.getIntExtra(EXTRA_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
+            // While polling, the poll is authoritative; a late broadcast carries a stale value.
+            if (polling || intent.getIntExtra(EXTRA_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
             val value = intent.getIntExtra(EXTRA_VALUE, -1)
             if (value >= 0) onVolume(value, Source.BROADCAST)
         }
