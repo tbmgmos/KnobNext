@@ -324,8 +324,14 @@ fun ControlRow(
 
 /** Collapsed by default: the trace is for troubleshooting, not for everyday use. */
 @Composable
-fun EventLog(lastEvent: String?) {
+fun EventLog(prefs: Prefs) {
     var open by remember { mutableStateOf(false) }
+    var lastEvent by remember { mutableStateOf(prefs.lastEvent) }
+    DisposableEffect(prefs) {
+        lastEvent = prefs.lastEvent
+        val stop = prefs.observeLog { lastEvent = prefs.lastEvent }
+        onDispose { stop() }
+    }
     val scheme = MaterialTheme.colorScheme
     Column(Modifier.padding(horizontal = 8.dp)) {
         TextButton(onClick = { open = !open }) {

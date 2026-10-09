@@ -27,9 +27,12 @@ class ScreenOffService : Service() {
         try {
             startForegroundWithNotification()
         } catch (_: Exception) {
+            starting = false
             stopSelf()
             return START_NOT_STICKY
         }
+        starting = false
+        // Also how a stop requested while this start was pending takes effect, see [stop].
         if (!shouldRun(this)) {
             stopSelf()
             return START_NOT_STICKY
@@ -75,13 +78,34 @@ class ScreenOffService : Service() {
             return prefs.enabled && needsBackground && Setup.accessibilityEnabled(context)
         }
 
-        /** Starts or stops the service to match the settings. Safe to call from anywhere. */
-        fun sync(context: Context) {
-            val intent = Intent(context, ScreenOffService::class.java)
+        // Between startForegroundService() and startForeground() in onStartCommand. Stopping the service
+        // in that gap makes the system kill the whole process — the accessibility service included.
+        @Volatile
+        private var starting = false
+
+        /**
+         * Starts or stops the service to match the settings. Safe to call from anywhere. From the
+         * background a start is only allowed when battery optimization is off; pass [inForeground]
+         * when called from a visible activity.
+         */
+        fun sync(context: Context, inForeground: Boolean = false) {
+            if (!shouldRun(context)) return stop(context)
+            if (!inForeground && !Setup.batteryUnrestricted(context)) return
             try {
-                if (shouldRun(context)) context.startForegroundService(intent) else context.stopService(intent)
+                starting = true
+                context.startForegroundService(Intent(context, ScreenOffService::class.java))
             } catch (_: Exception) {
-                // Background start not allowed right now (battery optimization on); the app retries on next open.
+                // Not allowed right now; the app retries on next open.
+                starting = false
+            }
+        }
+
+        fun stop(context: Context) {
+            // A pending start re-checks shouldRun in onStartCommand and stops itself there.
+            if (starting) return
+            try {
+                context.stopService(Intent(context, ScreenOffService::class.java))
+            } catch (_: Exception) {
             }
         }
     }

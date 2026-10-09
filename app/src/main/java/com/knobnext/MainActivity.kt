@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
 import com.knobnext.ui.KnobScreen
 import com.knobnext.ui.KnobTheme
 import com.knobnext.ui.ScreenActions
@@ -46,7 +47,7 @@ class MainActivity : ComponentActivity() {
             val now = ScreenOffService.shouldRun(this)
             if (now != shouldRun) {
                 shouldRun = now
-                ScreenOffService.sync(this)
+                ScreenOffService.sync(this, inForeground = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
             }
         }
         setContent {
@@ -65,7 +66,7 @@ class MainActivity : ComponentActivity() {
             playerAccess = Media(this).hasAccess(),
             batteryUnrestricted = Setup.batteryUnrestricted(this),
         )
-        ScreenOffService.sync(this)
+        ScreenOffService.sync(this, inForeground = true)
     }
 
     override fun onDestroy() {

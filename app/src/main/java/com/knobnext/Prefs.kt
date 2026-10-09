@@ -45,7 +45,6 @@ data class Settings(
     val enabled: Boolean,
     val onlyWhenPlaying: Boolean,
     val doubleMode: DoubleMode,
-    val lastEvent: String?,
     val headphonesOnly: Boolean,
     val pocketGuard: Boolean,
     val vibrate: Boolean,
@@ -62,11 +61,15 @@ data class Settings(
     val waveCount: Int,
     val sleepMinutes: Int,
     val sleepUntil: Long,
+    val resumeMinutes: Int,
     val actions: Map<Gesture, Action>,
 )
 
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("knob", Context.MODE_PRIVATE)
+
+    // The event log changes on every volume step; kept apart so that settings observers don't wake up for it.
+    private val logSp = context.getSharedPreferences("knob_log", Context.MODE_PRIVATE)
 
     var enabled: Boolean
         get() = sp.getBoolean("enabled", true)
@@ -87,8 +90,8 @@ class Prefs(context: Context) {
 
     /** Human-readable trace of the last double-press detection, shown in settings for troubleshooting. */
     var lastEvent: String?
-        get() = sp.getString("last_event", null)
-        set(v) = sp.edit().putString("last_event", v).apply()
+        get() = logSp.getString("last_event", null)
+        set(v) = logSp.edit().putString("last_event", v).apply()
 
     var headphonesOnly: Boolean
         get() = sp.getBoolean("headphones_only", false)
@@ -151,6 +154,14 @@ class Prefs(context: Context) {
         get() = sp.getInt("sleep_minutes", 30)
         set(v) = sp.edit().putInt("sleep_minutes", v).apply()
 
+    /**
+     * For how long after a gesture paused the music a gesture assigned to play/pause can resume it,
+     * in minutes; 0 turns this off. See KnobService.resumeWindowOpen.
+     */
+    var resumeMinutes: Int
+        get() = sp.getInt("resume_minutes", 30)
+        set(v) = sp.edit().putInt("resume_minutes", v).apply()
+
     /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
     var sleepUntil: Long
         get() = sp.getLong("sleep_until", 0L)
@@ -190,7 +201,6 @@ class Prefs(context: Context) {
         enabled = enabled,
         onlyWhenPlaying = onlyWhenPlaying,
         doubleMode = doubleMode,
-        lastEvent = lastEvent,
         headphonesOnly = headphonesOnly,
         pocketGuard = pocketGuard,
         vibrate = vibrate,
@@ -207,14 +217,20 @@ class Prefs(context: Context) {
         waveCount = waveCount,
         sleepMinutes = sleepMinutes,
         sleepUntil = sleepUntil,
+        resumeMinutes = resumeMinutes,
         actions = Gesture.entries.associateWith(::action),
     )
 
     /** Returns an unregister function. The listener object must stay referenced, so it lives in the closure. */
-    fun observe(onChange: () -> Unit): () -> Unit {
+    fun observe(onChange: () -> Unit): () -> Unit = observe(sp, onChange)
+
+    /** Same as [observe], for the event log. */
+    fun observeLog(onChange: () -> Unit): () -> Unit = observe(logSp, onChange)
+
+    private fun observe(prefs: SharedPreferences, onChange: () -> Unit): () -> Unit {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> onChange() }
-        sp.registerOnSharedPreferenceChangeListener(listener)
-        return { sp.unregisterOnSharedPreferenceChangeListener(listener) }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     companion object {

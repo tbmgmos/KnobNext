@@ -104,6 +104,7 @@
     <string name="section_keys_hint">Работает при включённом экране. «Удерживать долго» — держать дольше обычного (1,5 с и больше): на пороге обычного удержания будет лёгкий щелчок, а обычное действие сработает при отпускании. «Нажать и удерживать» — короткое нажатие и сразу удержание той же кнопки.</string>
     <string name="section_double">Нажатия подряд</string>
     <string name="double_when">Когда работает</string>
+    <string name="section_double_pause_hint">Пока ничего не играет и экран выключен, Android не реагирует на кнопки громкости, поэтому так паузу можно только поставить. Снять её — теми же нажатиями при включённом экране (см. «Снять паузу жестом» в настройках) или «+» и «−» вместе.</string>
     <string name="section_double_hint">Быстрые нажатия подряд, в том числе при выключенном экране. Громкость после жеста возвращается обратно. На максимальной и нулевой громкости нажатия в эту сторону не видны.</string>
     <string name="section_back_tap">Постукивание по корпусу</string>
     <string name="back_tap_title">Постукивание по задней панели</string>
@@ -131,6 +132,7 @@
     <string name="pref_sleep">Таймер сна</string>
     <string name="pref_sleep_hint">Через сколько поставить паузу, когда сработает действие «Таймер сна». Повторный запуск отменяет таймер.</string>
     <string name="pref_sleep_active">Пауза в %1$s. Повторите жест, чтобы отменить.</string>
+    <string name="sleep_cancel">Отменить таймер</string>
     <string name="minutes_15">15 мин</string>
     <string name="minutes_30">30 мин</string>
     <string name="minutes_60">1 час</string>
@@ -160,7 +162,9 @@
     <string name="settings_title">Настройки</string>
     <string name="pref_enabled">Включено</string>
     <string name="pref_only_when_playing">Только когда играет звук</string>
-    <string name="pref_only_when_playing_hint">Когда ничего не играет, удержание меняет громкость как обычно. Продолжить музыку — «+» и «−» вместе</string>
+    <string name="pref_only_when_playing_hint">Когда ничего не играет, кнопки работают как обычно. Продолжить музыку — «+» и «−» вместе или жестом, назначенным на паузу</string>
+    <string name="pref_resume">Снять паузу жестом</string>
+    <string name="pref_resume_hint">Сколько после паузы, поставленной жестом, её можно снять жестом: нажатия подряд работают и при включённом экране, а жесты движением не отключаются. «Выкл» бережёт батарею</string>
     <string name="double_mode_off">Выкл</string>
     <string name="double_mode_screen_off">Без экрана</string>
     <string name="double_mode_always">Всегда</string>

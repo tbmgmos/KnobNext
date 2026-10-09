@@ -56,6 +56,7 @@ import com.knobnext.NowPlayingTracker
 import com.knobnext.Prefs
 import com.knobnext.R
 import com.knobnext.Release
+import com.knobnext.SleepTimer
 import com.knobnext.TapSensitivity
 import com.knobnext.Updates
 import com.knobnext.appIcon
@@ -396,6 +397,7 @@ private fun LazyListScope.sequencesPage(ctx: PageContext) {
         }
     }
     item { Hint(stringResource(R.string.section_double_hint)) }
+    if (on) item { Hint(stringResource(R.string.section_double_pause_hint)) }
 }
 
 // ---------------------------------------------------------------- Motion
@@ -571,7 +573,26 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
         }
     }
     item {
-        val sleepActive = s.sleepUntil > System.currentTimeMillis()
+        Group(1) {
+            ControlRow(shape(0), stringResource(R.string.pref_resume), caption = stringResource(R.string.pref_resume_hint), enabled = s.enabled) {
+                ConnectedChoice(
+                    options = listOf(
+                        0 to R.string.double_mode_off,
+                        15 to R.string.minutes_15,
+                        30 to R.string.minutes_30,
+                        60 to R.string.minutes_60,
+                    ),
+                    selected = s.resumeMinutes,
+                    onSelect = { prefs.resumeMinutes = it },
+                    enabled = s.enabled,
+                )
+            }
+        }
+    }
+    // Only relevant once a gesture is assigned to the sleep timer (or one is running).
+    val sleepActive = s.sleepUntil > System.currentTimeMillis()
+    if (sleepActive || Action.SLEEP_TIMER in s.actions.values) item {
+        val context = LocalContext.current
         Group(1) {
             ControlRow(
                 shape(0),
@@ -590,6 +611,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     selected = s.sleepMinutes,
                     onSelect = { prefs.sleepMinutes = it },
                 )
+                if (sleepActive) {
+                    TextButton(onClick = { SleepTimer.cancel(context, prefs) }) {
+                        Text(stringResource(R.string.sleep_cancel))
+                    }
+                }
             }
         }
     }
@@ -613,7 +639,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
-    item { EventLog(s.lastEvent) }
+    item { EventLog(prefs) }
 }
 
 // ---------------------------------------------------------------- Building blocks

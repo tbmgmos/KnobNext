@@ -148,20 +148,13 @@ class Extras(private val context: Context, private val media: Media, private val
     }
 
     private fun toggleSleepTimer(): String? {
-        val alarms = context.getSystemService(AlarmManager::class.java)
-        val pending = PendingIntent.getBroadcast(
-            context, 0, Intent(context, SleepReceiver::class.java), PendingIntent.FLAG_IMMUTABLE,
-        )
-        if (prefs.sleepUntil > System.currentTimeMillis()) {
-            alarms.cancel(pending)
-            prefs.sleepUntil = 0L
+        if (SleepTimer.active(prefs)) {
+            SleepTimer.cancel(context, prefs)
             speaker.say(context.getString(R.string.speak_sleep_cancelled))
             return context.getString(R.string.log_sleep_cancelled)
         }
         val minutes = prefs.sleepMinutes
-        val delay = minutes * 60_000L
-        alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delay, pending)
-        prefs.sleepUntil = System.currentTimeMillis() + delay
+        SleepTimer.start(context, prefs, minutes)
         speaker.say(context.getString(R.string.speak_sleep_set, minutes))
         return context.getString(R.string.log_sleep_set, minutes)
     }
@@ -202,6 +195,27 @@ class Extras(private val context: Context, private val media: Media, private val
         private const val COMPAT_REPEAT_ARG = "android.support.v4.media.session.action.ARGUMENT_REPEAT_MODE"
         private const val OPEN_PLAY_DELAY_MS = 1_500L
     }
+}
+
+/** The sleep timer's alarm, shared by the gesture and the "cancel" button in settings. */
+object SleepTimer {
+    fun active(prefs: Prefs) = prefs.sleepUntil > System.currentTimeMillis()
+
+    fun start(context: Context, prefs: Prefs, minutes: Int) {
+        val delay = minutes * 60_000L
+        context.getSystemService(AlarmManager::class.java)
+            .setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delay, alarm(context))
+        prefs.sleepUntil = System.currentTimeMillis() + delay
+    }
+
+    fun cancel(context: Context, prefs: Prefs) {
+        context.getSystemService(AlarmManager::class.java).cancel(alarm(context))
+        prefs.sleepUntil = 0L
+    }
+
+    private fun alarm(context: Context) = PendingIntent.getBroadcast(
+        context, 0, Intent(context, SleepReceiver::class.java), PendingIntent.FLAG_IMMUTABLE,
+    )
 }
 
 /** Pauses playback when the sleep timer fires. */

@@ -153,6 +153,9 @@ class WaveDetector(
     private var waves = 0
     private var firstWaveAt = 0L
 
+    /** The sensor is covered right now (also used as the pocket check while this detector runs). */
+    val covered: Boolean get() = running && near == true
+
     private val pocketCheck = Runnable {
         blocked = true
         waves = 0

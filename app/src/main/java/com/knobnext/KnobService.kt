@@ -1,7 +1,6 @@
 package com.knobnext
 
 import android.accessibilityservice.AccessibilityService
-import android.content.Intent
 import android.media.AudioManager
 import android.media.session.MediaController
 import android.os.Handler
@@ -44,12 +43,14 @@ class KnobService : AccessibilityService() {
         /** Hold reached, but a long-hold action exists: the hold action waits for release. */
         private var holdArmed: Action? = null
         private var rampDirection = 0
+        private var rampSteps = 0
         private val up = keyCode == KeyEvent.KEYCODE_VOLUME_UP
 
+        // Capped: if the release is ever lost, the volume must not keep changing on its own.
         val ramp = object : Runnable {
             override fun run() {
                 media.volumeStep(rampDirection)
-                handler.postDelayed(this, RAMP_STEP_MS)
+                if (++rampSteps < RAMP_MAX_STEPS) handler.postDelayed(this, RAMP_STEP_MS)
             }
         }
 
@@ -121,8 +122,14 @@ class KnobService : AccessibilityService() {
     private lateinit var flip: FlipDetector
     private lateinit var twist: TwistDetector
     private lateinit var wave: WaveDetector
-    private lateinit var flipWakeLock: PowerManager.WakeLock
+    // Keeps sensors alive while nothing plays (the CPU may sleep otherwise): after a flip pause, and
+    // during the resume window when a motion gesture can resume playback.
+    private lateinit var wakeLock: PowerManager.WakeLock
     private var flipPausedAt = 0L
+
+    // When a gesture paused playback, or 0. For a while after that a gesture assigned to play/pause
+    // can resume it — see resumeWindowOpen.
+    private var pausedAt = 0L
 
     // Read by the sensor thread at ~400 Hz, so it is cached here instead of hitting preferences.
     @Volatile private var tapThreshold = TapSensitivity.MEDIUM.threshold
@@ -156,7 +163,7 @@ class KnobService : AccessibilityService() {
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onVolumeObserved)
+        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::forgetPresses, ::onVolumeObserved)
         volumeWatcher.start()
         backTap = BackTapDetector(this, { tapThreshold }) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
@@ -164,18 +171,17 @@ class KnobService : AccessibilityService() {
         flip = FlipDetector(this, ::onFlip)
         twist = TwistDetector(this) { fireGesture(Gesture.TWIST) }
         wave = WaveDetector(this, { prefs.waveCount }, { fireGesture(Gesture.WAVE) })
-        flipWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:flip").apply {
+        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:sensors").apply {
             setReferenceCounted(false)
         }
         handler.post(motionCheck)
-        // From the background a foreground service may only start when battery optimization is off.
-        if (Setup.batteryUnrestricted(this)) ScreenOffService.sync(this)
+        ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {
         if (::prefs.isInitialized) log(getString(R.string.log_service_stopped))
-        stopService(Intent(this, ScreenOffService::class.java))
+        ScreenOffService.stop(this)
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             volumeWatcher.stop()
@@ -183,7 +189,7 @@ class KnobService : AccessibilityService() {
             flip.stop()
             twist.stop()
             wave.stop()
-            if (flipWakeLock.isHeld) flipWakeLock.release()
+            if (wakeLock.isHeld) wakeLock.release()
             extras.release()
             proximity.release()
         }
@@ -207,7 +213,14 @@ class KnobService : AccessibilityService() {
     }
 
     private fun onDown(code: Int, repeatCount: Int): Boolean {
-        presses[code]?.let { return !it.passive }
+        presses[code]?.let { press ->
+            if (repeatCount > 0) return !press.passive
+            // A new press while the previous one is still "down": its release was lost (the screen went
+            // off mid-press). Drop it, otherwise this key would stay swallowed for good.
+            press.cancel()
+            presses.remove(code)
+            dropCombo()
+        }
 
         val other = presses[otherKey(code)]
         val bothAction = prefs.action(Gesture.BOTH)
@@ -228,18 +241,24 @@ class KnobService : AccessibilityService() {
         val up = code == KeyEvent.KEYCODE_VOLUME_UP
         val hold = prefs.action(if (up) Gesture.HOLD_UP else Gesture.HOLD_DOWN)
         val long = prefs.action(if (up) Gesture.LONG_HOLD_UP else Gesture.LONG_HOLD_DOWN)
-        val tapHold = SystemClock.uptimeMillis() - (lastTapUpAt[code] ?: 0L) <= TAP_HOLD_WINDOW_MS &&
-            prefs.action(if (up) Gesture.TAP_HOLD_UP else Gesture.TAP_HOLD_DOWN) != Action.NONE
+        val tapHoldAction = prefs.action(if (up) Gesture.TAP_HOLD_UP else Gesture.TAP_HOLD_DOWN)
+        val tapHold = tapHoldAction != Action.NONE &&
+            SystemClock.uptimeMillis() - (lastTapUpAt[code] ?: 0L) <= TAP_HOLD_WINDOW_MS
         val anyCombo = bothAction != Action.NONE || bothHold != Action.NONE
-        if (!tapHold && hold == Action.NONE && long == Action.NONE && !anyCombo) return false
+        // With "tap, then hold" assigned, the tap has to be taken too, to know when it was released.
+        if (tapHoldAction == Action.NONE && hold == Action.NONE && long == Action.NONE && !anyCombo) return false
         val target = media.resolve(prefs) ?: return false
 
         if (target.mode == Mode.COMBO_ONLY) {
-            if (anyCombo) presses[code] = Press(code, target.controller, passive = true)
-            return false
+            // Nothing plays: keys behave as usual, except holds that can start playback.
+            val idleHold = if (tapHold) tapHoldAction.worksWhenIdle else hold.worksWhenIdle || long.worksWhenIdle
+            if (!idleHold) {
+                if (anyCombo) presses[code] = Press(code, target.controller, passive = true)
+                return false
+            }
         }
 
-        if (prefs.pocketGuard) proximity.arm()
+        armPocketGuard()
         val press = Press(code, target.controller, tapHold = tapHold)
         presses[code] = press
         when {
@@ -266,6 +285,18 @@ class KnobService : AccessibilityService() {
         return true
     }
 
+    /** Forgets keys that are "down": with the screen off their releases never arrive. */
+    private fun forgetPresses() {
+        presses.values.forEach { it.cancel() }
+        presses.clear()
+        dropCombo()
+    }
+
+    private fun dropCombo() {
+        combo?.let { handler.removeCallbacks(it) }
+        combo = null
+    }
+
     private fun otherKey(code: Int) =
         if (code == KeyEvent.KEYCODE_VOLUME_UP) KeyEvent.KEYCODE_VOLUME_DOWN else KeyEvent.KEYCODE_VOLUME_UP
 
@@ -275,7 +306,15 @@ class KnobService : AccessibilityService() {
 
     private fun sequencesActive(): Boolean {
         val mode = prefs.doubleMode
-        return prefs.enabled && (mode == DoubleMode.ALWAYS || (mode == DoubleMode.SCREEN_OFF && !power.isInteractive))
+        if (!prefs.enabled || mode == DoubleMode.OFF) return false
+        // With the screen off and nothing playing, Android ignores the volume keys altogether, so a
+        // pause made there can only be undone with the screen on: allow that during the resume window.
+        return mode == DoubleMode.ALWAYS || !power.isInteractive || (resumeWindowOpen() && !audio.isMusicActive)
+    }
+
+    private fun resumeWindowOpen(): Boolean {
+        val minutes = prefs.resumeMinutes
+        return minutes > 0 && pausedAt != 0L && SystemClock.elapsedRealtime() - pausedAt < minutes * 60_000L
     }
 
     /**
@@ -325,7 +364,7 @@ class KnobService : AccessibilityService() {
         }
         if (sequence.isEmpty()) {
             sequenceBase = previous
-            if (prefs.pocketGuard) proximity.arm()
+            armPocketGuard()
         }
         sequence += direction
         sequenceLastAt = now
@@ -358,13 +397,34 @@ class KnobService : AccessibilityService() {
 
     private fun updateSensors() {
         tapThreshold = prefs.tapSensitivity.threshold
-        val playing = prefs.enabled && audio.isMusicActive
-        if (playing && prefs.backTap) backTap.start() else backTap.stop()
-        if (playing && prefs.twist) twist.start() else twist.stop()
-        if (playing && prefs.wave) wave.start() else wave.stop()
-        val flipPending = SystemClock.elapsedRealtime() - flipPausedAt < FLIP_RESUME_WINDOW_MS
-        if (prefs.enabled && prefs.flip && (playing || flipPending)) flip.start() else flip.stop()
-        if (!flipPending && flipWakeLock.isHeld) flipWakeLock.release()
+        val enabled = prefs.enabled
+        val playing = enabled && audio.isMusicActive
+        val now = SystemClock.elapsedRealtime()
+        // Playing again some other way (the player itself, headphones): the window is no longer needed.
+        if (playing && pausedAt != 0L && now - pausedAt > PAUSE_SETTLE_MS) pausedAt = 0L
+        val resumable = enabled && !playing && resumeWindowOpen()
+
+        fun wanted(on: Boolean, vararg gestures: Gesture) =
+            on && (playing || resumable && gestures.any { prefs.action(it).worksWhenIdle })
+
+        val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
+        val turn = wanted(prefs.twist, Gesture.TWIST)
+        if (tap) backTap.start() else backTap.stop()
+        if (turn) twist.start() else twist.stop()
+        if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
+        val flipPending = flipPausedAt != 0L && now - flipPausedAt < FLIP_RESUME_WINDOW_MS
+        if (enabled && prefs.flip && (playing || flipPending)) flip.start() else flip.stop()
+
+        // The accelerometer and gyroscope don't wake the CPU; without sound playing it may sleep.
+        // (The proximity sensor used for the wave does wake it.) Right after a pause, stay up until
+        // the sensors have been rearranged for the silence.
+        val settling = pausedAt != 0L && now - pausedAt < PAUSE_SETTLE_MS * 2
+        val keepAwake = flip.running && flipPending || !playing && (tap || turn) || settling
+        if (keepAwake && !wakeLock.isHeld) {
+            wakeLock.acquire(WAKE_LOCK_MAX_MS)
+        } else if (!keepAwake && wakeLock.isHeld) {
+            wakeLock.release()
+        }
     }
 
     /** Face down pauses; turning the phone back up resumes, but only playback that we paused. */
@@ -373,13 +433,14 @@ class KnobService : AccessibilityService() {
             if (!audio.isMusicActive) return
             media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
             flipPausedAt = SystemClock.elapsedRealtime()
-            // Nothing plays now, so the CPU could sleep and miss the phone being turned back.
-            flipWakeLock.acquire(FLIP_RESUME_WINDOW_MS)
+            pausedAt = flipPausedAt
+            // Nothing plays now: keep the CPU up so turning the phone back is noticed.
+            stayAwake()
             if (prefs.vibrate) haptics.play(Action.PLAY_PAUSE)
             log(getString(R.string.log_flip_paused))
-        } else if (SystemClock.elapsedRealtime() - flipPausedAt < FLIP_RESUME_WINDOW_MS) {
+        } else if (flipPausedAt != 0L && SystemClock.elapsedRealtime() - flipPausedAt < FLIP_RESUME_WINDOW_MS) {
             flipPausedAt = 0L
-            if (flipWakeLock.isHeld) flipWakeLock.release()
+            pausedAt = 0L
             media.sendKey(KeyEvent.KEYCODE_MEDIA_PLAY)
             if (prefs.vibrate) haptics.play(Action.PLAY_PAUSE)
             log(getString(R.string.log_flip_resumed))
@@ -397,16 +458,40 @@ class KnobService : AccessibilityService() {
         if (target == null || (target.mode == Mode.COMBO_ONLY && !action.worksWhenIdle)) {
             return log(getString(R.string.log_not_playing, name))
         }
-        if (prefs.pocketGuard && proximity.isCovered()) return log(getString(R.string.log_pocket, name))
-        if (restoreVolumeTo != null) {
-            ignoreVolumeUntil = SystemClock.elapsedRealtime() + IGNORE_OWN_CHANGE_MS
-            audio.setStreamVolume(AudioManager.STREAM_MUSIC, restoreVolumeTo, 0)
-            lastVolume = restoreVolumeTo
+        if (pocketCovered()) {
+            // The presses were accidental: undo their volume change too.
+            restoreVolumeTo?.let(::restoreVolume)
+            return log(getString(R.string.log_pocket, name))
+        }
+        restoreVolumeTo?.let(::restoreVolume)
+        if (action == Action.PLAY_PAUSE) {
+            pausedAt = if (audio.isMusicActive) SystemClock.elapsedRealtime() else 0L
+            if (pausedAt != 0L) stayAwake()
         }
         val problem = execute(action, controller ?: target.controller)
         log(problem?.let { "$name → ${getString(actionLabel(action))}: $it" }
             ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
     }
+
+    /** Until the next sensor check decides; with the screen off the CPU could otherwise sleep before it. */
+    private fun stayAwake() {
+        if (!wakeLock.isHeld) wakeLock.acquire(WAKE_LOCK_MAX_MS)
+    }
+
+    private fun restoreVolume(value: Int) {
+        ignoreVolumeUntil = SystemClock.elapsedRealtime() + IGNORE_OWN_CHANGE_MS
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, value, 0)
+        lastVolume = value
+    }
+
+    // While the wave detector runs it already watches the proximity sensor; a second listener on the
+    // same sensor can make it re-report "near" and confuse it.
+    private fun armPocketGuard() {
+        if (prefs.pocketGuard && !wave.running) proximity.arm()
+    }
+
+    private fun pocketCovered(): Boolean =
+        prefs.pocketGuard && if (wave.running) wave.covered else proximity.isCovered()
 
     private fun execute(action: Action, controller: MediaController?): String? {
         val problem = when (action) {
@@ -433,13 +518,16 @@ class KnobService : AccessibilityService() {
         const val TAP_HOLD_WINDOW_MS = 350L
         const val TAP_HOLD_DELAY_MS = 200L
         const val RAMP_STEP_MS = 110L
+        const val RAMP_MAX_STEPS = 60
         const val LONG_HOLD_EXTRA_MS = 800L
         const val LONG_HOLD_MIN_MS = 1_500L
         const val BOTH_HOLD_MS = 700L
         const val MOTION_CHECK_MS = 2_000L
         const val FLIP_RESUME_WINDOW_MS = 30 * 60 * 1000L
+        const val WAKE_LOCK_MAX_MS = 60 * 60 * 1000L
+        const val PAUSE_SETTLE_MS = 3_000L
         const val MAX_REPLAYED_STEPS = 4
-        const val LOG_LINES = 6
+        const val LOG_LINES = 10
         const val SEQUENCE_GAP_MS = 450L
         const val HUMAN_MIN_GAP_MS = 70L
         const val CONFIRM_MS = 300L
