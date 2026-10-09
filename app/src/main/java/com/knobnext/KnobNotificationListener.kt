@@ -8,6 +8,7 @@ import android.service.notification.NotificationListenerService
  */
 class KnobNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
+        KnobService.instance?.onPlayerAccessGranted()
         Setup.returnToAppIfRequested(this)
     }
 }
