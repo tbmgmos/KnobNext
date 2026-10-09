@@ -60,41 +60,70 @@ class Extras(private val context: Context, private val media: Media, private val
         return null
     }
 
+    private fun isLike(text: String) = LIKE.any { it.containsMatchIn(text) } && UNLIKE.none { it.containsMatchIn(text) }
+    private fun isUnlike(text: String) = LIKE.any { it.containsMatchIn(text) } && UNLIKE.any { it.containsMatchIn(text) }
+
+    /** Buttons of the player's own notification, as (lower-cased title, action). */
+    private fun notificationButtons(pkg: String) =
+        KnobNotificationListener.instance?.playerActions(pkg).orEmpty()
+            .map { (it.title?.toString().orEmpty().lowercase()) to it }
+
+    private fun press(action: android.app.Notification.Action): Boolean =
+        try {
+            action.actionIntent?.send()
+            action.actionIntent != null
+        } catch (_: Exception) {
+            false
+        }
+
     /**
-     * Players expose "like" differently: Spotify as "Add to Liked Songs" (ADD_TO_COLLECTION),
-     * YouTube Music as a thumbs-up, others as a heart / favourite, or through the rating API.
-     * Matching runs over both the action id and its (localized) label.
+     * Like the current track. Tried in order:
+     *  1. the heart / thumbs-up button of the player's notification — the same button a user taps,
+     *     and the only way Spotify accepts it from another app;
+     *  2. the session's custom action (Spotify "ADD_TO_COLLECTION", thumbs-up, heart, favourite…);
+     *  3. the rating API.
      */
     private fun like(controller: MediaController?): String? {
         val c = controller ?: return context.getString(R.string.log_needs_access)
-        val actions = c.playbackState?.customActions.orEmpty()
+        val buttons = notificationButtons(c.packageName)
+        buttons.firstOrNull { (title, _) -> isLike(title) }?.let { (_, action) -> if (press(action)) return null }
+        if (buttons.any { (title, _) -> isUnlike(title) }) return context.getString(R.string.log_already_liked)
+
+        val custom = c.playbackState?.customActions.orEmpty()
         fun text(a: PlaybackState.CustomAction) = "${a.action} ${a.name}".lowercase()
-        fun isUndo(a: PlaybackState.CustomAction) = UNLIKE.any { it.containsMatchIn(text(a)) }
-        val undo = actions.firstOrNull { a -> isUndo(a) && LIKE.any { it.containsMatchIn(text(a)) } }
-        val add = actions.firstOrNull { a -> !isUndo(a) && LIKE.any { it.containsMatchIn(text(a)) } }
-        if (add != null) {
-            c.transportControls.sendCustomAction(add, null)
+        custom.firstOrNull { isLike(text(it)) }?.let {
+            c.transportControls.sendCustomAction(it, null)
             return null
         }
         when (c.ratingType) {
             Rating.RATING_THUMB_UP_DOWN -> c.transportControls.setRating(Rating.newThumbRating(true))
             Rating.RATING_HEART -> c.transportControls.setRating(Rating.newHeartRating(true))
             else -> {
-                // The player shows only "remove from liked": the track is liked already.
-                if (undo != null) return context.getString(R.string.log_already_liked)
-                val offered = actions.joinToString { it.name.toString() }.ifEmpty { "—" }
+                if (custom.any { isUnlike(text(it)) }) return context.getString(R.string.log_already_liked)
+                val offered = (buttons.map { it.first } + custom.map { it.name.toString() })
+                    .filter { it.isNotBlank() }.distinct().joinToString().ifEmpty { "—" }
                 return context.getString(R.string.log_unsupported_actions, offered)
             }
         }
         return null
     }
 
+    /** Notification button first, then the session's custom action, then the generic compat command. */
+    private fun toggleMode(c: MediaController, words: List<Regex>): Boolean {
+        notificationButtons(c.packageName).firstOrNull { (title, _) -> words.any { it.containsMatchIn(title) } }
+            ?.let { (_, action) -> if (press(action)) return true }
+        c.playbackState?.customActions.orEmpty()
+            .firstOrNull { a -> words.any { it.containsMatchIn("${a.action} ${a.name}".lowercase()) } }
+            ?.let {
+                c.transportControls.sendCustomAction(it, null)
+                return true
+            }
+        return false
+    }
+
     private fun shuffle(controller: MediaController?): String? {
         val c = controller ?: return context.getString(R.string.log_needs_access)
-        findCustomAction(c, listOf("shuffle", "перемеш"))?.let {
-            c.transportControls.sendCustomAction(it, null)
-            return null
-        }
+        if (toggleMode(c, SHUFFLE)) return null
         val on = !(shuffleOn[c.packageName] ?: false)
         shuffleOn[c.packageName] = on
         c.transportControls.sendCustomAction(
@@ -106,10 +135,7 @@ class Extras(private val context: Context, private val media: Media, private val
 
     private fun repeat(controller: MediaController?): String? {
         val c = controller ?: return context.getString(R.string.log_needs_access)
-        findCustomAction(c, listOf("repeat", "повтор"))?.let {
-            c.transportControls.sendCustomAction(it, null)
-            return null
-        }
+        if (toggleMode(c, REPEAT)) return null
         // none → all → one → none
         val next = when (repeatMode[c.packageName] ?: 0) {
             0 -> 2
@@ -154,26 +180,21 @@ class Extras(private val context: Context, private val media: Media, private val
         }
     }
 
-    private fun findCustomAction(
-        c: MediaController,
-        words: List<String>,
-        exclude: List<String> = emptyList(),
-    ): PlaybackState.CustomAction? =
-        c.playbackState?.customActions?.firstOrNull { a ->
-            val text = "${a.action} ${a.name}".lowercase()
-            words.any { it in text } && exclude.none { it in text }
-        }
-
     companion object {
         private val LIKE = listOf(
             Regex("like"), Regex("thumbs?_?up"), Regex("thumb up"), Regex("favou?rite"), Regex("heart"), Regex("love"),
-            Regex("collection"), Regex("library"), Regex("нрав"), Regex("любим"), Regex("избранн"), Regex("медиатек"),
+            Regex("collection"), Regex("library"), Regex("save"), Regex("нрав"), Regex("любим"), Regex("избранн"),
+            Regex("медиатек"), Regex("сохран"),
         )
+        private val SHUFFLE = listOf(Regex("shuffle"), Regex("перемеш"), Regex("случайн"))
+        private val REPEAT = listOf(Regex("repeat"), Regex("повтор"))
 
         /** "Remove from liked", "dislike", "Не нравится" — but not "мне нравится". */
         private val UNLIKE = listOf(
             Regex("dislike"), Regex("unlike"), Regex("remove"), Regex("thumbs?_?down"), Regex("thumb down"),
             Regex("(^|[^а-яё])не нрав"), Regex("удал"), Regex("убрать"),
+            // "Save to playlist" / "add to queue" are not likes.
+            Regex("playlist"), Regex("плейлист"), Regex("queue"), Regex("очеред"),
         )
         private const val COMPAT_SET_SHUFFLE = "android.support.v4.media.session.action.SET_SHUFFLE_MODE"
         private const val COMPAT_SHUFFLE_ARG = "android.support.v4.media.session.action.ARGUMENT_SHUFFLE_MODE"

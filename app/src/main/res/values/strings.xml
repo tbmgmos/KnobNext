@@ -48,7 +48,7 @@
     <string name="step_service_body">KnobNext использует службу специальных возможностей только чтобы получать нажатия кнопок громкости. Приложение не видит экран, не читает ввод и не собирает данные. Откроется страница KnobNext — включите переключатель и подтвердите, после этого приложение откроется само.</string>
     <string name="step_service_button">Включить</string>
     <string name="step_player_title">Подключите плеер</string>
-    <string name="step_player_body">Название трека, перемотка и выбор плееров. Нужен доступ к уведомлениям — сами уведомления приложение не читает.</string>
+    <string name="step_player_body">Название трека, «нравится», перемотка и выбор плееров. Нужен доступ к уведомлениям — приложение смотрит только на кнопки уведомления плеера.</string>
     <string name="step_player_button">Подключить</string>
 
     <string name="fgs_channel">Жесты при выключенном экране</string>
@@ -61,7 +61,7 @@
     <string name="autostart_button">Автозапуск</string>
 
     <string name="access_title">Подключите плеер</string>
-    <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд и выбирать, в каких плеерах работают жесты. Сами уведомления приложение не читает.</string>
+    <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, ставить «нравится», перематывать и выбирать плееры. Приложение смотрит только на кнопки уведомления самого плеера — другие уведомления не читаются.</string>
     <string name="access_button">Дать доступ</string>
 
     <string name="update_title">Доступно обновление</string>
@@ -158,7 +158,7 @@
     <string name="double_mode_screen_off">Без экрана</string>
     <string name="double_mode_always">Всегда</string>
     <string name="last_event">Последние события:\n%1$s</string>
-    <string name="last_event_none">пока нет — выключите экран и нажмите кнопку громкости</string>
+    <string name="last_event_none">Пока пусто. Здесь видно, какие жесты распознаны и что из этого вышло.</string>
     <string name="log_volume">громкость %1$s %2$d→%3$d (%4$s)</string>
     <string name="log_via_broadcast">система</string>
     <string name="log_via_poll">опрос</string>

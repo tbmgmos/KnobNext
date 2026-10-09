@@ -395,7 +395,6 @@ private fun LazyListScope.sequencesPage(ctx: PageContext) {
         }
     }
     item { Hint(stringResource(R.string.section_double_hint)) }
-    if (on) item { EventLog(s.lastEvent) }
 }
 
 // ---------------------------------------------------------------- Motion
@@ -584,6 +583,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item { EventLog(s.lastEvent) }
 }
 
 // ---------------------------------------------------------------- Building blocks
