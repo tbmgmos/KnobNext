@@ -441,7 +441,7 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
         }
     }
     item { MotionToggle(ctx, R.string.twist_title, R.string.twist_subtitle, s.twist, { prefs.twist = it }, Gesture.TWIST, MaterialShapes.Burst, KnobIcons.ScreenRotation) }
-    item { MotionToggle(ctx, R.string.wave_title, R.string.wave_subtitle, s.wave, { prefs.wave = it }, Gesture.WAVE, MaterialShapes.Ghostish, KnobIcons.PanTool) }
+    item { WaveCard(ctx) }
     item { Hint(stringResource(R.string.motion_hint)) }
 }
 
@@ -465,6 +465,35 @@ private fun MotionToggle(
             )
             AnimatedVisibility(on) {
                 GestureRow(1, gesture, ctx.s, polygon, accent = true, onEdit = ctx.edit)
+            }
+        }
+    }
+}
+
+/** Wave settings with a live view of the proximity sensor, to find the motion that works on this phone. */
+@Composable
+private fun WaveCard(ctx: PageContext) {
+    val s = ctx.s
+    Group(if (s.wave) 4 else 1) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SwitchRow(
+                shape(0), stringResource(R.string.wave_title), s.wave, { ctx.prefs.wave = it },
+                subtitle = stringResource(R.string.wave_subtitle), enabled = s.enabled,
+                leading = { Badge(MaterialShapes.Ghostish, KnobIcons.PanTool, primary = true) },
+            )
+            AnimatedVisibility(s.wave) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(1), stringResource(R.string.wave_count_title), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(1 to R.string.wave_one, 2 to R.string.wave_two),
+                            selected = s.waveCount,
+                            onSelect = { ctx.prefs.waveCount = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    WaveTester(shape(2), s.waveCount)
+                    GestureRow(3, Gesture.WAVE, s, MaterialShapes.Ghostish, accent = true, onEdit = ctx.edit)
+                }
             }
         }
     }

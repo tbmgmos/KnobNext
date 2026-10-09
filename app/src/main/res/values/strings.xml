@@ -90,7 +90,7 @@
     <string name="gesture_up_down">«+», затем «−»</string>
     <string name="gesture_down_up">«−», затем «+»</string>
     <string name="gesture_twist">Двойной поворот запястья</string>
-    <string name="gesture_wave">Два взмаха над экраном</string>
+    <string name="gesture_wave">Взмах над экраном</string>
     <string name="action_announce">Озвучить трек</string>
     <string name="action_like">Нравится</string>
     <string name="action_shuffle">Перемешивание</string>
@@ -119,8 +119,15 @@
     <string name="twist_title">Поворот запястья</string>
     <string name="twist_subtitle">Быстро поверните телефон туда-обратно дважды</string>
     <string name="wave_title">Взмах над экраном</string>
-    <string name="wave_subtitle">Дважды проведите рукой над верхней частью экрана</string>
-    <string name="motion_hint">Датчики включаются, только пока играет музыка. Взмах работает через датчик приближения — при выключенном экране он доступен не на всех телефонах.</string>
+    <string name="wave_subtitle">Проведите ладонью в 2–3 см над верхним краем экрана, у фронтальной камеры</string>
+    <string name="motion_hint">Датчики включаются, только пока играет музыка. Взмах видит датчик приближения у верхнего края экрана: он замечает руку на расстоянии нескольких сантиметров, а при выключенном экране на некоторых телефонах реагирует медленнее. Если накрыть датчик дольше 3 секунд (карман, лицо), жест не сработает.</string>
+    <string name="wave_count_title">Сколько взмахов</string>
+    <string name="wave_one">Один</string>
+    <string name="wave_two">Два</string>
+    <string name="wave_test_title">Проверка датчика</string>
+    <string name="wave_near">Рука рядом</string>
+    <string name="wave_far">Рука не видна — проведите ладонью над камерой</string>
+    <string name="wave_unavailable">Датчик приближения недоступен</string>
     <string name="pref_sleep">Таймер сна</string>
     <string name="pref_sleep_hint">Через сколько поставить паузу, когда сработает действие «Таймер сна». Повторный запуск отменяет таймер.</string>
     <string name="pref_sleep_active">Пауза в %1$s. Повторите жест, чтобы отменить.</string>

@@ -59,6 +59,7 @@ data class Settings(
     val flip: Boolean,
     val twist: Boolean,
     val wave: Boolean,
+    val waveCount: Int,
     val sleepMinutes: Int,
     val sleepUntil: Long,
     val actions: Map<Gesture, Action>,
@@ -141,6 +142,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("wave", false)
         set(v) = sp.edit().putBoolean("wave", v).apply()
 
+    /** How many passes of the hand make the wave gesture: 1 or 2. */
+    var waveCount: Int
+        get() = sp.getInt("wave_count", 2).coerceIn(1, 2)
+        set(v) = sp.edit().putInt("wave_count", v).apply()
+
     var sleepMinutes: Int
         get() = sp.getInt("sleep_minutes", 30)
         set(v) = sp.edit().putInt("sleep_minutes", v).apply()
@@ -198,6 +204,7 @@ class Prefs(context: Context) {
         flip = flip,
         twist = twist,
         wave = wave,
+        waveCount = waveCount,
         sleepMinutes = sleepMinutes,
         sleepUntil = sleepUntil,
         actions = Gesture.entries.associateWith(::action),

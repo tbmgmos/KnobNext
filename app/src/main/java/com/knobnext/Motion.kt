@@ -29,9 +29,12 @@ abstract class SensorGesture(context: Context, type: Int, private val rate: Int)
         if (!running) return
         running = false
         sensors?.unregisterListener(this)
+        onStop()
     }
 
     protected open fun onStart() = Unit
+
+    protected open fun onStop() = Unit
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 }
@@ -126,52 +129,90 @@ class TwistDetector(context: Context, private val onTwist: () -> Unit) :
     }
 }
 
-/** Two short covers of the proximity sensor (a hand waved over the top of the phone). */
-class WaveDetector(context: Context, private val onWave: () -> Unit) :
-    SensorGesture(context, Sensor.TYPE_PROXIMITY, SensorManager.SENSOR_DELAY_NORMAL) {
+/**
+ * A hand passing over the proximity sensor (top edge of the screen).
+ *
+ * The sensor only reports "near" / "far" when the state changes, and on many phones (Pixel included)
+ * it reports "far" with a noticeable delay to avoid flicker during calls. So waves are counted when the
+ * hand *arrives* ("near"), not when it leaves. Covered for longer than [POCKET_MS] means pocket, face or
+ * a table edge: the count resets and nothing fires until the sensor is uncovered again.
+ *
+ * With [required] = 1 the gesture fires when the hand leaves (so a long cover can still be rejected);
+ * with 2 it fires right on the second arrival.
+ */
+class WaveDetector(
+    context: Context,
+    private val required: () -> Int,
+    private val onWave: () -> Unit,
+    private val onState: ((near: Boolean, waves: Int) -> Unit)? = null,
+) : SensorGesture(context, Sensor.TYPE_PROXIMITY, SensorManager.SENSOR_DELAY_FASTEST) {
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var near: Boolean? = null
+    private var blocked = false
     private var nearSince = 0L
     private var waves = 0
     private var firstWaveAt = 0L
-    private var initialized = false
 
-    override fun onStart() {
+    private val pocketCheck = Runnable {
+        blocked = true
         waves = 0
-        nearSince = 0L
-        initialized = false
+        onState?.invoke(true, 0)
     }
 
+    override fun onStart() {
+        near = null
+        blocked = false
+        waves = 0
+        handler.removeCallbacks(pocketCheck)
+    }
+
+    override fun onStop() = handler.removeCallbacks(pocketCheck)
+
     override fun onSensorChanged(event: SensorEvent) {
-        val range = event.sensor.maximumRange
-        val near = event.values[0] < minOf(range, 5f)
+        val isNear = event.values[0] < minOf(event.sensor.maximumRange, NEAR_CM)
+        val previous = near
+        near = isNear
         val now = SystemClock.elapsedRealtime()
-        if (!initialized) {
-            initialized = true
-            if (near) nearSince = -1L // covered at start (pocket, face): ignore until uncovered
+        if (previous == null) {
+            // Already covered when we started listening: wait until it is uncovered.
+            blocked = isNear
+            onState?.invoke(isNear, 0)
             return
         }
-        if (near) {
-            if (nearSince == 0L) nearSince = now
-            return
-        }
-        val coveredFor = if (nearSince > 0) now - nearSince else Long.MAX_VALUE
-        nearSince = 0L
-        if (coveredFor > MAX_COVER_MS) {
-            waves = 0
-            return
-        }
-        if (waves == 0 || now - firstWaveAt > WINDOW_MS) {
-            waves = 0
-            firstWaveAt = now
-        }
-        waves++
-        if (waves >= 2) {
-            waves = 0
-            onWave()
+        if (previous == isNear) return
+
+        if (isNear) {
+            if (blocked) return
+            nearSince = now
+            if (waves == 0 || now - firstWaveAt > WINDOW_MS) {
+                waves = 0
+                firstWaveAt = now
+            }
+            waves++
+            onState?.invoke(true, waves)
+            handler.postDelayed(pocketCheck, POCKET_MS)
+            if (required() >= 2 && waves >= required()) {
+                waves = 0
+                onWave()
+            }
+        } else {
+            handler.removeCallbacks(pocketCheck)
+            if (blocked) {
+                blocked = false
+                onState?.invoke(false, 0)
+                return
+            }
+            if (required() <= 1 && waves >= 1 && now - nearSince <= POCKET_MS) {
+                waves = 0
+                onWave()
+            }
+            onState?.invoke(false, waves)
         }
     }
 
     private companion object {
-        const val MAX_COVER_MS = 1_000L
-        const val WINDOW_MS = 1_500L
+        const val NEAR_CM = 5f
+        const val POCKET_MS = 3_000L
+        const val WINDOW_MS = 2_000L
     }
 }

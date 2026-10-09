@@ -23,7 +23,14 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -337,6 +344,83 @@ fun EventLog(lastEvent: String?) {
                     modifier = Modifier.padding(16.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Listens to the proximity sensor while visible and shows what it sees, plus how many wave gestures
+ * the same detector the service uses has recognized.
+ */
+@Composable
+fun WaveTester(shape: Shape, required: Int) {
+    val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
+    var near by remember { mutableStateOf(false) }
+    var recognized by remember { mutableIntStateOf(0) }
+    var available by remember { mutableStateOf(true) }
+    val currentRequired by rememberUpdatedState(required)
+    DisposableEffect(Unit) {
+        val detector = com.knobnext.WaveDetector(
+            context,
+            required = { currentRequired },
+            onWave = { recognized++ },
+            onState = { isNear, _ -> near = isNear },
+        )
+        available = detector.available
+        detector.start()
+        onDispose { detector.stop() }
+    }
+    val badge by animateColorAsState(
+        if (near) scheme.primary else scheme.surfaceContainerHighest,
+        MaterialTheme.motionScheme.fastEffectsSpec(),
+        label = "near",
+    )
+    val pop by animateFloatAsState(
+        if (near) 1.12f else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "pop",
+    )
+    Surface(shape = shape, color = scheme.surfaceBright, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .graphicsLayer {
+                        scaleX = pop
+                        scaleY = pop
+                    }
+                    .clip((if (near) MaterialShapes.Cookie4Sided else MaterialShapes.Circle).toShape())
+                    .background(badge),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    KnobIcons.PanTool,
+                    contentDescription = null,
+                    tint = if (near) scheme.onPrimary else scheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.wave_test_title), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(
+                        when {
+                            !available -> R.string.wave_unavailable
+                            near -> R.string.wave_near
+                            else -> R.string.wave_far
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (near) scheme.primary else scheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                "$recognized",
+                style = MaterialTheme.typography.headlineMediumEmphasized,
+                color = scheme.primary,
+            )
         }
     }
 }

@@ -163,7 +163,7 @@ class KnobService : AccessibilityService() {
         }
         flip = FlipDetector(this, ::onFlip)
         twist = TwistDetector(this) { fireGesture(Gesture.TWIST) }
-        wave = WaveDetector(this) { fireGesture(Gesture.WAVE) }
+        wave = WaveDetector(this, { prefs.waveCount }, { fireGesture(Gesture.WAVE) })
         flipWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:flip").apply {
             setReferenceCounted(false)
         }
