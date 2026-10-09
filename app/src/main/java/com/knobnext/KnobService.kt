@@ -70,6 +70,7 @@ class KnobService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        if (::prefs.isInitialized) log(getString(R.string.log_service_stopped))
         stopService(android.content.Intent(this, ScreenOffService::class.java))
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
@@ -156,6 +157,10 @@ class KnobService : AccessibilityService() {
     private fun onVolumeObserved(value: Int, source: VolumeWatcher.Source) {
         val previous = lastVolume
         lastVolume = value
+        if (source == VolumeWatcher.Source.SYNC) {
+            resetDouble()
+            return
+        }
         if (previous < 0 || value == previous) return
         val direction = if (value > previous) 1 else -1
         val steps = minOf(Math.abs(value - previous), MAX_REPLAYED_STEPS)

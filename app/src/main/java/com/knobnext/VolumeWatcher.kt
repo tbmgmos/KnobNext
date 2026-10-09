@@ -22,7 +22,8 @@ class VolumeWatcher(
     private val shouldPoll: () -> Boolean,
     private val onVolume: (value: Int, source: Source) -> Unit,
 ) {
-    enum class Source { BROADCAST, POLL }
+    /** SYNC = baseline taken when polling starts; it must not count as a press. */
+    enum class Source { BROADCAST, POLL, SYNC }
 
     private val audio = context.getSystemService(AudioManager::class.java)
     private var polling = false
@@ -70,7 +71,10 @@ class VolumeWatcher(
     private fun startPolling() {
         if (polling) return
         polling = true
-        handler.post(poll)
+        // Broadcasts may have been merged or missed while the screen was on: re-baseline silently,
+        // otherwise the first poll would see a multi-step "jump" and replay it as presses.
+        onVolume(audio.getStreamVolume(AudioManager.STREAM_MUSIC), Source.SYNC)
+        handler.postDelayed(poll, POLL_MS)
     }
 
     private fun stopPolling() {
