@@ -1,0 +1,15 @@
+name: Probe versions
+
+on: push
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for p in com/android/tools/build/gradle androidx/compose/compose-bom androidx/compose/material3/material3 androidx/activity/activity-compose androidx/graphics/graphics-shapes androidx/core/core-ktx; do
+            echo "== $p"
+            curl -sSL "https://dl.google.com/dl/android/maven2/$p/maven-metadata.xml" | grep -oE '<version>[^<]+</version>' | sed -E 's#</?version>##g' | tail -25 | tr '\n' ' '
+            echo
+          done
+          ls $ANDROID_HOME/platforms
