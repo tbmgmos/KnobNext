@@ -179,7 +179,13 @@ class WaveDetector(
             onState?.invoke(isNear, 0)
             return
         }
-        if (previous == isNear) return
+        if (previous == isNear) {
+            // The sensor only reports changes, so "near" twice means a "far" was lost in between
+            // (the system dropped it): count it as a new arrival instead of getting stuck.
+            if (!isNear) return
+            handler.removeCallbacks(pocketCheck)
+            blocked = false
+        }
 
         if (isNear) {
             if (blocked) return

@@ -13,8 +13,8 @@ import android.os.IBinder
 
 /**
  * Does no work of its own. While it runs, the app's process counts as foreground, so the system
- * doesn't freeze it with the screen off; a frozen process gets volume events late and merged,
- * which makes double presses impossible to detect.
+ * doesn't freeze it with the screen off (a frozen process gets volume events late and merged) and
+ * keeps delivering sensor events for motion gestures.
  */
 class ScreenOffService : Service() {
 
@@ -64,9 +64,15 @@ class ScreenOffService : Service() {
         private const val CHANNEL = "screen_off"
         private const val NOTIFICATION_ID = 1
 
+        /**
+         * Needed for screen-off press sequences and for motion gestures: Android stops delivering
+         * sensor events to apps that have been in the background for about a minute.
+         */
         fun shouldRun(context: Context): Boolean {
             val prefs = Prefs(context)
-            return prefs.enabled && prefs.doubleMode != DoubleMode.OFF && Setup.accessibilityEnabled(context)
+            val needsBackground = prefs.doubleMode != DoubleMode.OFF ||
+                prefs.backTap || prefs.flip || prefs.twist || prefs.wave
+            return prefs.enabled && needsBackground && Setup.accessibilityEnabled(context)
         }
 
         /** Starts or stops the service to match the settings. Safe to call from anywhere. */

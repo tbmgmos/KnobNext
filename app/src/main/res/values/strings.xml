@@ -51,11 +51,11 @@
     <string name="step_player_body">Название трека, «нравится», перемотка и выбор плееров. Нужен доступ к уведомлениям — приложение смотрит только на кнопки уведомления плеера.</string>
     <string name="step_player_button">Подключить</string>
 
-    <string name="fgs_channel">Жесты при выключенном экране</string>
+    <string name="fgs_channel">Жесты в фоне</string>
     <string name="fgs_title">KnobNext следит за кнопками громкости</string>
-    <string name="fgs_text">Нужно, чтобы двойное нажатие работало при выключенном экране</string>
-    <string name="battery_title">Работа при выключенном экране</string>
-    <string name="battery_body">Android усыпляет приложения при выключенном экране — нажатия доходят с опозданием и склеиваются. Разрешите KnobNext работать без ограничений батареи.</string>
+    <string name="fgs_text">Нужно, чтобы жесты и датчики работали в фоне и при выключенном экране</string>
+    <string name="battery_title">Работа в фоне</string>
+    <string name="battery_body">Android усыпляет приложения в фоне: нажатия доходят с опозданием, а датчики движения отключаются. Разрешите KnobNext работать без ограничений батареи.</string>
     <string name="battery_body_xiaomi">Android усыпляет приложения при выключенном экране — нажатия доходят с опозданием и склеиваются. Разрешите KnobNext работать без ограничений батареи, а на Xiaomi ещё включите «Автозапуск» и в «Контроле активности» выберите «Нет ограничений».</string>
     <string name="battery_button">Снять ограничение</string>
     <string name="autostart_button">Автозапуск</string>

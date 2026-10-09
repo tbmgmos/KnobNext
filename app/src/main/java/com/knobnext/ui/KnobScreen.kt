@@ -234,7 +234,8 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                 ) { Badge(MaterialShapes.Pentagon, KnobIcons.Close, error = true) }
             }
         }
-        if (s.doubleMode != DoubleMode.OFF && !setup.batteryUnrestricted) {
+        val needsBackground = s.doubleMode != DoubleMode.OFF || s.backTap || s.flip || s.twist || s.wave
+        if (needsBackground && !setup.batteryUnrestricted) {
             item {
                 InfoCard(
                     title = stringResource(R.string.battery_title),
