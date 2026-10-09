@@ -89,6 +89,19 @@ class Prefs(context: Context) {
     // The event log changes on every volume step; kept apart so that settings observers don't wake up for it.
     private val logSp = context.getSharedPreferences("knob_log", Context.MODE_PRIVATE)
 
+    // How long short taps last, to suggest a hold time that suits this person. Written on every tap,
+    // so it lives apart from the settings too.
+    private val statsSp = context.getSharedPreferences("knob_stats", Context.MODE_PRIVATE)
+
+    /** Recent short-tap durations in ms, oldest first. */
+    val tapDurations: List<Int>
+        get() = statsSp.getString("taps", null)?.split(',')?.mapNotNull { it.toIntOrNull() }.orEmpty()
+
+    fun recordTap(ms: Int) {
+        val kept = (tapDurations + ms).takeLast(TAP_SAMPLES)
+        statsSp.edit().putString("taps", kept.joinToString(",")).apply()
+    }
+
     var enabled: Boolean
         get() = sp.getBoolean("enabled", true)
         set(v) = sp.edit().putBoolean("enabled", v).apply()
@@ -303,6 +316,7 @@ class Prefs(context: Context) {
             Gesture.TRIPLE_DOWN to Action.PREVIOUS,
         )
 
+        const val TAP_SAMPLES = 30
         const val LONG_PRESS_MIN = 250
         const val LONG_PRESS_MAX = 1500
         const val LONG_PRESS_STEP = 50

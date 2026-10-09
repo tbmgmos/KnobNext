@@ -253,4 +253,46 @@
     <string name="profile_preset_seek_hint">Для видео и подкастов: удержание и двойное нажатие перематывают на 10 с, долгое удержание и тройное нажатие переключают</string>
     <string name="profile_hint">Остальные настройки (время удержания, режим нажатий подряд, жесты движением) общие для всех приложений.</string>
     <string name="tile_players_profiles">Свои жесты: %1$d</string>
+
+    <!-- Diagnostics -->
+    <string name="diag_title">Диагностика</string>
+    <string name="diag_open_hint">Что работает и что мешает, отчёт для разработчика</string>
+    <string name="diag_gestures">Жесты</string>
+    <string name="diag_gestures_on">включены</string>
+    <string name="diag_gestures_off">выключены на главном экране</string>
+    <string name="diag_service">Служба специальных возможностей</string>
+    <string name="diag_service_ok">работает</string>
+    <string name="diag_service_stuck">включена, но не запущена — выключите и включите её снова</string>
+    <string name="diag_service_off">выключена — без неё жесты не работают</string>
+    <string name="diag_restricted">Ограниченные настройки</string>
+    <string name="diag_restricted_blocked">запрещены — разрешите в «О приложении» → ⋮</string>
+    <string name="diag_background">Работа в фоне</string>
+    <string name="diag_background_off">не нужна: нажатия подряд и жесты движением выключены</string>
+    <string name="diag_background_ok">работает (уведомление в шторке)</string>
+    <string name="diag_background_stopped">не запущена — откройте приложение; если не поможет, снимите ограничения батареи</string>
+    <string name="diag_battery">Батарея</string>
+    <string name="diag_battery_ok">без ограничений</string>
+    <string name="diag_battery_limited">ограничена — с выключенным экраном система может усыплять приложение</string>
+    <string name="diag_player_access">Доступ к плееру</string>
+    <string name="diag_player_ok">есть</string>
+    <string name="diag_player_missing">нет — не работают «Сейчас играет», «нравится», свои жесты приложений и точная перемотка</string>
+    <string name="diag_now">Сейчас</string>
+    <string name="diag_now_nothing">ничего не играет</string>
+    <string name="diag_now_playing">%1$s — играет</string>
+    <string name="diag_now_paused">%1$s — на паузе</string>
+    <string name="diag_sensors">Датчики</string>
+    <string name="diag_sensors_all">все на месте</string>
+    <string name="diag_sensors_missing">нет: %1$s</string>
+    <string name="diag_sensor_accel">акселерометр</string>
+    <string name="diag_sensor_gyro">гироскоп</string>
+    <string name="diag_sensor_proximity">датчик приближения</string>
+    <string name="diag_device">Устройство</string>
+    <string name="diag_share">Поделиться отчётом</string>
+    <string name="diag_hint">Отчёт — это текст этой страницы и журнал событий. Его можно отправить разработчику: в нём нет личных данных, кроме названия играющего приложения.</string>
+    <string name="diag_report_log">Журнал событий:</string>
+
+    <!-- Hold time advice -->
+    <string name="hold_advice_title">Подстроить удержание</string>
+    <string name="hold_advice_body">Ваши короткие нажатия длятся до %1$d мс. Удержание %2$d мс подойдёт лучше: без случайных срабатываний и без лишнего ожидания.</string>
+    <string name="hold_advice_button">Поставить %1$d мс</string>
 </resources>

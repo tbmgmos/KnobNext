@@ -91,10 +91,16 @@ private enum class Page(val title: Int) {
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
     TEST(R.string.test_title),
+    DIAGNOSTICS(R.string.diag_title),
 }
 
 /** Where "back" leads from each page. */
-private val Page.parent: Page get() = if (this == Page.PROFILE) Page.PLAYERS else Page.HOME
+private val Page.parent: Page
+    get() = when (this) {
+        Page.PROFILE -> Page.PLAYERS
+        Page.DIAGNOSTICS -> Page.SETTINGS
+        else -> Page.HOME
+    }
 
 /** Everything a page needs, so page builders stay small. */
 private class PageContext(
@@ -230,6 +236,10 @@ fun KnobScreen(
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
+                    Page.DIAGNOSTICS -> {
+                        item { DiagnosticsCard(s, prefs, setup, nowPlaying, versionName) }
+                        item { Hint(stringResource(R.string.diag_hint)) }
+                    }
                 }
             }
         }
@@ -373,7 +383,22 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
         }
     }
     item { Group(1) { LongPressRow(shape(0), s.longPressMs, { ctx.prefs.longPressMs = it }, s.enabled) } }
+    item { HoldAdvice(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
+}
+
+/** Suggests a hold time from how long this person's short taps actually last. */
+@Composable
+private fun HoldAdvice(ctx: PageContext) {
+    val current = ctx.s.longPressMs
+    val taps = remember(current) { ctx.prefs.tapDurations }
+    val suggested = suggestLongPress(taps, current) ?: return
+    InfoCard(
+        title = stringResource(R.string.hold_advice_title),
+        body = stringResource(R.string.hold_advice_body, longTapMs(taps), suggested),
+        button = stringResource(R.string.hold_advice_button, suggested),
+        onClick = { ctx.prefs.longPressMs = suggested },
+    ) { Badge(MaterialShapes.Cookie4Sided, KnobIcons.TouchApp) }
 }
 
 // ---------------------------------------------------------------- Sequences
@@ -791,21 +816,27 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
         }
     }
     item {
-        Group(2) {
+        Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ListRow(
-                    shape(0), stringResource(R.string.open_accessibility),
+                    shape(0), stringResource(R.string.diag_title),
+                    subtitle = stringResource(R.string.diag_open_hint),
+                    onClick = { ctx.open(Page.DIAGNOSTICS) },
+                    trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.open_accessibility),
                     subtitle = stringResource(R.string.open_accessibility_hint),
                     onClick = ctx.actions.openAccessibility,
                     trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
                 )
                 if (ctx.updatesSupported) {
                     SwitchRow(
-                        shape(1), stringResource(R.string.pref_check_updates), s.checkUpdates, { prefs.checkUpdates = it },
+                        shape(2), stringResource(R.string.pref_check_updates), s.checkUpdates, { prefs.checkUpdates = it },
                         subtitle = stringResource(R.string.version_value, ctx.versionName),
                     )
                 } else {
-                    ListRow(shape(1), stringResource(R.string.app_name), stringResource(R.string.version_value, ctx.versionName))
+                    ListRow(shape(2), stringResource(R.string.app_name), stringResource(R.string.version_value, ctx.versionName))
                 }
             }
         }

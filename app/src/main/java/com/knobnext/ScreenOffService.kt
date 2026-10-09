@@ -32,12 +32,18 @@ class ScreenOffService : Service() {
             return START_NOT_STICKY
         }
         starting = false
+        running = true
         // Also how a stop requested while this start was pending takes effect, see [stop].
         if (!shouldRun(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        running = false
+        super.onDestroy()
     }
 
     private fun startForegroundWithNotification() {
@@ -82,6 +88,11 @@ class ScreenOffService : Service() {
         // in that gap makes the system kill the whole process — the accessibility service included.
         @Volatile
         private var starting = false
+
+        /** In the foreground right now (shown on the diagnostics page). */
+        @Volatile
+        var running = false
+            private set
 
         /**
          * Starts or stops the service to match the settings. Safe to call from anywhere. From the

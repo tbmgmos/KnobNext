@@ -214,7 +214,7 @@ class KnobService : AccessibilityService() {
         if (code != KeyEvent.KEYCODE_VOLUME_UP && code != KeyEvent.KEYCODE_VOLUME_DOWN) return false
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> onDown(code, event.repeatCount)
-            KeyEvent.ACTION_UP -> onUp(code)
+            KeyEvent.ACTION_UP -> onUp(code, (event.eventTime - event.downTime).toInt())
             else -> false
         }
     }
@@ -286,7 +286,7 @@ class KnobService : AccessibilityService() {
         return true
     }
 
-    private fun onUp(code: Int): Boolean {
+    private fun onUp(code: Int, heldMs: Int): Boolean {
         val press = presses.remove(code) ?: return false
         combo?.let {
             it.releasedEarly()
@@ -305,6 +305,7 @@ class KnobService : AccessibilityService() {
                 onVolumeChange(direction, volume, volume, VolumeWatcher.Source.KEY)
             } else {
                 media.volumeStep(if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER)
+                prefs.recordTap(heldMs)
             }
             lastTapUpAt[code] = SystemClock.uptimeMillis()
         }
