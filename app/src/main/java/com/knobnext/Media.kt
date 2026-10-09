@@ -84,6 +84,8 @@ class Media(private val context: Context) {
             }
             Action.SEEK_FORWARD -> seekBy(controller, SEEK_STEP_MS) ?: sendKey(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)
             Action.SEEK_BACK -> seekBy(controller, -SEEK_STEP_MS) ?: sendKey(KeyEvent.KEYCODE_MEDIA_REWIND)
+            Action.VOLUME_UP -> volumeStep(AudioManager.ADJUST_RAISE)
+            Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
         }
     }
 
@@ -99,6 +101,10 @@ class Media(private val context: Context) {
         if (duration > 0) target = target.coerceAtMost(duration - 1000)
         controller.transportControls.seekTo(target)
         return Unit
+    }
+
+    fun volumeStep(direction: Int) {
+        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
     }
 
     private fun sendKey(code: Int) {

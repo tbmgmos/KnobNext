@@ -16,7 +16,8 @@ class Haptics(context: Context) {
     private val vibrator = context.getSystemService(Vibrator::class.java)
 
     fun play(action: Action) {
-        if (vibrator?.hasVibrator() != true || action == Action.NONE) return
+        if (vibrator?.hasVibrator() != true) return
+        if (action == Action.NONE || action == Action.VOLUME_UP || action == Action.VOLUME_DOWN) return
         vibrator.vibrate(effect(action))
     }
 

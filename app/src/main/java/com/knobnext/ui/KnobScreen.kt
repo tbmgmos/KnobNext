@@ -36,6 +36,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.knobnext.DoubleMode
 import com.knobnext.Gesture
+import com.knobnext.TapSensitivity
+import androidx.compose.animation.AnimatedVisibility
 import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
@@ -200,7 +202,9 @@ fun KnobScreen(
                 nowPlaying?.let { now -> item { NowPlayingCard(now, media) } }
             }
 
-            item { GesturesSection(s) { editing = it } }
+            item { VolumeKeysSection(s) { editing = it } }
+            item { DoublePressSection(s, prefs) { editing = it } }
+            item { BackTapSection(s, prefs) { editing = it } }
             item { SettingsSection(s, prefs) }
             item { PlayersSection(s, prefs, notificationAccess) }
             item { AboutSection(s, prefs, versionName, updatesSupported) }
@@ -208,39 +212,62 @@ fun KnobScreen(
     }
 }
 
+/** One gesture → action row; tapping it opens the action picker. */
 @Composable
-private fun GesturesSection(s: com.knobnext.Settings, onEdit: (Gesture) -> Unit) {
+private fun GroupScope.GestureRow(
+    index: Int,
+    gesture: Gesture,
+    s: com.knobnext.Settings,
+    badge: androidx.graphics.shapes.RoundedPolygon,
+    accent: Boolean,
+    enabled: Boolean = true,
+    onEdit: (Gesture) -> Unit,
+) {
     val scheme = MaterialTheme.colorScheme
-    val shapes = listOf(
-        MaterialShapes.Sunny,
-        MaterialShapes.Cookie4Sided,
-        MaterialShapes.Clover4Leaf,
-        MaterialShapes.Cookie6Sided,
-        MaterialShapes.Cookie7Sided,
+    val action = s.actions.getValue(gesture)
+    ListRow(
+        shape = shape(index),
+        title = stringResource(gestureLabel(gesture)),
+        subtitle = stringResource(actionLabel(action)),
+        enabled = enabled,
+        onClick = { onEdit(gesture) },
+        leading = {
+            ShapeBadge(
+                badge, actionIcon(action),
+                if (accent) scheme.tertiaryContainer else scheme.secondaryContainer,
+                if (accent) scheme.onTertiaryContainer else scheme.onSecondaryContainer,
+            )
+        },
+    )
+}
+
+@Composable
+private fun SectionHint(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp),
+    )
+}
+
+@Composable
+private fun VolumeKeysSection(s: com.knobnext.Settings, onEdit: (Gesture) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val rows = listOf(
+        Gesture.HOLD_UP to MaterialShapes.Sunny,
+        Gesture.HOLD_DOWN to MaterialShapes.Cookie4Sided,
+        Gesture.TAP_HOLD_UP to MaterialShapes.Cookie6Sided,
+        Gesture.TAP_HOLD_DOWN to MaterialShapes.Cookie7Sided,
+        Gesture.BOTH to MaterialShapes.Clover4Leaf,
     )
     Column {
-        SectionTitle(stringResource(R.string.gestures_title))
-        Group(Gesture.entries.size + 1) {
+        SectionTitle(stringResource(R.string.section_keys))
+        Group(rows.size + 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Gesture.entries.forEachIndexed { i, g ->
-                    val action = s.actions.getValue(g)
-                    ListRow(
-                        shape = shape(i),
-                        title = stringResource(gestureLabel(g)),
-                        subtitle = stringResource(actionLabel(action)),
-                        enabled = !g.double || s.doubleMode != DoubleMode.OFF,
-                        onClick = { onEdit(g) },
-                        leading = {
-                            ShapeBadge(
-                                shapes[i], actionIcon(action),
-                                if (g.double) scheme.tertiaryContainer else scheme.secondaryContainer,
-                                if (g.double) scheme.onTertiaryContainer else scheme.onSecondaryContainer,
-                            )
-                        },
-                    )
-                }
+                rows.forEachIndexed { i, (g, shape) -> GestureRow(i, g, s, shape, accent = false, onEdit = onEdit) }
                 ListRow(
-                    shape = shape(Gesture.entries.size),
+                    shape = shape(rows.size),
                     title = stringResource(R.string.gesture_tap),
                     subtitle = stringResource(R.string.action_volume),
                     leading = {
@@ -249,13 +276,74 @@ private fun GesturesSection(s: com.knobnext.Settings, onEdit: (Gesture) -> Unit)
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            stringResource(R.string.gestures_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = scheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        SectionHint(stringResource(R.string.section_keys_hint))
+    }
+}
+
+@Composable
+private fun DoublePressSection(s: com.knobnext.Settings, prefs: Prefs, onEdit: (Gesture) -> Unit) {
+    val on = s.doubleMode != DoubleMode.OFF
+    Column {
+        SectionTitle(stringResource(R.string.section_double))
+        Group(3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ControlRow(shape(0), stringResource(R.string.double_when), enabled = s.enabled) {
+                    ConnectedChoice(
+                        options = listOf(
+                            DoubleMode.OFF to R.string.double_mode_off,
+                            DoubleMode.SCREEN_OFF to R.string.double_mode_screen_off,
+                            DoubleMode.ALWAYS to R.string.double_mode_always,
+                        ),
+                        selected = s.doubleMode,
+                        onSelect = { prefs.doubleMode = it },
+                        enabled = s.enabled,
+                    )
+                }
+                GestureRow(1, Gesture.DOUBLE_UP, s, MaterialShapes.Pill, accent = true, enabled = on, onEdit = onEdit)
+                GestureRow(2, Gesture.DOUBLE_DOWN, s, MaterialShapes.Arch, accent = true, enabled = on, onEdit = onEdit)
+            }
+        }
+        SectionHint(stringResource(R.string.section_double_hint))
+        if (on) EventLog(s.lastEvent)
+    }
+}
+
+@Composable
+private fun BackTapSection(s: com.knobnext.Settings, prefs: Prefs, onEdit: (Gesture) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Column {
+        SectionTitle(stringResource(R.string.section_back_tap))
+        Group(if (s.backTap) 4 else 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
+                    subtitle = stringResource(R.string.back_tap_subtitle),
+                    enabled = s.enabled,
+                    leading = {
+                        ShapeBadge(MaterialShapes.SoftBurst, KnobIcons.TouchApp, scheme.primaryContainer, scheme.onPrimaryContainer)
+                    },
+                )
+                AnimatedVisibility(s.backTap) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ControlRow(shape(1), stringResource(R.string.back_tap_sensitivity), enabled = s.enabled) {
+                            ConnectedChoice(
+                                options = listOf(
+                                    TapSensitivity.LOW to R.string.sensitivity_low,
+                                    TapSensitivity.MEDIUM to R.string.sensitivity_medium,
+                                    TapSensitivity.HIGH to R.string.sensitivity_high,
+                                ),
+                                selected = s.tapSensitivity,
+                                onSelect = { prefs.tapSensitivity = it },
+                                enabled = s.enabled,
+                            )
+                        }
+                        GestureRow(2, Gesture.BACK_TAP_2, s, MaterialShapes.Puffy, accent = true, onEdit = onEdit)
+                        GestureRow(3, Gesture.BACK_TAP_3, s, MaterialShapes.Flower, accent = true, onEdit = onEdit)
+                    }
+                }
+            }
+        }
+        if (s.backTap) SectionHint(stringResource(R.string.back_tap_hint))
     }
 }
 
@@ -263,27 +351,26 @@ private fun GesturesSection(s: com.knobnext.Settings, onEdit: (Gesture) -> Unit)
 private fun SettingsSection(s: com.knobnext.Settings, prefs: Prefs) {
     Column {
         SectionTitle(stringResource(R.string.settings_title))
-        Group(7) {
+        Group(6) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(shape(0), stringResource(R.string.pref_enabled), s.enabled, { prefs.enabled = it }, highlighted = true)
                 SwitchRow(
                     shape(1), stringResource(R.string.pref_only_when_playing), s.onlyWhenPlaying, { prefs.onlyWhenPlaying = it },
                     subtitle = stringResource(R.string.pref_only_when_playing_hint), enabled = s.enabled,
                 )
-                DoubleModeRow(shape(2), s.doubleMode, { prefs.doubleMode = it }, s.lastEvent, s.enabled)
                 SwitchRow(
-                    shape(3), stringResource(R.string.pref_headphones), s.headphonesOnly, { prefs.headphonesOnly = it },
+                    shape(2), stringResource(R.string.pref_headphones), s.headphonesOnly, { prefs.headphonesOnly = it },
                     subtitle = stringResource(R.string.pref_headphones_hint), enabled = s.enabled,
                 )
                 SwitchRow(
-                    shape(4), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
+                    shape(3), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
                     subtitle = stringResource(R.string.pref_pocket_hint), enabled = s.enabled,
                 )
                 SwitchRow(
-                    shape(5), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
+                    shape(4), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
                     subtitle = stringResource(R.string.pref_vibrate_hint), enabled = s.enabled,
                 )
-                LongPressRow(shape(6), s.longPressMs, { prefs.longPressMs = it }, s.enabled)
+                LongPressRow(shape(5), s.longPressMs, { prefs.longPressMs = it }, s.enabled)
             }
         }
     }

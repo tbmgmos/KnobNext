@@ -3,15 +3,25 @@ package com.knobnext
 import android.content.Context
 import android.content.SharedPreferences
 
-enum class Action { NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK }
+/** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
+enum class Action { NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN }
 
-enum class Gesture(val key: String, val double: Boolean) {
-    HOLD_UP("action_hold_up", false),
-    HOLD_DOWN("action_hold_down", false),
-    BOTH("action_both", false),
-    DOUBLE_UP("action_double_up_off", true),
-    DOUBLE_DOWN("action_double_down_off", true),
+enum class GestureGroup { KEYS, DOUBLE, BACK_TAP }
+
+enum class Gesture(val key: String, val group: GestureGroup, val default: Action) {
+    HOLD_UP("action_hold_up", GestureGroup.KEYS, Action.NEXT),
+    HOLD_DOWN("action_hold_down", GestureGroup.KEYS, Action.PREVIOUS),
+    TAP_HOLD_UP("action_tap_hold_up", GestureGroup.KEYS, Action.VOLUME_UP),
+    TAP_HOLD_DOWN("action_tap_hold_down", GestureGroup.KEYS, Action.VOLUME_DOWN),
+    BOTH("action_both", GestureGroup.KEYS, Action.PLAY_PAUSE),
+    DOUBLE_UP("action_double_up_off", GestureGroup.DOUBLE, Action.NEXT),
+    DOUBLE_DOWN("action_double_down_off", GestureGroup.DOUBLE, Action.PREVIOUS),
+    BACK_TAP_2("action_back_tap_2", GestureGroup.BACK_TAP, Action.NEXT),
+    BACK_TAP_3("action_back_tap_3", GestureGroup.BACK_TAP, Action.PREVIOUS),
 }
+
+/** How hard the back has to be tapped; values are high-pass acceleration thresholds in m/s². */
+enum class TapSensitivity(val threshold: Float) { LOW(5.0f), MEDIUM(3.5f), HIGH(2.4f) }
 
 /** When a quick double press of a volume key counts as a gesture. */
 enum class DoubleMode { OFF, SCREEN_OFF, ALWAYS }
@@ -29,6 +39,8 @@ data class Settings(
     val allowedApps: Set<String>,
     val seenPlayers: Set<String>,
     val checkUpdates: Boolean,
+    val backTap: Boolean,
+    val tapSensitivity: TapSensitivity,
     val actions: Map<Gesture, Action>,
 )
 
@@ -88,6 +100,15 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("check_updates", true)
         set(v) = sp.edit().putBoolean("check_updates", v).apply()
 
+    var backTap: Boolean
+        get() = sp.getBoolean("back_tap", false)
+        set(v) = sp.edit().putBoolean("back_tap", v).apply()
+
+    var tapSensitivity: TapSensitivity
+        get() = TapSensitivity.entries.firstOrNull { it.name == sp.getString("tap_sensitivity", null) }
+            ?: TapSensitivity.MEDIUM
+        set(v) = sp.edit().putString("tap_sensitivity", v.name).apply()
+
     var returnRequestedAt: Long
         get() = sp.getLong("return_requested_at", 0L)
         set(v) = sp.edit().putLong("return_requested_at", v).apply()
@@ -107,6 +128,7 @@ class Prefs(context: Context) {
             Gesture.HOLD_UP, Gesture.DOUBLE_UP -> if (swap) Action.PREVIOUS else Action.NEXT
             Gesture.HOLD_DOWN, Gesture.DOUBLE_DOWN -> if (swap) Action.NEXT else Action.PREVIOUS
             Gesture.BOTH -> if (sp.getBoolean("combo_play_pause", true)) Action.PLAY_PAUSE else Action.NONE
+            else -> g.default
         }
     }
 
@@ -125,6 +147,8 @@ class Prefs(context: Context) {
         allowedApps = allowedApps,
         seenPlayers = seenPlayers,
         checkUpdates = checkUpdates,
+        backTap = backTap,
+        tapSensitivity = tapSensitivity,
         actions = Gesture.entries.associateWith(::action),
     )
 

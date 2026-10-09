@@ -318,6 +318,8 @@ fun actionLabel(a: Action) = when (a) {
     Action.PLAY_PAUSE -> R.string.action_play_pause
     Action.SEEK_FORWARD -> R.string.action_seek_forward
     Action.SEEK_BACK -> R.string.action_seek_back
+    Action.VOLUME_UP -> R.string.action_volume_up
+    Action.VOLUME_DOWN -> R.string.action_volume_down
 }
 
 fun actionIcon(a: Action) = when (a) {
@@ -327,14 +329,20 @@ fun actionIcon(a: Action) = when (a) {
     Action.PLAY_PAUSE -> KnobIcons.PlayPause
     Action.SEEK_FORWARD -> KnobIcons.FastForward
     Action.SEEK_BACK -> KnobIcons.FastRewind
+    Action.VOLUME_UP -> KnobIcons.VolumeUp
+    Action.VOLUME_DOWN -> KnobIcons.VolumeDown
 }
 
 fun gestureLabel(g: Gesture) = when (g) {
     Gesture.HOLD_UP -> R.string.gesture_hold_up
     Gesture.HOLD_DOWN -> R.string.gesture_hold_down
     Gesture.BOTH -> R.string.gesture_both
+    Gesture.TAP_HOLD_UP -> R.string.gesture_tap_hold_up
+    Gesture.TAP_HOLD_DOWN -> R.string.gesture_tap_hold_down
     Gesture.DOUBLE_UP -> R.string.gesture_double_up
     Gesture.DOUBLE_DOWN -> R.string.gesture_double_down
+    Gesture.BACK_TAP_2 -> R.string.gesture_back_tap_2
+    Gesture.BACK_TAP_3 -> R.string.gesture_back_tap_3
 }
 
 private class SetupStep(

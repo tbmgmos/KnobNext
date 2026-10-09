@@ -26,17 +26,63 @@ class KnobService : AccessibilityService() {
     // the system (nothing playing) and is tracked only so that pressing the other key can resume playback.
     private val presses = HashMap<Int, Press>()
 
+    // When each key was last released after a short press: a press right after it is "tap, then hold".
+    private val lastTapUpAt = HashMap<Int, Long>()
+
     private inner class Press(
         val keyCode: Int,
         val controller: MediaController?,
         val passive: Boolean = false,
+        val tapHold: Boolean = false,
     ) : Runnable {
         var handled = false
+        private var rampDirection = 0
+
+        /** Repeats a volume step while the key stays down. */
+        val ramp = object : Runnable {
+            override fun run() {
+                media.volumeStep(rampDirection)
+                handler.postDelayed(this, RAMP_STEP_MS)
+            }
+        }
 
         override fun run() {
             handled = true
-            val gesture = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) Gesture.HOLD_UP else Gesture.HOLD_DOWN
-            fire(prefs.action(gesture), controller)
+            val up = keyCode == KeyEvent.KEYCODE_VOLUME_UP
+            val gesture = when {
+                tapHold && up -> Gesture.TAP_HOLD_UP
+                tapHold -> Gesture.TAP_HOLD_DOWN
+                up -> Gesture.HOLD_UP
+                else -> Gesture.HOLD_DOWN
+            }
+            when (val action = prefs.action(gesture)) {
+                Action.VOLUME_UP, Action.VOLUME_DOWN -> {
+                    rampDirection = if (action == Action.VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                    ramp.run()
+                }
+                else -> fire(action, controller)
+            }
+        }
+
+        fun cancel() {
+            handler.removeCallbacks(this)
+            handler.removeCallbacks(ramp)
+        }
+    }
+
+    // ---- Back taps: accelerometer, active only while music plays ----
+
+    private lateinit var backTap: BackTapDetector
+
+    // Read by the sensor thread at ~400 Hz, so it is cached here instead of hitting preferences.
+    @Volatile private var tapThreshold = TapSensitivity.MEDIUM.threshold
+
+    private val backTapCheck = object : Runnable {
+        override fun run() {
+            tapThreshold = prefs.tapSensitivity.threshold
+            val wanted = prefs.enabled && prefs.backTap && audio.isMusicActive
+            if (wanted) backTap.start() else backTap.stop()
+            handler.postDelayed(this, BACK_TAP_CHECK_MS)
         }
     }
 
@@ -64,6 +110,8 @@ class KnobService : AccessibilityService() {
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         volumeWatcher = VolumeWatcher(this, handler, ::doublePressActive, ::onVolumeObserved)
         volumeWatcher.start()
+        backTap = BackTapDetector(this, { tapThreshold }, ::onBackTaps)
+        handler.post(backTapCheck)
         // From the background a foreground service may only start when battery optimization is off.
         if (Setup.batteryUnrestricted(this)) ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
@@ -75,6 +123,7 @@ class KnobService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             volumeWatcher.stop()
+            backTap.release()
             proximity.release()
         }
         super.onDestroy()
@@ -101,7 +150,7 @@ class KnobService : AccessibilityService() {
         val bothAction = prefs.action(Gesture.BOTH)
         if (other != null && bothAction != Action.NONE) {
             if (!other.handled) {
-                handler.removeCallbacks(other)
+                other.cancel()
                 other.handled = true
                 fire(bothAction, other.controller)
             }
@@ -110,8 +159,11 @@ class KnobService : AccessibilityService() {
         }
 
         if (repeatCount > 0) return false
-        val hold = prefs.action(if (code == KeyEvent.KEYCODE_VOLUME_UP) Gesture.HOLD_UP else Gesture.HOLD_DOWN)
-        if (hold == Action.NONE && bothAction == Action.NONE) return false
+        val up = code == KeyEvent.KEYCODE_VOLUME_UP
+        val hold = prefs.action(if (up) Gesture.HOLD_UP else Gesture.HOLD_DOWN)
+        val tapHold = SystemClock.uptimeMillis() - (lastTapUpAt[code] ?: 0L) <= TAP_HOLD_WINDOW_MS &&
+            prefs.action(if (up) Gesture.TAP_HOLD_UP else Gesture.TAP_HOLD_DOWN) != Action.NONE
+        if (!tapHold && hold == Action.NONE && bothAction == Action.NONE) return false
         val target = media.resolve(prefs) ?: return false
 
         if (target.mode == Mode.COMBO_ONLY) {
@@ -120,20 +172,24 @@ class KnobService : AccessibilityService() {
         }
 
         if (prefs.pocketGuard) proximity.arm()
-        val press = Press(code, target.controller)
+        val press = Press(code, target.controller, tapHold = tapHold)
         presses[code] = press
-        if (hold != Action.NONE) handler.postDelayed(press, prefs.longPressMs.toLong())
+        when {
+            tapHold -> handler.postDelayed(press, TAP_HOLD_DELAY_MS)
+            hold != Action.NONE -> handler.postDelayed(press, prefs.longPressMs.toLong())
+        }
         return true
     }
 
     private fun onUp(code: Int): Boolean {
         val press = presses.remove(code) ?: return false
-        handler.removeCallbacks(press)
+        press.cancel()
         if (press.passive) return false
-        if (!press.handled) {
-            val direction =
-                if (code == KeyEvent.KEYCODE_VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-            audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
+        if (press.handled) {
+            lastTapUpAt.remove(code)
+        } else {
+            media.volumeStep(if (code == KeyEvent.KEYCODE_VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER)
+            lastTapUpAt[code] = SystemClock.uptimeMillis()
         }
         return true
     }
@@ -221,6 +277,19 @@ class KnobService : AccessibilityService() {
         log(getString(R.string.log_fired, name, getString(com.knobnext.ui.actionLabel(action))))
     }
 
+    private fun onBackTaps(count: Int) {
+        val gesture = if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3
+        val name = getString(com.knobnext.ui.gestureLabel(gesture))
+        val action = prefs.action(gesture)
+        if (action == Action.NONE) return log(getString(R.string.log_no_action, name))
+        val target = media.resolve(prefs)
+        if (target == null || (target.mode == Mode.COMBO_ONLY && action != Action.PLAY_PAUSE)) {
+            return log(getString(R.string.log_not_playing, name))
+        }
+        fire(action, target.controller)
+        log(getString(R.string.log_fired, name, getString(com.knobnext.ui.actionLabel(action))))
+    }
+
     private fun resetDouble() {
         handler.removeCallbacks(dblFire)
         dblCount = 0
@@ -243,6 +312,10 @@ class KnobService : AccessibilityService() {
     }
 
     private companion object {
+        const val TAP_HOLD_WINDOW_MS = 350L
+        const val TAP_HOLD_DELAY_MS = 200L
+        const val RAMP_STEP_MS = 110L
+        const val BACK_TAP_CHECK_MS = 2_000L
         const val MAX_REPLAYED_STEPS = 4
         const val LOG_LINES = 5
         const val DOUBLE_PRESS_MS = 450L

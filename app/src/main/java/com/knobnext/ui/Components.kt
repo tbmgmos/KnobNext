@@ -18,10 +18,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -41,7 +50,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
-import com.knobnext.DoubleMode
 import com.knobnext.Prefs
 import com.knobnext.R
 
@@ -244,50 +252,89 @@ fun OneLine(text: String, style: androidx.compose.ui.text.TextStyle, color: Colo
     Text(text, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
+/** M3 Expressive connected button group used as a single-choice selector. */
 @Composable
-fun DoubleModeRow(
+fun <T> ConnectedChoice(
+    options: List<Pair<T, Int>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+    ) {
+        options.forEachIndexed { i, (value, label) ->
+            ToggleButton(
+                checked = value == selected,
+                onCheckedChange = { onSelect(value) },
+                enabled = enabled,
+                shapes = when (i) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { role = Role.RadioButton },
+            ) {
+                if (value == selected) {
+                    Icon(KnobIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+                OneLine(stringResource(label), MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+/** A titled block inside a group: header text, optional caption and free content (choices, sliders). */
+@Composable
+fun ControlRow(
     shape: Shape,
-    mode: DoubleMode,
-    onChange: (DoubleMode) -> Unit,
-    lastEvent: String?,
-    enabled: Boolean,
+    title: String,
+    caption: String? = null,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val options = listOf(
-        DoubleMode.OFF to R.string.double_mode_off,
-        DoubleMode.SCREEN_OFF to R.string.double_mode_screen_off,
-        DoubleMode.ALWAYS to R.string.double_mode_always,
-    )
     Surface(shape = shape, color = scheme.surfaceBright, modifier = Modifier.fillMaxWidth()) {
         Column(
             Modifier
                 .padding(horizontal = 20.dp, vertical = 16.dp)
                 .graphicsLayer { alpha = if (enabled) 1f else 0.45f },
         ) {
-            Text(stringResource(R.string.pref_double), style = MaterialTheme.typography.titleMedium)
-            Text(
-                stringResource(R.string.pref_double_hint),
-                style = MaterialTheme.typography.bodyMedium,
-                color = scheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                options.forEachIndexed { i, (value, label) ->
-                    SegmentedButton(
-                        selected = mode == value,
-                        onClick = { onChange(value) },
-                        enabled = enabled,
-                        shape = SegmentedButtonDefaults.itemShape(i, options.size),
-                        label = { OneLine(stringResource(label), MaterialTheme.typography.labelLarge) },
-                    )
-                }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            if (caption != null) {
+                Text(caption, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
             }
-            if (mode != DoubleMode.OFF) {
-                Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+/** Collapsed by default: the trace is for troubleshooting, not for everyday use. */
+@Composable
+fun EventLog(lastEvent: String?) {
+    var open by remember { mutableStateOf(false) }
+    val scheme = MaterialTheme.colorScheme
+    Column(Modifier.padding(horizontal = 8.dp)) {
+        TextButton(onClick = { open = !open }) {
+            Text(stringResource(if (open) R.string.log_hide else R.string.log_show))
+        }
+        AnimatedVisibility(open) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = scheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(
-                    stringResource(R.string.last_event, lastEvent ?: stringResource(R.string.last_event_none)),
-                    style = MaterialTheme.typography.bodySmall,
+                    lastEvent ?: stringResource(R.string.last_event_none),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
                 )
             }
         }
