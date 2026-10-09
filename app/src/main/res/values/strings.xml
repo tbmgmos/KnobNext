@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KnobNext</string>
+    <string name="service_label">KnobNext — треки кнопками громкости</string>
+    <string name="service_description">Долгое нажатие кнопки громкости переключает трек или видео в любом плеере. Короткое нажатие меняет громкость как обычно. Сервис читает только нажатия кнопок громкости и не видит содержимое экрана.</string>
+
+    <string name="status_on">Сервис включён ✓</string>
+    <string name="status_off">Сервис выключен — включите его в настройках специальных возможностей</string>
+    <string name="open_accessibility">Открыть «Специальные возможности»</string>
+    <string name="restricted_hint">Если переключатель сервиса серый и написано «Ограниченная настройка» (Android 13+, приложение установлено из APK): откройте «О приложении» → меню ⋮ → «Разрешить ограниченные настройки», затем снова включите сервис.</string>
+    <string name="open_app_info">Открыть «О приложении»</string>
+
+    <string name="how_to_title">Как пользоваться</string>
+    <string name="how_to">• Короткое нажатие «+» / «−» — громкость, как обычно\n• Удерживать «+» — следующий трек\n• Удерживать «−» — предыдущий трек\n• Нажать «+» и «−» вместе — пауза / воспроизведение\n\nРаботает с любым плеером, который поддерживает медиакнопки (YouTube, Spotify, VK Музыка, Яндекс Музыка, VLC, браузер и т. д.). На большинстве телефонов работает только при включённом экране (в том числе на экране блокировки).</string>
+
+    <string name="settings_title">Настройки</string>
+    <string name="pref_enabled">Включено</string>
+    <string name="pref_only_when_playing">Только когда играет звук</string>
+    <string name="pref_only_when_playing_hint">Когда ничего не играет, кнопки громкости работают полностью штатно (в т. ч. удержание для быстрой регулировки)</string>
+    <string name="pref_swap">Поменять направления (удержание «+» — предыдущий трек)</string>
+    <string name="pref_combo">«+» и «−» вместе — пауза / воспроизведение</string>
+    <string name="pref_vibrate">Вибрация при переключении</string>
+    <string name="pref_long_press">Длительность удержания: %1$d мс</string>
+</resources>

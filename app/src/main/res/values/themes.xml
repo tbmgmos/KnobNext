@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorPrimary">@color/accent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <color name="accent">#FF3D5AFE</color>
+    <color name="status_ok">#FF2E7D32</color>
+    <color name="status_bad">#FFC62828</color>
+    <color name="icon_bg">#FF1A237E</color>
+</resources>

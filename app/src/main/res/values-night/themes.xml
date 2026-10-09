@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorPrimary">@color/accent</item>
+    </style>
+    <color name="accent">#FF8C9EFF</color>
+    <color name="status_ok">#FF81C784</color>
+    <color name="status_bad">#FFEF9A9A</color>
+</resources>
