@@ -5,6 +5,8 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -34,6 +36,8 @@ class Extras(private val context: Context, private val media: Media, private val
     private val shuffleOn = HashMap<String, Boolean>()
     private val repeatMode = HashMap<String, Int>()
 
+    private val torch = Torch(context, handler)
+
     fun perform(action: Action, controller: MediaController?): String? = when (action) {
         Action.ANNOUNCE -> announce(controller)
         Action.LIKE -> like(controller)
@@ -41,10 +45,59 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.REPEAT -> repeat(controller)
         Action.SLEEP_TIMER -> toggleSleepTimer()
         Action.OPEN_PLAYER -> openPlayer(controller)
+        Action.RESTART -> restart(controller)
+        Action.SWITCH_PLAYER -> switchPlayer(controller)
+        Action.FLASHLIGHT -> torch.toggle()
+        Action.RINGER -> toggleRinger()
         else -> null
     }
 
-    fun release() = speaker.release()
+    fun release() {
+        speaker.release()
+        torch.release()
+    }
+
+    /** Back to the start of the track; players that can't seek usually restart on "previous". */
+    private fun restart(controller: MediaController?): String? {
+        val c = controller ?: return context.getString(R.string.log_needs_access)
+        if (c.playbackState?.actions?.and(PlaybackState.ACTION_SEEK_TO) != 0L) {
+            c.transportControls.seekTo(0)
+        } else {
+            c.transportControls.skipToPrevious()
+        }
+        return null
+    }
+
+    /** Pauses this player and resumes the next one that has a session, in a stable order. */
+    private fun switchPlayer(controller: MediaController?): String? {
+        val filtering = prefs.appFilter
+        val players = media.controllers()
+            .filter { !filtering || it.packageName in prefs.allowedApps }
+            .distinctBy { it.packageName }
+            .sortedBy { it.packageName }
+        if (players.isEmpty()) return context.getString(R.string.log_needs_access)
+        val current = players.indexOfFirst { it.packageName == controller?.packageName }
+        val next = players[(current + 1) % players.size]
+        if (next.packageName == controller?.packageName) return context.getString(R.string.log_no_other_player)
+        controller?.transportControls?.pause()
+        next.transportControls.play()
+        prefs.lastPlayer = next.packageName
+        return context.getString(R.string.log_switched_to, appLabel(context, next.packageName))
+    }
+
+    /** Sound ↔ vibrate. Leaving "silent" may need Do Not Disturb access, which the app doesn't ask for. */
+    private fun toggleRinger(): String =
+        try {
+            if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+                audio.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                context.getString(R.string.log_ringer_vibrate)
+            } else {
+                audio.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                context.getString(R.string.log_ringer_normal)
+            }
+        } catch (_: SecurityException) {
+            context.getString(R.string.log_ringer_dnd)
+        }
 
     private fun announce(controller: MediaController?): String? {
         val meta = controller?.metadata
@@ -201,10 +254,19 @@ class Extras(private val context: Context, private val media: Media, private val
 object SleepTimer {
     fun active(prefs: Prefs) = prefs.sleepUntil > System.currentTimeMillis()
 
+    /** The music fades out over this long before the pause. */
+    const val FADE_MS = 30_000L
+
+    /** Called when the timer fires; the service sets it to fade out instead of cutting off. */
+    @Volatile
+    var fader: (() -> Unit)? = null
+
     fun start(context: Context, prefs: Prefs, minutes: Int) {
         val delay = minutes * 60_000L
+        // Fires when the fade has to begin, so the music is paused right at the time shown.
+        val fireIn = (delay - FADE_MS).coerceAtLeast(0L)
         context.getSystemService(AlarmManager::class.java)
-            .setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + delay, alarm(context))
+            .setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + fireIn, alarm(context))
         prefs.sleepUntil = System.currentTimeMillis() + delay
     }
 
@@ -218,13 +280,66 @@ object SleepTimer {
     )
 }
 
-/** Pauses playback when the sleep timer fires. */
+/** Fades out and pauses when the sleep timer fires (or just pauses if the service isn't running). */
 class SleepReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Prefs(context).sleepUntil = 0L
+        SleepTimer.fader?.let { return it() }
         val audio = context.getSystemService(AudioManager::class.java)
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
+    }
+}
+
+/** The camera flash as a torch. Needs no permission; fails only while another app uses the camera. */
+private class Torch(private val context: Context, handler: Handler) {
+    private val cameras = context.getSystemService(CameraManager::class.java)
+    private var on = false
+
+    private val id: String? by lazy {
+        try {
+            val withFlash = cameras?.cameraIdList.orEmpty().filter {
+                cameras?.getCameraCharacteristics(it)?.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+            withFlash.firstOrNull {
+                cameras?.getCameraCharacteristics(it)?.get(CameraCharacteristics.LENS_FACING) ==
+                    CameraCharacteristics.LENS_FACING_BACK
+            } ?: withFlash.firstOrNull()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // The torch can also be switched from quick settings; follow it so the toggle stays right.
+    private val callback = object : CameraManager.TorchCallback() {
+        override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+            if (cameraId == id) on = enabled
+        }
+    }
+
+    init {
+        try {
+            cameras?.registerTorchCallback(callback, handler)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun toggle(): String? {
+        val camera = id ?: return context.getString(R.string.log_no_torch)
+        return try {
+            cameras?.setTorchMode(camera, !on)
+            on = !on
+            null
+        } catch (_: Exception) {
+            context.getString(R.string.log_torch_busy)
+        }
+    }
+
+    fun release() {
+        try {
+            cameras?.unregisterTorchCallback(callback)
+        } catch (_: Exception) {
+        }
     }
 }
 

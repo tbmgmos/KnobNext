@@ -107,6 +107,32 @@ object KnobIcons {
             "s3,1.34 3,3v2H9z",
     )
 
+    val Replay = icon(
+        "Replay",
+        "M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z",
+    )
+    val SwapHoriz = icon("SwapHoriz", "M6.99,11L3,15l3.99,4v-3H14v-2H6.99v-3zM21,9l-3.99,-4v3H10v2h7.01v3L21,9z")
+    val Flashlight = icon(
+        "Flashlight",
+        "M6,2h12v3H6V2zM6,7h12v1l-2,3v11H8V11L6,8V7zM12,15.5c0.83,0 1.5,-0.67 1.5,-1.5s-0.67,-1.5 -1.5,-1.5 " +
+            "-1.5,0.67 -1.5,1.5 0.67,1.5 1.5,1.5z",
+    )
+    val Vibration = icon(
+        "Vibration",
+        "M0,15h2V9H0v6zM3,17h2V7H3v10zM22,9v6h2V9h-2zM19,17h2V7h-2v10zM16.5,3h-9C6.67,3 6,3.67 6,4.5v15" +
+            "c0,0.83 0.67,1.5 1.5,1.5h9c0.83,0 1.5,-0.67 1.5,-1.5v-15C18,3.67 17.33,3 16.5,3zM16,19H8V5h8v14z",
+    )
+    val Checklist = icon(
+        "Checklist",
+        "M22,7h-9v2h9V7zM22,15h-9v2h9V15zM5.54,11L2,7.46l1.41,-1.41 2.12,2.12 4.24,-4.24 1.41,1.41L5.54,11z" +
+            "M5.54,19L2,15.46l1.41,-1.41 2.12,2.12 4.24,-4.24 1.41,1.41L5.54,19z",
+    )
+    val Tune = icon(
+        "Tune",
+        "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10z" +
+            "M15,9h2V7h4V5h-4V3h-2v6z",
+    )
+
     private fun icon(name: String, path: String): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
             .addPath(addPathNodes(path), fill = SolidColor(Color.Black))

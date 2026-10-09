@@ -5,11 +5,26 @@ import android.content.SharedPreferences
 
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
-    NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, LIKE, SHUFFLE, REPEAT, SLEEP_TIMER, OPEN_PLAYER;
+    NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
+    ANNOUNCE, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER,
 
-    /** Actions that make sense when nothing is playing (they start or prepare playback). */
-    val worksWhenIdle: Boolean get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER
+    // Not about music: the volume keys as shortcuts.
+    FLASHLIGHT, RINGER;
+
+    /** Actions that make sense when nothing is playing (they start playback or aren't about music). */
+    val worksWhenIdle: Boolean
+        get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER
+
+    val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
+}
+
+/** Starting points for an app's own gesture set. */
+enum class ProfilePreset {
+    /** A copy of the common gestures. */
+    COMMON,
+
+    /** Video and podcasts: holds and double presses seek, long holds and triple presses switch. */
+    SEEK,
 }
 
 enum class GestureGroup { KEYS, SEQUENCE, MOTION }
@@ -62,7 +77,10 @@ data class Settings(
     val sleepMinutes: Int,
     val sleepUntil: Long,
     val resumeMinutes: Int,
+    val announceSkips: Boolean,
     val actions: Map<Gesture, Action>,
+    /** Apps with their own gesture set → that set. */
+    val profiles: Map<String, Map<Gesture, Action>>,
 )
 
 class Prefs(context: Context) {
@@ -162,6 +180,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("resume_minutes", 30)
         set(v) = sp.edit().putInt("resume_minutes", v).apply()
 
+    /** With the screen off, say the new track's name after switching. */
+    var announceSkips: Boolean
+        get() = sp.getBoolean("announce_skips", false)
+        set(v) = sp.edit().putBoolean("announce_skips", v).apply()
+
     /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
     var sleepUntil: Long
         get() = sp.getLong("sleep_until", 0L)
@@ -197,6 +220,39 @@ class Prefs(context: Context) {
 
     fun setAction(g: Gesture, a: Action) = sp.edit().putString(g.key, a.name).apply()
 
+    // ---- Per-app gesture sets ----
+
+    val profileApps: Set<String>
+        get() = sp.getStringSet("profile_apps", null)?.toSet() ?: emptySet()
+
+    private fun profileKey(g: Gesture, pkg: String) = "${g.key}@$pkg"
+
+    private fun stored(key: String): Action? =
+        sp.getString(key, null)?.let { stored -> Action.entries.firstOrNull { it.name == stored } ?: Action.NONE }
+
+    /** The action for [g] while [pkg] is the player: its own set if it has one, otherwise the common one. */
+    fun action(g: Gesture, pkg: String?): Action =
+        if (pkg != null && pkg in profileApps) stored(profileKey(g, pkg)) ?: action(g) else action(g)
+
+    fun setAction(g: Gesture, a: Action, pkg: String?) {
+        if (pkg == null) setAction(g, a) else sp.edit().putString(profileKey(g, pkg), a.name).apply()
+    }
+
+    fun createProfile(pkg: String, preset: ProfilePreset) {
+        val edit = sp.edit()
+        Gesture.entries.forEach { g ->
+            val a = if (preset == ProfilePreset.SEEK) SEEK_PRESET[g] ?: action(g) else action(g)
+            edit.putString(profileKey(g, pkg), a.name)
+        }
+        edit.putStringSet("profile_apps", profileApps + pkg).apply()
+    }
+
+    fun deleteProfile(pkg: String) {
+        val edit = sp.edit()
+        Gesture.entries.forEach { edit.remove(profileKey(it, pkg)) }
+        edit.putStringSet("profile_apps", profileApps - pkg).apply()
+    }
+
     fun snapshot() = Settings(
         enabled = enabled,
         onlyWhenPlaying = onlyWhenPlaying,
@@ -218,7 +274,9 @@ class Prefs(context: Context) {
         sleepMinutes = sleepMinutes,
         sleepUntil = sleepUntil,
         resumeMinutes = resumeMinutes,
-        actions = Gesture.entries.associateWith(::action),
+        announceSkips = announceSkips,
+        actions = Gesture.entries.associateWith { action(it) },
+        profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )
 
     /** Returns an unregister function. The listener object must stay referenced, so it lives in the closure. */
@@ -234,6 +292,17 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        private val SEEK_PRESET = mapOf(
+            Gesture.HOLD_UP to Action.SEEK_FORWARD,
+            Gesture.HOLD_DOWN to Action.SEEK_BACK,
+            Gesture.LONG_HOLD_UP to Action.NEXT,
+            Gesture.LONG_HOLD_DOWN to Action.PREVIOUS,
+            Gesture.DOUBLE_UP to Action.SEEK_FORWARD,
+            Gesture.DOUBLE_DOWN to Action.SEEK_BACK,
+            Gesture.TRIPLE_UP to Action.NEXT,
+            Gesture.TRIPLE_DOWN to Action.PREVIOUS,
+        )
+
         const val LONG_PRESS_MIN = 250
         const val LONG_PRESS_MAX = 1500
         const val LONG_PRESS_STEP = 50

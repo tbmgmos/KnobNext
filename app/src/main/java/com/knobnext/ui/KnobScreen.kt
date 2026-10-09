@@ -54,6 +54,7 @@ import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
 import com.knobnext.Prefs
+import com.knobnext.ProfilePreset
 import com.knobnext.R
 import com.knobnext.Release
 import com.knobnext.SleepTimer
@@ -87,8 +88,13 @@ private enum class Page(val title: Int) {
     SEQUENCES(R.string.section_double),
     MOTION(R.string.section_motion),
     PLAYERS(R.string.players_title),
+    PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
+    TEST(R.string.test_title),
 }
+
+/** Where "back" leads from each page. */
+private val Page.parent: Page get() = if (this == Page.PROFILE) Page.PLAYERS else Page.HOME
 
 /** Everything a page needs, so page builders stay small. */
 private class PageContext(
@@ -98,9 +104,13 @@ private class PageContext(
     val actions: ScreenActions,
     val versionName: String,
     val updatesSupported: Boolean,
-    val edit: (Gesture) -> Unit,
+    /** Edit a gesture's action: the common set when the package is null, otherwise that app's own set. */
+    val editIn: (Gesture, String?) -> Unit,
     val open: (Page) -> Unit,
-)
+    val openProfile: (String) -> Unit,
+) {
+    val edit: (Gesture) -> Unit = { editIn(it, null) }
+}
 
 @Composable
 fun KnobScreen(
@@ -136,13 +146,13 @@ fun KnobScreen(
         }
     }
 
-    var editing by remember { mutableStateOf<Gesture?>(null) }
-    editing?.let { g ->
+    var editing by remember { mutableStateOf<Pair<Gesture, String?>?>(null) }
+    editing?.let { (g, pkg) ->
         ActionDialog(
             gesture = g,
-            current = s.actions.getValue(g),
+            current = pkg?.let { s.profiles[it]?.get(g) } ?: s.actions.getValue(g),
             onPick = {
-                prefs.setAction(g, it)
+                prefs.setAction(g, it, pkg)
                 editing = null
             },
             onDismiss = { editing = null },
@@ -150,8 +160,17 @@ fun KnobScreen(
     }
 
     var page by rememberSaveable { mutableStateOf(Page.HOME) }
-    BackHandler(enabled = page != Page.HOME) { page = Page.HOME }
-    val ctx = PageContext(s, prefs, setup, actions, versionName, updatesSupported, { editing = it }, { page = it })
+    var profilePkg by rememberSaveable { mutableStateOf<String?>(null) }
+    BackHandler(enabled = page != Page.HOME) { page = page.parent }
+    val ctx = PageContext(
+        s, prefs, setup, actions, versionName, updatesSupported,
+        editIn = { g, pkg -> editing = g to pkg },
+        open = { page = it },
+        openProfile = {
+            profilePkg = it
+            page = Page.PROFILE
+        },
+    )
 
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
@@ -169,7 +188,7 @@ fun KnobScreen(
                 },
                 navigationIcon = {
                     if (page != Page.HOME) {
-                        IconButton(onClick = { page = Page.HOME }) {
+                        IconButton(onClick = { page = page.parent }) {
                             Icon(KnobIcons.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     }
@@ -191,6 +210,8 @@ fun KnobScreen(
             },
             label = "page",
         ) { current ->
+            // Composed only while the check page is shown: that is what keeps the service in check mode.
+            val check = if (current == Page.TEST) rememberGestureCheck() else null
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -206,7 +227,9 @@ fun KnobScreen(
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
                     Page.PLAYERS -> playersPage(ctx)
+                    Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
+                    Page.TEST -> testPage(ctx, check ?: CheckState())
                 }
             }
         }
@@ -260,7 +283,7 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
             }
         }
     }
-    nowPlaying?.let { now -> item { NowPlayingCard(now, media) } }
+    nowPlaying?.let { now -> item { NowPlayingCard(now, media, ownGestures = now.controller.packageName in s.profiles) } }
 
     item {
         Column {
@@ -292,18 +315,22 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
         }
     }
     item {
-        Group(2) {
+        Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 PageTile(
-                    0, MaterialShapes.Cookie12Sided, KnobIcons.MusicNote, R.string.players_title,
-                    if (s.appFilter && setup.playerAccess) {
-                        stringResource(R.string.tile_players_some, s.allowedApps.size)
-                    } else {
-                        stringResource(R.string.tile_players_all)
+                    0, MaterialShapes.Cookie7Sided, KnobIcons.Checklist, R.string.test_title,
+                    stringResource(R.string.tile_test),
+                ) { ctx.open(Page.TEST) }
+                PageTile(
+                    1, MaterialShapes.Cookie12Sided, KnobIcons.MusicNote, R.string.players_title,
+                    when {
+                        s.profiles.isNotEmpty() -> stringResource(R.string.tile_players_profiles, s.profiles.size)
+                        s.appFilter && setup.playerAccess -> stringResource(R.string.tile_players_some, s.allowedApps.size)
+                        else -> stringResource(R.string.tile_players_all)
                     },
                 ) { ctx.open(Page.PLAYERS) }
                 PageTile(
-                    1, MaterialShapes.Cookie9Sided, KnobIcons.Settings, R.string.settings_title,
+                    2, MaterialShapes.Cookie9Sided, KnobIcons.Settings, R.string.settings_title,
                     stringResource(R.string.tile_settings),
                 ) { ctx.open(Page.SETTINGS) }
             }
@@ -505,20 +532,55 @@ private fun WaveCard(ctx: PageContext) {
 // ---------------------------------------------------------------- Players
 
 private fun LazyListScope.playersPage(ctx: PageContext) {
+    item { ProfilesList(ctx) }
+    item { Hint(stringResource(R.string.profiles_hint)) }
     item { PlayersList(ctx) }
     item { Hint(stringResource(R.string.players_hint)) }
+}
+
+/** Players seen so far, as (package, label, icon), sorted by label. */
+@Composable
+private fun rememberPlayers(seen: Set<String>): List<Triple<String, String, androidx.compose.ui.graphics.ImageBitmap?>> {
+    val context = LocalContext.current
+    return remember(seen) {
+        seen.map { pkg -> Triple(pkg, appLabel(context, pkg), appIcon(context, pkg)?.asImageBitmap()) }
+            .sortedBy { it.second.lowercase() }
+    }
+}
+
+@Composable
+private fun ProfilesList(ctx: PageContext) {
+    val s = ctx.s
+    val players = rememberPlayers(s.seenPlayers)
+    Column {
+        SectionTitle(stringResource(R.string.profiles_title))
+        when {
+            !ctx.setup.playerAccess -> Group(1) { ListRow(shape(0), stringResource(R.string.profiles_no_access), enabled = false) }
+            players.isEmpty() -> Group(1) { ListRow(shape(0), stringResource(R.string.players_empty), enabled = false) }
+            else -> Group(players.size) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    players.forEachIndexed { i, (pkg, label, icon) ->
+                        ListRow(
+                            shape = shape(i),
+                            title = label,
+                            subtitle = stringResource(if (pkg in s.profiles) R.string.profile_own else R.string.profile_common),
+                            enabled = s.enabled,
+                            onClick = { ctx.openProfile(pkg) },
+                            leading = { AppIcon(icon) },
+                            trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun PlayersList(ctx: PageContext) {
     val s = ctx.s
     val access = ctx.setup.playerAccess
-    val context = LocalContext.current
-    val players = remember(s.seenPlayers) {
-        s.seenPlayers
-            .map { pkg -> Triple(pkg, appLabel(context, pkg), appIcon(context, pkg)?.asImageBitmap()) }
-            .sortedBy { it.second.lowercase() }
-    }
+    val players = rememberPlayers(s.seenPlayers)
     val showList = access && s.appFilter
     Group(1 + if (showList) maxOf(players.size, 1) else 0) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -545,13 +607,118 @@ private fun PlayersList(ctx: PageContext) {
     }
 }
 
+// ---------------------------------------------------------------- One app's gestures
+
+private fun LazyListScope.profilePage(ctx: PageContext, pkg: String) {
+    val own = ctx.s.profiles[pkg]
+    item { ProfileHeader(ctx, pkg, own != null) }
+    if (own == null) {
+        item { ProfilePresets(ctx, pkg) }
+    } else {
+        listOf(
+            GestureGroup.KEYS to R.string.section_keys,
+            GestureGroup.SEQUENCE to R.string.section_double,
+            GestureGroup.MOTION to R.string.section_motion,
+        ).forEach { (group, title) ->
+            item {
+                val gestures = Gesture.entries.filter { it.group == group }
+                Column {
+                    SectionTitle(stringResource(title))
+                    Group(gestures.size) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            gestures.forEachIndexed { i, g ->
+                                GestureRow(
+                                    i, g, ctx.s, gestureShape(g), accent = group != GestureGroup.KEYS,
+                                    actions = own, onEdit = { ctx.editIn(it, pkg) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    item { Hint(stringResource(R.string.profile_hint)) }
+}
+
+@Composable
+private fun ProfileHeader(ctx: PageContext, pkg: String, own: Boolean) {
+    val context = LocalContext.current
+    val label = remember(pkg) { appLabel(context, pkg) }
+    val icon = remember(pkg) { appIcon(context, pkg)?.asImageBitmap() }
+    Group(1) {
+        SwitchRow(
+            shape(0), label, own,
+            { on -> if (on) ctx.prefs.createProfile(pkg, ProfilePreset.COMMON) else ctx.prefs.deleteProfile(pkg) },
+            subtitle = stringResource(if (own) R.string.profile_on_hint else R.string.profile_off_hint),
+            enabled = ctx.s.enabled,
+            leading = { AppIcon(icon, size = 48) },
+        )
+    }
+}
+
+@Composable
+private fun ProfilePresets(ctx: PageContext, pkg: String) {
+    Column {
+        SectionTitle(stringResource(R.string.profile_start))
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ListRow(
+                    shape(0), stringResource(R.string.profile_preset_common),
+                    subtitle = stringResource(R.string.profile_preset_common_hint),
+                    enabled = ctx.s.enabled,
+                    onClick = { ctx.prefs.createProfile(pkg, ProfilePreset.COMMON) },
+                    leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.Tune) },
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.profile_preset_seek),
+                    subtitle = stringResource(R.string.profile_preset_seek_hint),
+                    enabled = ctx.s.enabled,
+                    onClick = { ctx.prefs.createProfile(pkg, ProfilePreset.SEEK) },
+                    leading = { Badge(MaterialShapes.Pill, KnobIcons.FastForward) },
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Gesture check
+
+private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
+    val s = ctx.s
+    if (!ctx.setup.serviceEnabled || !ctx.setup.serviceRunning) {
+        item {
+            InfoCard(
+                title = stringResource(R.string.not_running_title),
+                body = stringResource(R.string.test_not_running),
+                button = stringResource(R.string.open_accessibility),
+                onClick = ctx.actions.openAccessibility,
+            ) { Badge(MaterialShapes.Pentagon, KnobIcons.Close, error = true) }
+        }
+    }
+    item { CheckHero(check) }
+    item { CheckList(stringResource(R.string.section_keys), Gesture.entries.filter { it.group == GestureGroup.KEYS }, s.actions, check) }
+    if (s.doubleMode != DoubleMode.OFF) {
+        item {
+            CheckList(stringResource(R.string.section_double), Gesture.entries.filter { it.group == GestureGroup.SEQUENCE }, s.actions, check)
+        }
+    }
+    val motion = buildList {
+        if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
+        if (s.twist) add(Gesture.TWIST)
+        if (s.wave) add(Gesture.WAVE)
+    }
+    if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, s.actions, check) }
+    item { Hint(stringResource(R.string.test_hint)) }
+}
+
 // ---------------------------------------------------------------- Settings
 
 private fun LazyListScope.settingsPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(4) {
+        Group(5) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.pref_only_when_playing), s.onlyWhenPlaying, { prefs.onlyWhenPlaying = it },
@@ -568,6 +735,10 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                 SwitchRow(
                     shape(3), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
                     subtitle = stringResource(R.string.pref_vibrate_hint), enabled = s.enabled,
+                )
+                SwitchRow(
+                    shape(4), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
+                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
                 )
             }
         }
@@ -683,10 +854,11 @@ private fun GroupScope.GestureRow(
     badge: RoundedPolygon,
     accent: Boolean,
     enabled: Boolean = true,
+    actions: Map<Gesture, Action> = s.actions,
     onEdit: (Gesture) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val action = s.actions.getValue(gesture)
+    val action = actions[gesture] ?: Action.NONE
     ListRow(
         shape = shape(index),
         title = stringResource(gestureLabel(gesture)),
@@ -715,7 +887,7 @@ private fun GestureGroupCard(
     Group(rows.size + if (footer) 1 else 0) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             rows.forEachIndexed { i, (g, polygon) ->
-                GestureRow(i, g, ctx.s, polygon, accent, enabled, ctx.edit)
+                GestureRow(i, g, ctx.s, polygon, accent, enabled, onEdit = ctx.edit)
             }
             if (footer) {
                 ListRow(

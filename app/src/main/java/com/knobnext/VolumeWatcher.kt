@@ -31,8 +31,8 @@ class VolumeWatcher(
     private val onScreenOff: () -> Unit,
     private val onVolume: (value: Int, source: Source) -> Unit,
 ) {
-    /** SYNC = a new baseline; it must not count as a press. */
-    enum class Source { BROADCAST, POLL, SYNC }
+    /** SYNC = a new baseline; it must not count as a press. KEY = a tap seen directly (gesture check). */
+    enum class Source { BROADCAST, POLL, SYNC, KEY }
 
     private val audio = context.getSystemService(AudioManager::class.java)
     private val power = context.getSystemService(PowerManager::class.java)

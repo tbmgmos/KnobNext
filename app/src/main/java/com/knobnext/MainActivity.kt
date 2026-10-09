@@ -69,6 +69,16 @@ class MainActivity : ComponentActivity() {
         ScreenOffService.sync(this, inForeground = true)
     }
 
+    override fun onStart() {
+        super.onStart()
+        GestureTest.setVisible(true)
+    }
+
+    override fun onStop() {
+        GestureTest.setVisible(false)
+        super.onStop()
+    }
+
     override fun onDestroy() {
         stopObserving()
         super.onDestroy()

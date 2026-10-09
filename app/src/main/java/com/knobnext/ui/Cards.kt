@@ -213,7 +213,7 @@ fun InfoCard(
 }
 
 @Composable
-fun NowPlayingCard(now: NowPlaying, media: Media) {
+fun NowPlayingCard(now: NowPlaying, media: Media, ownGestures: Boolean = false) {
     val scheme = MaterialTheme.colorScheme
     val c = now.controller
     val playCorner by animateDpAsState(
@@ -249,7 +249,11 @@ fun NowPlayingCard(now: NowPlaying, media: Media) {
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    OneLine(now.appLabel, MaterialTheme.typography.labelLarge, scheme.onSecondaryContainer.copy(alpha = 0.75f))
+                    OneLine(
+                        if (ownGestures) now.appLabel + " · " + stringResource(R.string.profile_badge) else now.appLabel,
+                        MaterialTheme.typography.labelLarge,
+                        scheme.onSecondaryContainer.copy(alpha = 0.75f),
+                    )
                     OneLine(now.title ?: stringResource(R.string.now_playing_unknown), MaterialTheme.typography.titleLargeEmphasized)
                     now.artist?.let { OneLine(it, MaterialTheme.typography.bodyMedium) }
                 }
@@ -294,6 +298,14 @@ fun ActionDialog(gesture: Gesture, current: Action, onPick: (Action) -> Unit, on
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Action.entries.forEach { a ->
+                    if (a == Action.entries.first { it.notMusic }) {
+                        Text(
+                            stringResource(R.string.actions_not_music),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp),
+                        )
+                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -330,6 +342,10 @@ fun actionLabel(a: Action) = when (a) {
     Action.REPEAT -> R.string.action_repeat
     Action.SLEEP_TIMER -> R.string.action_sleep
     Action.OPEN_PLAYER -> R.string.action_open_player
+    Action.RESTART -> R.string.action_restart
+    Action.SWITCH_PLAYER -> R.string.action_switch_player
+    Action.FLASHLIGHT -> R.string.action_flashlight
+    Action.RINGER -> R.string.action_ringer
 }
 
 fun actionIcon(a: Action) = when (a) {
@@ -347,6 +363,10 @@ fun actionIcon(a: Action) = when (a) {
     Action.REPEAT -> KnobIcons.Repeat
     Action.SLEEP_TIMER -> KnobIcons.Bedtime
     Action.OPEN_PLAYER -> KnobIcons.MusicNote
+    Action.RESTART -> KnobIcons.Replay
+    Action.SWITCH_PLAYER -> KnobIcons.SwapHoriz
+    Action.FLASHLIGHT -> KnobIcons.Flashlight
+    Action.RINGER -> KnobIcons.Vibration
 }
 
 fun gestureLabel(g: Gesture) = when (g) {

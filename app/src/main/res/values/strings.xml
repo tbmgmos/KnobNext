@@ -203,4 +203,54 @@
     <string name="about_title">О приложении</string>
     <string name="pref_check_updates">Проверять обновления</string>
     <string name="version_value">Версия %1$s</string>
+
+    <!-- New actions -->
+    <string name="action_restart">В начало трека</string>
+    <string name="action_switch_player">Другой плеер</string>
+    <string name="action_flashlight">Фонарик</string>
+    <string name="action_ringer">Звонок: звук / вибрация</string>
+    <string name="actions_not_music">Не только музыка</string>
+    <string name="log_no_torch">у телефона нет вспышки</string>
+    <string name="log_torch_busy">камера занята другим приложением</string>
+    <string name="log_ringer_vibrate">теперь вибрация</string>
+    <string name="log_ringer_normal">теперь со звуком</string>
+    <string name="log_ringer_dnd">включён «Не беспокоить» — выключите его вручную</string>
+    <string name="log_no_other_player">другого плеера нет</string>
+    <string name="log_switched_to">теперь %1$s</string>
+    <string name="log_sleep_fade">таймер сна: плавно выключаю</string>
+    <string name="pref_announce_skips">Называть трек после переключения</string>
+    <string name="pref_announce_skips_hint">При выключенном экране — чтобы знать, что заиграло</string>
+
+    <!-- Gesture check -->
+    <string name="test_title">Проверка жестов</string>
+    <string name="tile_test">Попробуйте жесты — музыка не переключится</string>
+    <string name="test_idle_title">Сделайте любой жест</string>
+    <string name="test_idle_body">Пока открыт этот экран, жесты только отмечаются, их действия не выполняются</string>
+    <string name="test_no_action">действие не назначено</string>
+    <string name="test_tap_up">Короткое нажатие «+»</string>
+    <string name="test_tap_down">Короткое нажатие «−»</string>
+    <string name="test_held">Слишком быстро — похоже на удержание. Нажимайте чуть медленнее</string>
+    <string name="test_flip_down">Переворот экраном вниз</string>
+    <string name="test_flip_up">Переворот экраном вверх</string>
+    <string name="test_not_running">Служба не запущена, поэтому жесты не распознаются. Включите её заново.</string>
+    <string name="test_hint">Нажатия подряд здесь проверяются и при включённом экране. Чтобы проверить их как в жизни: включите музыку, выключите экран, сделайте жест и вернитесь — в течение двух минут он отметится здесь.</string>
+    <string name="log_test">проверка: %1$s</string>
+
+    <!-- Per-app gestures -->
+    <string name="profiles_title">Свои жесты для приложений</string>
+    <string name="profiles_hint">Например, в YouTube или подкастах удержание может перематывать, а в Spotify — переключать треки. Профиль включается сам, когда играет это приложение.</string>
+    <string name="profiles_no_access">Нужен доступ к плееру, чтобы знать, какое приложение играет</string>
+    <string name="profile_title">Жесты приложения</string>
+    <string name="profile_own">Свои жесты</string>
+    <string name="profile_common">Общие жесты</string>
+    <string name="profile_badge">свои жесты</string>
+    <string name="profile_on_hint">Когда играет это приложение, работают жесты ниже</string>
+    <string name="profile_off_hint">Сейчас работают общие жесты</string>
+    <string name="profile_start">С чего начать</string>
+    <string name="profile_preset_common">Как общие</string>
+    <string name="profile_preset_common_hint">Копия общих жестов — дальше поменяйте нужное</string>
+    <string name="profile_preset_seek">Перемотка вместо треков</string>
+    <string name="profile_preset_seek_hint">Для видео и подкастов: удержание и двойное нажатие перематывают на 10 с, долгое удержание и тройное нажатие переключают</string>
+    <string name="profile_hint">Остальные настройки (время удержания, режим нажатий подряд, жесты движением) общие для всех приложений.</string>
+    <string name="tile_players_profiles">Свои жесты: %1$d</string>
 </resources>
