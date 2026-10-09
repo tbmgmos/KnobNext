@@ -78,11 +78,13 @@
     <string name="double_mode_off">Выкл</string>
     <string name="double_mode_screen_off">Экран выкл.</string>
     <string name="double_mode_always">Всегда</string>
-    <string name="last_event">Последнее событие: %1$s</string>
+    <string name="last_event">Последние события:\n%1$s</string>
     <string name="last_event_none">пока нет — выключите экран и нажмите кнопку громкости</string>
     <string name="log_volume">громкость %1$s %2$d→%3$d (%4$s)</string>
     <string name="log_via_broadcast">система</string>
-    <string name="log_via_session">плеер</string>
+    <string name="log_via_poll">опрос</string>
+    <string name="log_screen_on">[экран вкл]</string>
+    <string name="log_screen_off">[экран выкл]</string>
     <string name="log_held">кнопку держат — жест отменён</string>
     <string name="log_no_action">%1$s: действие не назначено</string>
     <string name="log_not_playing">%1$s: ничего не играет</string>

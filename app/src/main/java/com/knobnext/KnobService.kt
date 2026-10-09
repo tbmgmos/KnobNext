@@ -61,15 +61,13 @@ class KnobService : AccessibilityService() {
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        volumeWatcher = VolumeWatcher(this, media, handler, ::onVolumeObserved)
+        volumeWatcher = VolumeWatcher(this, handler, ::doublePressActive, ::onVolumeObserved)
         volumeWatcher.start()
-        instance = this
         ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {
-        if (instance === this) instance = null
         stopService(android.content.Intent(this, ScreenOffService::class.java))
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
@@ -86,7 +84,6 @@ class KnobService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (code != KeyEvent.KEYCODE_VOLUME_UP && code != KeyEvent.KEYCODE_VOLUME_DOWN) return false
-        volumeWatcher.ensureSessions()
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> onDown(code, event.repeatCount)
             KeyEvent.ACTION_UP -> onUp(code)
@@ -145,23 +142,34 @@ class KnobService : AccessibilityService() {
      * Two quick presses in the same direction = gesture. A third change right after means the key is
      * being held (auto-repeat) to ramp the volume, so the pending gesture is cancelled.
      */
+    private fun doublePressActive(): Boolean {
+        val mode = prefs.doubleMode
+        return prefs.enabled && (mode == DoubleMode.ALWAYS || (mode == DoubleMode.SCREEN_OFF && !power.isInteractive))
+    }
+
+    /**
+     * One press is one volume step, so a jump of several steps in one report means several presses
+     * whose broadcasts were merged; replay them as separate steps.
+     */
     private fun onVolumeObserved(value: Int, source: VolumeWatcher.Source) {
         val previous = lastVolume
         lastVolume = value
         if (previous < 0 || value == previous) return
-        onVolumeChange(if (value > previous) 1 else -1, previous, value, source)
+        val direction = if (value > previous) 1 else -1
+        val steps = minOf(Math.abs(value - previous), MAX_REPLAYED_STEPS)
+        for (i in 0 until steps) {
+            onVolumeChange(direction, previous + i * direction, previous + (i + 1) * direction, source)
+        }
     }
 
     private fun onVolumeChange(direction: Int, previous: Int, value: Int, source: VolumeWatcher.Source) {
         val now = SystemClock.elapsedRealtime()
         if (now < ignoreVolumeUntil) return
-        val mode = prefs.doubleMode
-        val screenOn = power.isInteractive
-        if (!prefs.enabled || mode == DoubleMode.OFF || (mode == DoubleMode.SCREEN_OFF && screenOn)) {
+        if (!doublePressActive()) {
             resetDouble()
             return
         }
-        val via = getString(if (source == VolumeWatcher.Source.BROADCAST) R.string.log_via_broadcast else R.string.log_via_session)
+        val via = getString(if (source == VolumeWatcher.Source.BROADCAST) R.string.log_via_broadcast else R.string.log_via_poll)
         log(getString(R.string.log_volume, if (direction > 0) "↑" else "↓", previous, value, via))
         if (now < rampUntil) {
             rampUntil = now + RAMP_QUIET_MS
@@ -213,8 +221,11 @@ class KnobService : AccessibilityService() {
     }
 
     private fun log(message: String) {
-        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())
-        prefs.lastEvent = "$time · $message"
+        val time = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())
+        val screen = getString(if (power.isInteractive) R.string.log_screen_on else R.string.log_screen_off)
+        val entry = "$time $screen · $message"
+        val older = prefs.lastEvent?.lines().orEmpty().take(LOG_LINES - 1)
+        prefs.lastEvent = (listOf(entry) + older).joinToString("\n")
     }
 
     private fun fire(action: Action, controller: MediaController?) {
@@ -224,16 +235,12 @@ class KnobService : AccessibilityService() {
         if (prefs.vibrate) haptics.play(action)
     }
 
-    fun onPlayerAccessGranted() = volumeWatcher.ensureSessions()
-
-    companion object {
-        /** The connected instance, so the notification listener can tell it that player access appeared. */
-        var instance: KnobService? = null
-            private set
-
-        private const val DOUBLE_PRESS_MS = 450L
-        private const val CONFIRM_MS = 250L
-        private const val RAMP_QUIET_MS = 600L
-        private const val IGNORE_OWN_CHANGE_MS = 400L
+    private companion object {
+        const val MAX_REPLAYED_STEPS = 4
+        const val LOG_LINES = 5
+        const val DOUBLE_PRESS_MS = 450L
+        const val CONFIRM_MS = 250L
+        const val RAMP_QUIET_MS = 600L
+        const val IGNORE_OWN_CHANGE_MS = 400L
     }
 }
