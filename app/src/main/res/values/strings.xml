@@ -20,6 +20,19 @@
     <string name="restricted_hint">Android блокирует службы у приложений, установленных из APK. Откройте «О приложении» → ⋮ → «Разрешить доступ к настройкам с ограниченным доступом», затем включите службу снова.</string>
     <string name="open_app_info">О приложении</string>
 
+    <string name="setup_title">Настройка</string>
+    <string name="setup_steps_left">Обязательных шагов осталось: %1$d</string>
+    <string name="step_optional">по желанию</string>
+    <string name="step_restricted_title">Снимите ограничение Android</string>
+    <string name="step_restricted_body">KnobNext установлен из файла, поэтому Android пока не даёт включить службу. Откроется «О приложении»: нажмите ⋮ в правом верхнем углу → «Разрешить доступ к настройкам с ограниченным доступом» и вернитесь сюда.</string>
+    <string name="step_restricted_button">Открыть «О приложении»</string>
+    <string name="step_service_title">Включите службу KnobNext</string>
+    <string name="step_service_body">Откроется страница KnobNext — включите переключатель и подтвердите. После этого приложение откроется само.</string>
+    <string name="step_service_button">Включить</string>
+    <string name="step_player_title">Подключите плеер</string>
+    <string name="step_player_body">Название трека, перемотка и выбор плееров. Нужен доступ к уведомлениям — сами уведомления приложение не читает.</string>
+    <string name="step_player_button">Подключить</string>
+
     <string name="access_title">Подключите плеер</string>
     <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд и выбирать, в каких плеерах работают жесты. Сами уведомления приложение не читает.</string>
     <string name="access_button">Дать доступ</string>

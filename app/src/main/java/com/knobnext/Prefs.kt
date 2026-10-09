@@ -74,6 +74,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("check_updates", true)
         set(v) = sp.edit().putBoolean("check_updates", v).apply()
 
+    var returnRequestedAt: Long
+        get() = sp.getLong("return_requested_at", 0L)
+        set(v) = sp.edit().putLong("return_requested_at", v).apply()
+
     fun rememberPlayer(packageName: String) {
         val seen = seenPlayers
         if (packageName !in seen) sp.edit().putStringSet("seen_players", seen + packageName).apply()

@@ -2,8 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Only for checking GitHub for a newer release; can be turned off in settings. -->
-    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Lets the app show names and icons of players (package visibility on Android 11+). -->
     <queries>

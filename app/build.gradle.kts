@@ -18,6 +18,20 @@ android {
         versionName = providers.gradleProperty("versionName").orNull ?: "3.0.0-local"
     }
 
+    // github: checks GitHub Releases for updates (needs INTERNET). rustore: the store delivers updates,
+    // so that build has no network permission at all.
+    flavorDimensions += "store"
+    productFlavors {
+        create("github") {
+            dimension = "store"
+            resValue("bool", "update_check", "true")
+        }
+        create("rustore") {
+            dimension = "store"
+            resValue("bool", "update_check", "false")
+        }
+    }
+
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {

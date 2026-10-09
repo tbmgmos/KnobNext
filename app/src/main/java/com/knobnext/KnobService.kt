@@ -78,6 +78,7 @@ class KnobService : AccessibilityService() {
         } else {
             registerReceiver(volumeReceiver, filter)
         }
+        Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {

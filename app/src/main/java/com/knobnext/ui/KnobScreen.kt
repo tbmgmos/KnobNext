@@ -2,7 +2,6 @@
 
 package com.knobnext.ui
 
-import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,16 +52,24 @@ class ScreenActions(
     val openUrl: (String) -> Unit,
 )
 
+data class SetupState(
+    val restrictedApplies: Boolean,
+    val restrictedBlocked: Boolean,
+    val serviceEnabled: Boolean,
+    val playerAccess: Boolean,
+)
+
 @Composable
 fun KnobScreen(
-    serviceEnabled: Boolean,
-    notificationAccess: Boolean,
+    setup: SetupState,
     versionName: String,
     prefs: Prefs,
     actions: ScreenActions,
 ) {
     val context = LocalContext.current
     val media = remember { Media(context) }
+    val notificationAccess = setup.playerAccess
+    val updatesSupported = remember { context.resources.getBoolean(R.bool.update_check) }
 
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(prefs) {
@@ -80,7 +87,11 @@ fun KnobScreen(
 
     var update by remember { mutableStateOf<Release?>(null) }
     LaunchedEffect(s.checkUpdates) {
-        update = if (s.checkUpdates) Updates.latest()?.takeIf { Updates.isNewer(it.version, versionName) } else null
+        update = if (updatesSupported && s.checkUpdates) {
+            Updates.latest()?.takeIf { Updates.isNewer(it.version, versionName) }
+        } else {
+            null
+        }
     }
 
     var editing by remember { mutableStateOf<Gesture?>(null) }
@@ -126,44 +137,34 @@ fun KnobScreen(
             update?.let { release ->
                 item { UpdateCard(release) { actions.openUrl(release.apkUrl ?: release.pageUrl) } }
             }
-            item { StatusHero(serviceEnabled, actions.openAccessibility) }
-            if (!serviceEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                item {
-                    InfoCard(
-                        title = stringResource(R.string.restricted_title),
-                        body = stringResource(R.string.restricted_hint),
-                        button = stringResource(R.string.open_app_info),
-                        onClick = actions.openAppInfo,
-                    ) {
-                        ShapeBadge(
-                            MaterialShapes.Gem, KnobIcons.Lock,
-                            MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.onTertiary, size = 40,
-                        )
+            if (!setup.serviceEnabled) {
+                item { SetupCard(setup, actions) }
+            } else {
+                item { StatusHero(true, actions.openAccessibility) }
+                if (!notificationAccess) {
+                    item {
+                        InfoCard(
+                            title = stringResource(R.string.access_title),
+                            body = stringResource(R.string.access_body),
+                            button = stringResource(R.string.access_button),
+                            onClick = actions.openNotificationAccess,
+                        ) {
+                            ShapeBadge(
+                                MaterialShapes.Flower, KnobIcons.MusicNote,
+                                MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.onTertiary, size = 40,
+                            )
+                        }
                     }
                 }
             }
             if (notificationAccess) {
                 nowPlaying?.let { now -> item { NowPlayingCard(now, media) } }
-            } else {
-                item {
-                    InfoCard(
-                        title = stringResource(R.string.access_title),
-                        body = stringResource(R.string.access_body),
-                        button = stringResource(R.string.access_button),
-                        onClick = actions.openNotificationAccess,
-                    ) {
-                        ShapeBadge(
-                            MaterialShapes.Flower, KnobIcons.MusicNote,
-                            MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.onTertiary, size = 40,
-                        )
-                    }
-                }
             }
 
             item { GesturesSection(s) { editing = it } }
             item { SettingsSection(s, prefs) }
             item { PlayersSection(s, prefs, notificationAccess) }
-            item { AboutSection(s, prefs, versionName) }
+            item { AboutSection(s, prefs, versionName, updatesSupported) }
         }
     }
 }
@@ -299,17 +300,22 @@ private fun PlayersSection(s: com.knobnext.Settings, prefs: Prefs, access: Boole
 }
 
 @Composable
-private fun AboutSection(s: com.knobnext.Settings, prefs: Prefs, versionName: String) {
+private fun AboutSection(s: com.knobnext.Settings, prefs: Prefs, versionName: String, updatesSupported: Boolean) {
     Column {
         SectionTitle(stringResource(R.string.about_title))
         Group(1) {
-            SwitchRow(
-                shape(0), stringResource(R.string.pref_check_updates), s.checkUpdates, { prefs.checkUpdates = it },
-                subtitle = stringResource(R.string.version_value, versionName),
-                leading = {
-                    Icon(KnobIcons.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                },
-            )
+            val leading: @Composable () -> Unit = {
+                Icon(KnobIcons.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+            if (updatesSupported) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pref_check_updates), s.checkUpdates, { prefs.checkUpdates = it },
+                    subtitle = stringResource(R.string.version_value, versionName),
+                    leading = leading,
+                )
+            } else {
+                ListRow(shape(0), stringResource(R.string.app_name), stringResource(R.string.version_value, versionName))
+            }
         }
     }
 }

@@ -53,14 +53,21 @@ jobs:
           KNOB_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KNOB_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew assembleRelease --no-daemon -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE"
-          mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/KnobNext-$VERSION_NAME.apk"
+          ./gradlew assembleGithubRelease assembleRustoreRelease --no-daemon \
+            -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE"
+          mkdir -p dist rustore
+          cp app/build/outputs/apk/github/release/app-github-release.apk "dist/KnobNext-$VERSION_NAME.apk"
+          cp app/build/outputs/apk/rustore/release/app-rustore-release.apk "rustore/KnobNext-$VERSION_NAME-rustore.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: KnobNext-${{ env.VERSION_NAME }}
           path: dist/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KnobNext-${{ env.VERSION_NAME }}-rustore
+          path: rustore/*.apk
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')

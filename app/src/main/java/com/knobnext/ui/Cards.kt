@@ -329,3 +329,106 @@ fun gestureLabel(g: Gesture) = when (g) {
     Gesture.DOUBLE_UP_OFF -> R.string.gesture_double_up_off
     Gesture.DOUBLE_DOWN_OFF -> R.string.gesture_double_down_off
 }
+
+private class SetupStep(
+    val title: Int,
+    val body: Int,
+    val button: Int,
+    val done: Boolean,
+    val optional: Boolean,
+    val onClick: () -> Unit,
+)
+
+@Composable
+fun SetupCard(setup: SetupState, actions: ScreenActions) {
+    val scheme = MaterialTheme.colorScheme
+    val steps = buildList {
+        if (setup.restrictedApplies) {
+            add(
+                SetupStep(
+                    R.string.step_restricted_title, R.string.step_restricted_body, R.string.step_restricted_button,
+                    done = !setup.restrictedBlocked, optional = false, onClick = actions.openAppInfo,
+                ),
+            )
+        }
+        add(
+            SetupStep(
+                R.string.step_service_title, R.string.step_service_body, R.string.step_service_button,
+                done = setup.serviceEnabled, optional = false, onClick = actions.openAccessibility,
+            ),
+        )
+        add(
+            SetupStep(
+                R.string.step_player_title, R.string.step_player_body, R.string.step_player_button,
+                done = setup.playerAccess, optional = true, onClick = actions.openNotificationAccess,
+            ),
+        )
+    }
+    val current = steps.indexOfFirst { !it.done }
+    val left = steps.count { !it.done && !it.optional }
+    val numberShapes = listOf(MaterialShapes.Cookie4Sided, MaterialShapes.Sunny, MaterialShapes.Clover4Leaf)
+
+    Surface(
+        shape = RoundedCornerShape(36.dp),
+        color = scheme.primaryContainer,
+        contentColor = scheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(24.dp)) {
+            Text(stringResource(R.string.setup_title), style = MaterialTheme.typography.displaySmallEmphasized)
+            Spacer(Modifier.height(4.dp))
+            Text(stringResource(R.string.setup_steps_left, left), style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.height(20.dp))
+            steps.forEachIndexed { i, step ->
+                val active = i == current
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip((if (step.done) MaterialShapes.Circle else numberShapes[i % numberShapes.size]).toShape())
+                            .background(if (step.done || active) scheme.primary else scheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (step.done) {
+                            Icon(KnobIcons.Check, contentDescription = null, tint = scheme.onPrimary, modifier = Modifier.size(22.dp))
+                        } else {
+                            Text(
+                                "${i + 1}",
+                                style = MaterialTheme.typography.titleMediumEmphasized,
+                                color = if (active) scheme.onPrimary else scheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .padding(top = 8.dp)
+                            .graphicsLayer { alpha = if (step.done || active) 1f else 0.6f },
+                    ) {
+                        Text(
+                            stringResource(step.title) +
+                                if (step.optional) " · " + stringResource(R.string.step_optional) else "",
+                            style = MaterialTheme.typography.titleMediumEmphasized,
+                        )
+                        if (active) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(stringResource(step.body), style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = step.onClick,
+                                shapes = ButtonDefaults.shapes(),
+                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                            ) {
+                                Text(stringResource(step.button), style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.width(8.dp))
+                                Icon(KnobIcons.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+                if (i != steps.lastIndex) Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+}
