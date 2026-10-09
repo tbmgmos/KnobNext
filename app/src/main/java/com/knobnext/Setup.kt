@@ -79,6 +79,27 @@ object Setup {
         return listOf(details, list)
     }
 
+    fun batteryUnrestricted(context: Context): Boolean =
+        context.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
+
+    fun batteryIntents(context: Context): List<Intent> = listOf(
+        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${context.packageName}")),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        appInfoIntent(context),
+    )
+
+    /** Xiaomi / Redmi / POCO keep background apps frozen unless "Autostart" is allowed. */
+    fun autostartIntents(): List<Intent> {
+        val maker = Build.MANUFACTURER.lowercase()
+        if (maker !in setOf("xiaomi", "redmi", "poco")) return emptyList()
+        return listOf(
+            Intent().setComponent(
+                ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+            ),
+            Intent("miui.intent.action.OP_AUTO_START").addCategory(Intent.CATEGORY_DEFAULT),
+        )
+    }
+
     fun appInfoIntent(context: Context): Intent =
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null))
 

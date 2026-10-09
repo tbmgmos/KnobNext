@@ -51,12 +51,16 @@ class ScreenActions(
     val openAppInfo: () -> Unit,
     val openNotificationAccess: () -> Unit,
     val openUrl: (String) -> Unit,
+    val openBattery: () -> Unit,
+    /** Only on phones that need it (Xiaomi family). */
+    val openAutostart: (() -> Unit)?,
 )
 
 data class SetupState(
     val restricted: com.knobnext.Restricted,
     val serviceEnabled: Boolean,
     val playerAccess: Boolean,
+    val batteryUnrestricted: Boolean,
 )
 
 @Composable
@@ -154,6 +158,24 @@ fun KnobScreen(
                                 MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.onTertiary, size = 40,
                             )
                         }
+                    }
+                }
+            }
+            if (setup.serviceEnabled && s.doubleMode != DoubleMode.OFF && !setup.batteryUnrestricted) {
+                item {
+                    InfoCard(
+                        title = stringResource(R.string.battery_title),
+                        body = stringResource(
+                            if (actions.openAutostart != null) R.string.battery_body_xiaomi else R.string.battery_body,
+                        ),
+                        button = stringResource(R.string.battery_button),
+                        onClick = actions.openBattery,
+                        secondary = actions.openAutostart?.let { stringResource(R.string.autostart_button) to it },
+                    ) {
+                        ShapeBadge(
+                            MaterialShapes.Arch, KnobIcons.Lock,
+                            MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.onTertiary, size = 40,
+                        )
                     }
                 }
             }

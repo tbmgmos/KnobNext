@@ -18,7 +18,9 @@ import com.knobnext.ui.SetupState
 
 class MainActivity : ComponentActivity() {
 
-    private var setup by mutableStateOf(SetupState(restricted = Restricted.NOT_APPLICABLE, serviceEnabled = false, playerAccess = false))
+    private var setup by mutableStateOf(SetupState(restricted = Restricted.NOT_APPLICABLE, serviceEnabled = false, playerAccess = false, batteryUnrestricted = true))
+
+    private var stopObserving: () -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -36,7 +38,17 @@ class MainActivity : ComponentActivity() {
                 openFirst(Setup.notificationAccessIntents(this))
             },
             openUrl = { openFirst(listOf(Intent(Intent.ACTION_VIEW, Uri.parse(it)))) },
+            openBattery = { openFirst(Setup.batteryIntents(this)) },
+            openAutostart = Setup.autostartIntents().takeIf { it.isNotEmpty() }?.let { intents -> { openFirst(intents) } },
         )
+        var shouldRun = ScreenOffService.shouldRun(this)
+        stopObserving = prefs.observe {
+            val now = ScreenOffService.shouldRun(this)
+            if (now != shouldRun) {
+                shouldRun = now
+                ScreenOffService.sync(this)
+            }
+        }
         setContent {
             KnobTheme {
                 KnobScreen(setup = setup, versionName = version, prefs = prefs, actions = actions)
@@ -50,7 +62,14 @@ class MainActivity : ComponentActivity() {
             restricted = Setup.restrictedState(this),
             serviceEnabled = Setup.accessibilityEnabled(this) || isServiceRunning(),
             playerAccess = Media(this).hasAccess(),
+            batteryUnrestricted = Setup.batteryUnrestricted(this),
         )
+        ScreenOffService.sync(this)
+    }
+
+    override fun onDestroy() {
+        stopObserving()
+        super.onDestroy()
     }
 
     private fun openFirst(intents: List<Intent>) {

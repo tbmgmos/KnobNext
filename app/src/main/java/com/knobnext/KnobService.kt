@@ -64,11 +64,13 @@ class KnobService : AccessibilityService() {
         volumeWatcher = VolumeWatcher(this, media, handler, ::onVolumeObserved)
         volumeWatcher.start()
         instance = this
+        ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        stopService(android.content.Intent(this, ScreenOffService::class.java))
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             volumeWatcher.stop()

@@ -11,6 +11,7 @@ class KnobTileService : TileService() {
     override fun onClick() {
         val prefs = Prefs(this)
         prefs.enabled = !prefs.enabled
+        ScreenOffService.sync(this)
         render()
     }
 

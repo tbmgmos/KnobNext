@@ -34,6 +34,15 @@
     <string name="step_player_body">Название трека, перемотка и выбор плееров. Нужен доступ к уведомлениям — сами уведомления приложение не читает.</string>
     <string name="step_player_button">Подключить</string>
 
+    <string name="fgs_channel">Жесты при выключенном экране</string>
+    <string name="fgs_title">KnobNext следит за кнопками громкости</string>
+    <string name="fgs_text">Нужно, чтобы двойное нажатие работало при выключенном экране</string>
+    <string name="battery_title">Работа при выключенном экране</string>
+    <string name="battery_body">Android усыпляет приложения при выключенном экране — нажатия доходят с опозданием и склеиваются. Разрешите KnobNext работать без ограничений батареи.</string>
+    <string name="battery_body_xiaomi">Android усыпляет приложения при выключенном экране — нажатия доходят с опозданием и склеиваются. Разрешите KnobNext работать без ограничений батареи, а на Xiaomi ещё включите «Автозапуск» и в «Контроле активности» выберите «Нет ограничений».</string>
+    <string name="battery_button">Снять ограничение</string>
+    <string name="autostart_button">Автозапуск</string>
+
     <string name="access_title">Подключите плеер</string>
     <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд и выбирать, в каких плеерах работают жесты. Сами уведомления приложение не читает.</string>
     <string name="access_button">Дать доступ</string>

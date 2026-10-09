@@ -181,6 +181,7 @@ fun InfoCard(
     body: String,
     button: String,
     onClick: () -> Unit,
+    secondary: Pair<String, () -> Unit>? = null,
     badge: @Composable () -> Unit,
 ) {
     Surface(
@@ -197,7 +198,12 @@ fun InfoCard(
             Spacer(Modifier.height(10.dp))
             Text(body, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(14.dp))
-            FilledTonalButton(onClick = onClick, shapes = ButtonDefaults.shapes()) { Text(button) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = onClick, shapes = ButtonDefaults.shapes()) { Text(button) }
+                secondary?.let { (label, action) ->
+                    TextButton(onClick = action) { Text(label) }
+                }
+            }
         }
     }
 }
