@@ -18,7 +18,7 @@ import com.knobnext.ui.SetupState
 
 class MainActivity : ComponentActivity() {
 
-    private var setup by mutableStateOf(SetupState(restrictedApplies = false, restrictedBlocked = false, serviceEnabled = false, playerAccess = false))
+    private var setup by mutableStateOf(SetupState(restricted = Restricted.NOT_APPLICABLE, serviceEnabled = false, playerAccess = false))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -47,9 +47,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         setup = SetupState(
-            restrictedApplies = Setup.installedFromFile(this),
-            restrictedBlocked = Setup.restrictedSettingsBlocked(this),
-            serviceEnabled = isServiceEnabled(),
+            restricted = Setup.restrictedState(this),
+            serviceEnabled = Setup.accessibilityEnabled(this) || isServiceRunning(),
             playerAccess = Media(this).hasAccess(),
         )
     }
@@ -64,7 +63,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun isServiceEnabled(): Boolean =
+    private fun isServiceRunning(): Boolean =
         getSystemService(AccessibilityManager::class.java)
             .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any {

@@ -23,8 +23,9 @@
     <string name="setup_title">Настройка</string>
     <string name="setup_steps_left">Обязательных шагов осталось: %1$d</string>
     <string name="step_optional">по желанию</string>
+    <string name="step_restricted_if_grey">если переключатель серый</string>
     <string name="step_restricted_title">Снимите ограничение Android</string>
-    <string name="step_restricted_body">KnobNext установлен из файла, поэтому Android пока не даёт включить службу. Откроется «О приложении»: нажмите ⋮ в правом верхнем углу → «Разрешить доступ к настройкам с ограниченным доступом» и вернитесь сюда.</string>
+    <string name="step_restricted_body">Android ограничивает приложения, установленные из файла: переключатель службы серый и написано «Ограниченная настройка». Откройте «О приложении» → ⋮ в правом верхнем углу → «Разрешить доступ к настройкам с ограниченным доступом» и вернитесь сюда.</string>
     <string name="step_restricted_button">Открыть «О приложении»</string>
     <string name="step_service_title">Включите службу KnobNext</string>
     <string name="step_service_body">KnobNext использует службу специальных возможностей только чтобы получать нажатия кнопок громкости. Приложение не видит экран, не читает ввод и не собирает данные. Откроется страница KnobNext — включите переключатель и подтвердите, после этого приложение откроется само.</string>

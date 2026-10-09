@@ -62,6 +62,7 @@ import com.knobnext.Gesture
 import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.R
+import com.knobnext.Restricted
 import com.knobnext.Release
 
 @Composable
@@ -335,7 +336,8 @@ private class SetupStep(
     val body: Int,
     val button: Int,
     val done: Boolean,
-    val optional: Boolean,
+    /** Not required to finish setup; [label] explains when it is needed. */
+    val label: Int? = null,
     val onClick: () -> Unit,
 )
 
@@ -343,29 +345,38 @@ private class SetupStep(
 fun SetupCard(setup: SetupState, actions: ScreenActions) {
     val scheme = MaterialTheme.colorScheme
     val steps = buildList {
-        if (setup.restrictedApplies) {
-            add(
+        when (setup.restricted) {
+            Restricted.NOT_APPLICABLE -> Unit
+            Restricted.ALLOWED, Restricted.BLOCKED -> add(
                 SetupStep(
                     R.string.step_restricted_title, R.string.step_restricted_body, R.string.step_restricted_button,
-                    done = !setup.restrictedBlocked, optional = false, onClick = actions.openAppInfo,
+                    done = setup.restricted == Restricted.ALLOWED, onClick = actions.openAppInfo,
+                ),
+            )
+            // Can't tell on this Android version: show it as a hint that never blocks the next step.
+            Restricted.UNKNOWN -> add(
+                SetupStep(
+                    R.string.step_restricted_title, R.string.step_restricted_body, R.string.step_restricted_button,
+                    done = false, label = R.string.step_restricted_if_grey, onClick = actions.openAppInfo,
                 ),
             )
         }
         add(
             SetupStep(
                 R.string.step_service_title, R.string.step_service_body, R.string.step_service_button,
-                done = setup.serviceEnabled, optional = false, onClick = actions.openAccessibility,
+                done = setup.serviceEnabled, onClick = actions.openAccessibility,
             ),
         )
         add(
             SetupStep(
                 R.string.step_player_title, R.string.step_player_body, R.string.step_player_button,
-                done = setup.playerAccess, optional = true, onClick = actions.openNotificationAccess,
+                done = setup.playerAccess, label = R.string.step_optional, onClick = actions.openNotificationAccess,
             ),
         )
     }
-    val current = steps.indexOfFirst { !it.done }
-    val left = steps.count { !it.done && !it.optional }
+    val current = steps.indexOfFirst { !it.done && it.label == null }
+        .takeIf { it >= 0 } ?: steps.indexOfFirst { !it.done }
+    val left = steps.count { !it.done && it.label == null }
     val numberShapes = listOf(MaterialShapes.Cookie4Sided, MaterialShapes.Sunny, MaterialShapes.Clover4Leaf)
 
     Surface(
@@ -403,26 +414,32 @@ fun SetupCard(setup: SetupState, actions: ScreenActions) {
                     Column(
                         Modifier
                             .weight(1f)
-                            .padding(top = 8.dp)
-                            .graphicsLayer { alpha = if (step.done || active) 1f else 0.6f },
+                            .padding(top = 8.dp),
                     ) {
                         Text(
-                            stringResource(step.title) +
-                                if (step.optional) " · " + stringResource(R.string.step_optional) else "",
+                            stringResource(step.title) + (step.label?.let { " · " + stringResource(it) } ?: ""),
                             style = MaterialTheme.typography.titleMediumEmphasized,
                         )
-                        if (active) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(stringResource(step.body), style = MaterialTheme.typography.bodyMedium)
-                            Spacer(Modifier.height(12.dp))
-                            Button(
-                                onClick = step.onClick,
-                                shapes = ButtonDefaults.shapes(),
-                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
-                            ) {
-                                Text(stringResource(step.button), style = MaterialTheme.typography.titleSmall)
-                                Spacer(Modifier.width(8.dp))
-                                Icon(KnobIcons.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
+                        if (!step.done) {
+                            if (active || step.label != null && i < current) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(stringResource(step.body), style = MaterialTheme.typography.bodyMedium)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            if (active) {
+                                Button(
+                                    onClick = step.onClick,
+                                    shapes = ButtonDefaults.shapes(),
+                                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                                ) {
+                                    Text(stringResource(step.button), style = MaterialTheme.typography.titleSmall)
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(KnobIcons.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
+                                }
+                            } else {
+                                FilledTonalButton(onClick = step.onClick, shapes = ButtonDefaults.shapes()) {
+                                    Text(stringResource(step.button))
+                                }
                             }
                         }
                     }

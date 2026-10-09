@@ -11,6 +11,8 @@ import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
 
+enum class Restricted { NOT_APPLICABLE, BLOCKED, ALLOWED, UNKNOWN }
+
 object Setup {
     private const val OP_RESTRICTED_SETTINGS = "android:access_restricted_settings"
     private const val ACTION_ACCESSIBILITY_DETAILS = "android.settings.ACCESSIBILITY_DETAILS_SETTINGS"
@@ -32,15 +34,32 @@ object Setup {
             source == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
     }
 
-    fun restrictedSettingsBlocked(context: Context): Boolean {
-        if (!installedFromFile(context)) return false
-        return try {
+    /**
+     * The app-op behind "Allow restricted settings". Its modes differ between Android versions and
+     * vendors, so anything other than a clear "errored/ignored" or "allowed" is reported as UNKNOWN
+     * and the UI treats the step as a hint instead of a blocker.
+     */
+    fun restrictedState(context: Context): Restricted {
+        if (!installedFromFile(context)) return Restricted.NOT_APPLICABLE
+        val mode = try {
             context.getSystemService(AppOpsManager::class.java)
-                .unsafeCheckOpNoThrow(OP_RESTRICTED_SETTINGS, Process.myUid(), context.packageName) !=
-                AppOpsManager.MODE_ALLOWED
+                .unsafeCheckOpNoThrow(OP_RESTRICTED_SETTINGS, Process.myUid(), context.packageName)
         } catch (_: Exception) {
-            true
+            return Restricted.UNKNOWN
         }
+        return when (mode) {
+            AppOpsManager.MODE_ALLOWED -> Restricted.ALLOWED
+            AppOpsManager.MODE_ERRORED, AppOpsManager.MODE_IGNORED -> Restricted.BLOCKED
+            else -> Restricted.UNKNOWN
+        }
+    }
+
+    /** Enabled by the user in system settings (even if the service is still starting up). */
+    fun accessibilityEnabled(context: Context): Boolean {
+        val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            ?: return false
+        val own = ComponentName(context, KnobService::class.java)
+        return enabled.split(':').any { ComponentName.unflattenFromString(it) == own }
     }
 
     /** The page with KnobNext's own switch, or the accessibility list with KnobNext highlighted. */

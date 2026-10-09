@@ -53,8 +53,7 @@ class ScreenActions(
 )
 
 data class SetupState(
-    val restrictedApplies: Boolean,
-    val restrictedBlocked: Boolean,
+    val restricted: com.knobnext.Restricted,
     val serviceEnabled: Boolean,
     val playerAccess: Boolean,
 )
