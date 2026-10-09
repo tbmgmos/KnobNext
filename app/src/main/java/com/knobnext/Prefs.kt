@@ -5,18 +5,22 @@ import android.content.SharedPreferences
 
 enum class Action { NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK }
 
-enum class Gesture(val key: String, val screenOff: Boolean) {
+enum class Gesture(val key: String, val double: Boolean) {
     HOLD_UP("action_hold_up", false),
     HOLD_DOWN("action_hold_down", false),
     BOTH("action_both", false),
-    DOUBLE_UP_OFF("action_double_up_off", true),
-    DOUBLE_DOWN_OFF("action_double_down_off", true),
+    DOUBLE_UP("action_double_up_off", true),
+    DOUBLE_DOWN("action_double_down_off", true),
 }
+
+/** When a quick double press of a volume key counts as a gesture. */
+enum class DoubleMode { OFF, SCREEN_OFF, ALWAYS }
 
 data class Settings(
     val enabled: Boolean,
     val onlyWhenPlaying: Boolean,
-    val screenOff: Boolean,
+    val doubleMode: DoubleMode,
+    val lastEvent: String?,
     val headphonesOnly: Boolean,
     val pocketGuard: Boolean,
     val vibrate: Boolean,
@@ -39,9 +43,19 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("only_when_playing", true)
         set(v) = sp.edit().putBoolean("only_when_playing", v).apply()
 
-    var screenOff: Boolean
-        get() = sp.getBoolean("screen_off", true)
-        set(v) = sp.edit().putBoolean("screen_off", v).apply()
+    var doubleMode: DoubleMode
+        get() {
+            val stored = sp.getString("double_mode", null)
+            DoubleMode.entries.firstOrNull { it.name == stored }?.let { return it }
+            // Version 3.0 had a single "screen off" switch.
+            return if (sp.getBoolean("screen_off", true)) DoubleMode.SCREEN_OFF else DoubleMode.OFF
+        }
+        set(v) = sp.edit().putString("double_mode", v.name).apply()
+
+    /** Human-readable trace of the last double-press detection, shown in settings for troubleshooting. */
+    var lastEvent: String?
+        get() = sp.getString("last_event", null)
+        set(v) = sp.edit().putString("last_event", v).apply()
 
     var headphonesOnly: Boolean
         get() = sp.getBoolean("headphones_only", false)
@@ -90,8 +104,8 @@ class Prefs(context: Context) {
         // Defaults, honoring the "swap" / "combo" switches of version 2.
         val swap = sp.getBoolean("swap", false)
         return when (g) {
-            Gesture.HOLD_UP, Gesture.DOUBLE_UP_OFF -> if (swap) Action.PREVIOUS else Action.NEXT
-            Gesture.HOLD_DOWN, Gesture.DOUBLE_DOWN_OFF -> if (swap) Action.NEXT else Action.PREVIOUS
+            Gesture.HOLD_UP, Gesture.DOUBLE_UP -> if (swap) Action.PREVIOUS else Action.NEXT
+            Gesture.HOLD_DOWN, Gesture.DOUBLE_DOWN -> if (swap) Action.NEXT else Action.PREVIOUS
             Gesture.BOTH -> if (sp.getBoolean("combo_play_pause", true)) Action.PLAY_PAUSE else Action.NONE
         }
     }
@@ -101,7 +115,8 @@ class Prefs(context: Context) {
     fun snapshot() = Settings(
         enabled = enabled,
         onlyWhenPlaying = onlyWhenPlaying,
-        screenOff = screenOff,
+        doubleMode = doubleMode,
+        lastEvent = lastEvent,
         headphonesOnly = headphonesOnly,
         pocketGuard = pocketGuard,
         vibrate = vibrate,

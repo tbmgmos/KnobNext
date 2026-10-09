@@ -45,15 +45,17 @@ class KnobService : AccessibilityService() {
         }
     }
 
-    // ---- Screen off: the system still changes the volume and announces it ----
+    // ---- Double press: detected from volume change broadcasts. This is the only signal available with
+    // the screen off, where Android does not pass volume keys to accessibility services at all. ----
 
-    private var offDirection = 0
-    private var offCount = 0
-    private var offLastAt = 0L
-    private var offBaseVolume = 0
+    private var dblDirection = 0
+    private var dblCount = 0
+    private var dblLastAt = 0L
+    private var dblBaseVolume = 0
     private var rampUntil = 0L
     private var ignoreVolumeUntil = 0L
-    private val offFire = Runnable { fireScreenOffGesture() }
+    private var lastChange = Triple(-1, -1, 0L)
+    private val dblFire = Runnable { fireDoublePress() }
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -61,7 +63,12 @@ class KnobService : AccessibilityService() {
             val value = intent.getIntExtra(EXTRA_VALUE, -1)
             val previous = intent.getIntExtra(EXTRA_PREV_VALUE, -1)
             if (value < 0 || previous < 0 || value == previous) return
-            onScreenOffVolumeChange(if (value > previous) 1 else -1, previous)
+            // Some builds announce the same change twice; count it once.
+            val now = SystemClock.elapsedRealtime()
+            val (lastPrev, lastValue, lastAt) = lastChange
+            lastChange = Triple(previous, value, now)
+            if (previous == lastPrev && value == lastValue && now - lastAt < DUPLICATE_MS) return
+            onVolumeChange(if (value > previous) 1 else -1, previous, value, now)
         }
     }
 
@@ -155,54 +162,66 @@ class KnobService : AccessibilityService() {
      * Two quick presses in the same direction = gesture. A third change right after means the key is
      * being held (auto-repeat) to ramp the volume, so the pending gesture is cancelled.
      */
-    private fun onScreenOffVolumeChange(direction: Int, previous: Int) {
-        val now = SystemClock.elapsedRealtime()
+    private fun onVolumeChange(direction: Int, previous: Int, value: Int, now: Long) {
         if (now < ignoreVolumeUntil) return
-        if (power.isInteractive || !prefs.enabled || !prefs.screenOff) {
-            resetScreenOff()
+        val mode = prefs.doubleMode
+        val screenOn = power.isInteractive
+        if (!prefs.enabled || mode == DoubleMode.OFF || (mode == DoubleMode.SCREEN_OFF && screenOn)) {
+            resetDouble()
             return
         }
+        log(getString(R.string.log_volume, if (direction > 0) "↑" else "↓", previous, value))
         if (now < rampUntil) {
             rampUntil = now + RAMP_QUIET_MS
             return
         }
-        if (offCount > 0 && direction == offDirection && now - offLastAt <= DOUBLE_PRESS_MS) {
-            offCount++
-            offLastAt = now
-            if (offCount == 2) {
-                handler.postDelayed(offFire, CONFIRM_MS)
+        if (dblCount > 0 && direction == dblDirection && now - dblLastAt <= DOUBLE_PRESS_MS) {
+            dblCount++
+            dblLastAt = now
+            if (dblCount == 2) {
+                handler.postDelayed(dblFire, CONFIRM_MS)
             } else {
-                resetScreenOff()
+                resetDouble()
                 rampUntil = now + RAMP_QUIET_MS
+                log(getString(R.string.log_held))
             }
         } else {
-            handler.removeCallbacks(offFire)
-            offDirection = direction
-            offCount = 1
-            offLastAt = now
-            offBaseVolume = previous
+            handler.removeCallbacks(dblFire)
+            dblDirection = direction
+            dblCount = 1
+            dblLastAt = now
+            dblBaseVolume = previous
             if (prefs.pocketGuard) proximity.arm()
         }
     }
 
-    private fun fireScreenOffGesture() {
-        val direction = offDirection
-        val base = offBaseVolume
-        resetScreenOff()
-        val action = prefs.action(if (direction > 0) Gesture.DOUBLE_UP_OFF else Gesture.DOUBLE_DOWN_OFF)
-        if (action == Action.NONE) return
-        val target = media.resolve(prefs) ?: return
-        if (target.mode == Mode.COMBO_ONLY && action != Action.PLAY_PAUSE) return
-        if (prefs.pocketGuard && proximity.isCovered()) return
+    private fun fireDoublePress() {
+        val gesture = if (dblDirection > 0) Gesture.DOUBLE_UP else Gesture.DOUBLE_DOWN
+        val base = dblBaseVolume
+        resetDouble()
+        val name = getString(if (gesture == Gesture.DOUBLE_UP) R.string.gesture_double_up else R.string.gesture_double_down)
+        val action = prefs.action(gesture)
+        if (action == Action.NONE) return log(getString(R.string.log_no_action, name))
+        val target = media.resolve(prefs)
+        if (target == null || (target.mode == Mode.COMBO_ONLY && action != Action.PLAY_PAUSE)) {
+            return log(getString(R.string.log_not_playing, name))
+        }
+        if (prefs.pocketGuard && proximity.isCovered()) return log(getString(R.string.log_pocket, name))
         ignoreVolumeUntil = SystemClock.elapsedRealtime() + IGNORE_OWN_CHANGE_MS
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0)
         fire(action, target.controller)
+        log(getString(R.string.log_fired, name, getString(com.knobnext.ui.actionLabel(action))))
     }
 
-    private fun resetScreenOff() {
-        handler.removeCallbacks(offFire)
-        offCount = 0
-        offDirection = 0
+    private fun resetDouble() {
+        handler.removeCallbacks(dblFire)
+        dblCount = 0
+        dblDirection = 0
+    }
+
+    private fun log(message: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())
+        prefs.lastEvent = "$time · $message"
     }
 
     private fun fire(action: Action, controller: MediaController?) {
@@ -218,6 +237,7 @@ class KnobService : AccessibilityService() {
         const val EXTRA_VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE"
         const val EXTRA_PREV_VALUE = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE"
 
+        const val DUPLICATE_MS = 120L
         const val DOUBLE_PRESS_MS = 450L
         const val CONFIRM_MS = 250L
         const val RAMP_QUIET_MS = 600L

@@ -327,8 +327,8 @@ fun gestureLabel(g: Gesture) = when (g) {
     Gesture.HOLD_UP -> R.string.gesture_hold_up
     Gesture.HOLD_DOWN -> R.string.gesture_hold_down
     Gesture.BOTH -> R.string.gesture_both
-    Gesture.DOUBLE_UP_OFF -> R.string.gesture_double_up_off
-    Gesture.DOUBLE_DOWN_OFF -> R.string.gesture_double_down_off
+    Gesture.DOUBLE_UP -> R.string.gesture_double_up
+    Gesture.DOUBLE_DOWN -> R.string.gesture_double_down
 }
 
 private class SetupStep(

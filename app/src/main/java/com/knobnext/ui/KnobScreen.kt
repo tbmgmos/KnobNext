@@ -34,6 +34,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.knobnext.DoubleMode
 import com.knobnext.Gesture
 import com.knobnext.Media
 import com.knobnext.NowPlaying
@@ -188,13 +189,13 @@ private fun GesturesSection(s: com.knobnext.Settings, onEdit: (Gesture) -> Unit)
                         shape = shape(i),
                         title = stringResource(gestureLabel(g)),
                         subtitle = stringResource(actionLabel(action)),
-                        enabled = !g.screenOff || s.screenOff,
+                        enabled = !g.double || s.doubleMode != DoubleMode.OFF,
                         onClick = { onEdit(g) },
                         leading = {
                             ShapeBadge(
                                 shapes[i], actionIcon(action),
-                                if (g.screenOff) scheme.tertiaryContainer else scheme.secondaryContainer,
-                                if (g.screenOff) scheme.onTertiaryContainer else scheme.onSecondaryContainer,
+                                if (g.double) scheme.tertiaryContainer else scheme.secondaryContainer,
+                                if (g.double) scheme.onTertiaryContainer else scheme.onSecondaryContainer,
                             )
                         },
                     )
@@ -230,10 +231,7 @@ private fun SettingsSection(s: com.knobnext.Settings, prefs: Prefs) {
                     shape(1), stringResource(R.string.pref_only_when_playing), s.onlyWhenPlaying, { prefs.onlyWhenPlaying = it },
                     subtitle = stringResource(R.string.pref_only_when_playing_hint), enabled = s.enabled,
                 )
-                SwitchRow(
-                    shape(2), stringResource(R.string.pref_screen_off), s.screenOff, { prefs.screenOff = it },
-                    subtitle = stringResource(R.string.pref_screen_off_hint), enabled = s.enabled,
-                )
+                DoubleModeRow(shape(2), s.doubleMode, { prefs.doubleMode = it }, s.lastEvent, s.enabled)
                 SwitchRow(
                     shape(3), stringResource(R.string.pref_headphones), s.headphonesOnly, { prefs.headphonesOnly = it },
                     subtitle = stringResource(R.string.pref_headphones_hint), enabled = s.enabled,

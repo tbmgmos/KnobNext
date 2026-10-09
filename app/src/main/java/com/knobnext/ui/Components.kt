@@ -18,6 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -38,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
+import com.knobnext.DoubleMode
 import com.knobnext.Prefs
 import com.knobnext.R
 
@@ -238,4 +242,54 @@ fun AppIcon(icon: ImageBitmap?, size: Int = 40) {
 @Composable
 fun OneLine(text: String, style: androidx.compose.ui.text.TextStyle, color: Color = Color.Unspecified) {
     Text(text, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+@Composable
+fun DoubleModeRow(
+    shape: Shape,
+    mode: DoubleMode,
+    onChange: (DoubleMode) -> Unit,
+    lastEvent: String?,
+    enabled: Boolean,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val options = listOf(
+        DoubleMode.OFF to R.string.double_mode_off,
+        DoubleMode.SCREEN_OFF to R.string.double_mode_screen_off,
+        DoubleMode.ALWAYS to R.string.double_mode_always,
+    )
+    Surface(shape = shape, color = scheme.surfaceBright, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .graphicsLayer { alpha = if (enabled) 1f else 0.45f },
+        ) {
+            Text(stringResource(R.string.pref_double), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.pref_double_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                options.forEachIndexed { i, (value, label) ->
+                    SegmentedButton(
+                        selected = mode == value,
+                        onClick = { onChange(value) },
+                        enabled = enabled,
+                        shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                        label = { OneLine(stringResource(label), MaterialTheme.typography.labelLarge) },
+                    )
+                }
+            }
+            if (mode != DoubleMode.OFF) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    stringResource(R.string.last_event, lastEvent ?: stringResource(R.string.last_event_none)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
