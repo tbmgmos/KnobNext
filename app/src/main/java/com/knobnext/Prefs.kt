@@ -4,20 +4,35 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
-enum class Action { NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN }
+enum class Action {
+    NONE, NEXT, PREVIOUS, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
+    ANNOUNCE, LIKE, SHUFFLE, REPEAT, SLEEP_TIMER, OPEN_PLAYER;
 
-enum class GestureGroup { KEYS, DOUBLE, BACK_TAP }
+    /** Actions that make sense when nothing is playing (they start or prepare playback). */
+    val worksWhenIdle: Boolean get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER
+}
+
+enum class GestureGroup { KEYS, SEQUENCE, MOTION }
 
 enum class Gesture(val key: String, val group: GestureGroup, val default: Action) {
     HOLD_UP("action_hold_up", GestureGroup.KEYS, Action.NEXT),
     HOLD_DOWN("action_hold_down", GestureGroup.KEYS, Action.PREVIOUS),
+    LONG_HOLD_UP("action_long_hold_up", GestureGroup.KEYS, Action.NONE),
+    LONG_HOLD_DOWN("action_long_hold_down", GestureGroup.KEYS, Action.NONE),
     TAP_HOLD_UP("action_tap_hold_up", GestureGroup.KEYS, Action.VOLUME_UP),
     TAP_HOLD_DOWN("action_tap_hold_down", GestureGroup.KEYS, Action.VOLUME_DOWN),
     BOTH("action_both", GestureGroup.KEYS, Action.PLAY_PAUSE),
-    DOUBLE_UP("action_double_up_off", GestureGroup.DOUBLE, Action.NEXT),
-    DOUBLE_DOWN("action_double_down_off", GestureGroup.DOUBLE, Action.PREVIOUS),
-    BACK_TAP_2("action_back_tap_2", GestureGroup.BACK_TAP, Action.NEXT),
-    BACK_TAP_3("action_back_tap_3", GestureGroup.BACK_TAP, Action.PREVIOUS),
+    BOTH_HOLD("action_both_hold", GestureGroup.KEYS, Action.ANNOUNCE),
+    DOUBLE_UP("action_double_up_off", GestureGroup.SEQUENCE, Action.NEXT),
+    DOUBLE_DOWN("action_double_down_off", GestureGroup.SEQUENCE, Action.PREVIOUS),
+    TRIPLE_UP("action_triple_up", GestureGroup.SEQUENCE, Action.SEEK_FORWARD),
+    TRIPLE_DOWN("action_triple_down", GestureGroup.SEQUENCE, Action.SEEK_BACK),
+    UP_DOWN("action_up_down", GestureGroup.SEQUENCE, Action.PLAY_PAUSE),
+    DOWN_UP("action_down_up", GestureGroup.SEQUENCE, Action.NONE),
+    BACK_TAP_2("action_back_tap_2", GestureGroup.MOTION, Action.NEXT),
+    BACK_TAP_3("action_back_tap_3", GestureGroup.MOTION, Action.PREVIOUS),
+    TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
+    WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
 }
 
 /** How hard the back has to be tapped; values are high-pass acceleration thresholds in m/s². */
@@ -41,6 +56,11 @@ data class Settings(
     val checkUpdates: Boolean,
     val backTap: Boolean,
     val tapSensitivity: TapSensitivity,
+    val flip: Boolean,
+    val twist: Boolean,
+    val wave: Boolean,
+    val sleepMinutes: Int,
+    val sleepUntil: Long,
     val actions: Map<Gesture, Action>,
 )
 
@@ -109,6 +129,32 @@ class Prefs(context: Context) {
             ?: TapSensitivity.MEDIUM
         set(v) = sp.edit().putString("tap_sensitivity", v.name).apply()
 
+    var flip: Boolean
+        get() = sp.getBoolean("flip", false)
+        set(v) = sp.edit().putBoolean("flip", v).apply()
+
+    var twist: Boolean
+        get() = sp.getBoolean("twist", false)
+        set(v) = sp.edit().putBoolean("twist", v).apply()
+
+    var wave: Boolean
+        get() = sp.getBoolean("wave", false)
+        set(v) = sp.edit().putBoolean("wave", v).apply()
+
+    var sleepMinutes: Int
+        get() = sp.getInt("sleep_minutes", 30)
+        set(v) = sp.edit().putInt("sleep_minutes", v).apply()
+
+    /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
+    var sleepUntil: Long
+        get() = sp.getLong("sleep_until", 0L)
+        set(v) = sp.edit().putLong("sleep_until", v).apply()
+
+    /** Most recent player package, for "open player" when nothing is playing. */
+    var lastPlayer: String?
+        get() = sp.getString("last_player", null)
+        set(v) = sp.edit().putString("last_player", v).apply()
+
     var returnRequestedAt: Long
         get() = sp.getLong("return_requested_at", 0L)
         set(v) = sp.edit().putLong("return_requested_at", v).apply()
@@ -149,6 +195,11 @@ class Prefs(context: Context) {
         checkUpdates = checkUpdates,
         backTap = backTap,
         tapSensitivity = tapSensitivity,
+        flip = flip,
+        twist = twist,
+        wave = wave,
+        sleepMinutes = sleepMinutes,
+        sleepUntil = sleepUntil,
         actions = Gesture.entries.associateWith(::action),
     )
 

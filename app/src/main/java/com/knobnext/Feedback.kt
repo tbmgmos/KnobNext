@@ -21,6 +21,18 @@ class Haptics(context: Context) {
         vibrator.vibrate(effect(action))
     }
 
+    /** A light tick: "you've reached the long-hold threshold, keep holding for the second action". */
+    fun tick() {
+        if (vibrator?.hasVibrator() != true) return
+        vibrator.vibrate(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+            } else {
+                VibrationEffect.createOneShot(12, VibrationEffect.DEFAULT_AMPLITUDE)
+            },
+        )
+    }
+
     private fun effect(action: Action): VibrationEffect {
         val seek = VibrationEffect.createWaveform(longArrayOf(0, 18, 70, 18, 70, 18), -1)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

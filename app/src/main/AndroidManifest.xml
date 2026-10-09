@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Keeps the CPU awake for a while after "flip to pause", to notice the phone being turned back. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Lets the app show names and icons of players (package visibility on Android 11+). -->
     <queries>
@@ -14,6 +16,10 @@
         </intent>
         <intent>
             <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+        <!-- Text-to-speech engine for the "announce track" action. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
 
@@ -64,6 +70,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Detects double presses of the volume keys while the screen is off to control media playback" />
         </service>
+
+        <receiver
+            android:name=".SleepReceiver"
+            android:exported="false" />
 
         <service
             android:name=".KnobTileService"

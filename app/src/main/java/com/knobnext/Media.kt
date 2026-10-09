@@ -64,6 +64,7 @@ class Media(private val context: Context) {
         val filtering = prefs.appFilter && hasAccess()
         val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all)
         if (filtering && controller == null) return null
+        controller?.packageName?.let { if (it != prefs.lastPlayer) prefs.lastPlayer = it }
 
         // isMusicActive is the ground truth that sound is audible; some players report stale states.
         val playing = audio.isMusicActive && (!filtering || controller?.isPlaying() == true)
@@ -86,6 +87,8 @@ class Media(private val context: Context) {
             Action.SEEK_BACK -> seekBy(controller, -SEEK_STEP_MS) ?: sendKey(KeyEvent.KEYCODE_MEDIA_REWIND)
             Action.VOLUME_UP -> volumeStep(AudioManager.ADJUST_RAISE)
             Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
+            // Handled by Extras: they need the service (speech, alarms, launching apps).
+            Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER -> Unit
         }
     }
 
@@ -107,7 +110,7 @@ class Media(private val context: Context) {
         audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
     }
 
-    private fun sendKey(code: Int) {
+    fun sendKey(code: Int) {
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
     }

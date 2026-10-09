@@ -19,6 +19,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -288,7 +290,7 @@ fun ActionDialog(gesture: Gesture, current: Action, onPick: (Action) -> Unit, on
         onDismissRequest = onDismiss,
         title = { Text(stringResource(gestureLabel(gesture))) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Action.entries.forEach { a ->
                     Row(
                         Modifier
@@ -320,6 +322,12 @@ fun actionLabel(a: Action) = when (a) {
     Action.SEEK_BACK -> R.string.action_seek_back
     Action.VOLUME_UP -> R.string.action_volume_up
     Action.VOLUME_DOWN -> R.string.action_volume_down
+    Action.ANNOUNCE -> R.string.action_announce
+    Action.LIKE -> R.string.action_like
+    Action.SHUFFLE -> R.string.action_shuffle
+    Action.REPEAT -> R.string.action_repeat
+    Action.SLEEP_TIMER -> R.string.action_sleep
+    Action.OPEN_PLAYER -> R.string.action_open_player
 }
 
 fun actionIcon(a: Action) = when (a) {
@@ -331,11 +339,26 @@ fun actionIcon(a: Action) = when (a) {
     Action.SEEK_BACK -> KnobIcons.FastRewind
     Action.VOLUME_UP -> KnobIcons.VolumeUp
     Action.VOLUME_DOWN -> KnobIcons.VolumeDown
+    Action.ANNOUNCE -> KnobIcons.RecordVoice
+    Action.LIKE -> KnobIcons.Favorite
+    Action.SHUFFLE -> KnobIcons.Shuffle
+    Action.REPEAT -> KnobIcons.Repeat
+    Action.SLEEP_TIMER -> KnobIcons.Bedtime
+    Action.OPEN_PLAYER -> KnobIcons.MusicNote
 }
 
 fun gestureLabel(g: Gesture) = when (g) {
     Gesture.HOLD_UP -> R.string.gesture_hold_up
     Gesture.HOLD_DOWN -> R.string.gesture_hold_down
+    Gesture.LONG_HOLD_UP -> R.string.gesture_long_hold_up
+    Gesture.LONG_HOLD_DOWN -> R.string.gesture_long_hold_down
+    Gesture.BOTH_HOLD -> R.string.gesture_both_hold
+    Gesture.TRIPLE_UP -> R.string.gesture_triple_up
+    Gesture.TRIPLE_DOWN -> R.string.gesture_triple_down
+    Gesture.UP_DOWN -> R.string.gesture_up_down
+    Gesture.DOWN_UP -> R.string.gesture_down_up
+    Gesture.TWIST -> R.string.gesture_twist
+    Gesture.WAVE -> R.string.gesture_wave
     Gesture.BOTH -> R.string.gesture_both
     Gesture.TAP_HOLD_UP -> R.string.gesture_tap_hold_up
     Gesture.TAP_HOLD_DOWN -> R.string.gesture_tap_hold_down
