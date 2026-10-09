@@ -220,12 +220,13 @@ private fun StatusHero(enabled: Boolean, onOpen: () -> Unit) {
         contentColor = content,
         modifier = Modifier.fillMaxWidth(),
     ) {
+        val popIn = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
         Column(Modifier.padding(24.dp)) {
             Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
                 AnimatedContent(
                     targetState = enabled,
                     transitionSpec = {
-                        (scaleIn(MaterialTheme.motionScheme.fastSpatialSpec()) + fadeIn())
+                        (scaleIn(popIn) + fadeIn())
                             .togetherWith(scaleOut() + fadeOut())
                     },
                     label = "heroShape",
