@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// CI passes the release keystore through env vars; without them release falls back to the debug key.
+val releaseKeystore: String? = System.getenv("KNOB_KEYSTORE")?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "com.knobnext"
     compileSdk = 37
@@ -11,8 +14,19 @@ android {
         applicationId = "com.knobnext"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = providers.gradleProperty("versionCode").orNull?.toInt() ?: 3
+        versionName = providers.gradleProperty("versionName").orNull ?: "3.0.0-local"
+    }
+
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("KNOB_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KNOB_KEY_ALIAS")
+                keyPassword = System.getenv("KNOB_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -20,7 +34,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
 
@@ -41,4 +55,5 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }

@@ -1,51 +1,95 @@
 package com.knobnext
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
+import android.media.session.MediaController
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
 class KnobService : AccessibilityService() {
 
     private lateinit var audio: AudioManager
+    private lateinit var power: PowerManager
     private lateinit var prefs: Prefs
+    private lateinit var media: Media
+    private lateinit var haptics: Haptics
+    private lateinit var proximity: ProximityProbe
     private val handler = Handler(Looper.getMainLooper())
+
+    // Without notification access we can't see a paused player, so remember our own last command.
+    private var lastCommandAt = 0L
+
+    // ---- Screen on: key events from the accessibility framework ----
 
     // Volume keys whose DOWN we consumed; their UP must be consumed too.
     private val presses = HashMap<Int, Press>()
 
-    // Keep intercepting for a while after our own media command, so a paused player
-    // (isMusicActive == false) can still be resumed with the same buttons.
-    private var lastMediaCommandAt = 0L
-
-    private inner class Press(val keyCode: Int) : Runnable {
+    private inner class Press(val keyCode: Int, val controller: MediaController?) : Runnable {
         var handled = false
 
         override fun run() {
             handled = true
-            val next = (keyCode == KeyEvent.KEYCODE_VOLUME_UP) != prefs.swap
-            sendMediaKey(if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            val gesture = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) Gesture.HOLD_UP else Gesture.HOLD_DOWN
+            fire(prefs.action(gesture), controller)
+        }
+    }
+
+    // ---- Screen off: the system still changes the volume and announces it ----
+
+    private var offDirection = 0
+    private var offCount = 0
+    private var offLastAt = 0L
+    private var offBaseVolume = 0
+    private var rampUntil = 0L
+    private var ignoreVolumeUntil = 0L
+    private val offFire = Runnable { fireScreenOffGesture() }
+
+    private val volumeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.getIntExtra(EXTRA_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
+            val value = intent.getIntExtra(EXTRA_VALUE, -1)
+            val previous = intent.getIntExtra(EXTRA_PREV_VALUE, -1)
+            if (value < 0 || previous < 0 || value == previous) return
+            onScreenOffVolumeChange(if (value > previous) 1 else -1, previous)
         }
     }
 
     override fun onServiceConnected() {
         audio = getSystemService(AudioManager::class.java)
+        power = getSystemService(PowerManager::class.java)
         prefs = Prefs(this)
+        media = Media(this)
+        haptics = Haptics(this)
+        proximity = ProximityProbe(this)
+        val filter = IntentFilter(VOLUME_CHANGED_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(volumeReceiver, filter, RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(volumeReceiver, filter)
+        }
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        if (::prefs.isInitialized) {
+            unregisterReceiver(volumeReceiver)
+            proximity.release()
+        }
+        super.onDestroy()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
     override fun onInterrupt() = Unit
-
-    override fun onDestroy() {
-        handler.removeCallbacksAndMessages(null)
-        super.onDestroy()
-    }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
@@ -61,21 +105,26 @@ class KnobService : AccessibilityService() {
         if (presses.containsKey(code)) return true
 
         val other = presses[otherKey(code)]
-        if (other != null && prefs.comboPlayPause) {
+        val bothAction = prefs.action(Gesture.BOTH)
+        if (other != null && bothAction != Action.NONE) {
             if (!other.handled) {
                 handler.removeCallbacks(other)
                 other.handled = true
-                sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                fire(bothAction, other.controller)
             }
-            presses[code] = Press(code).apply { handled = true }
+            presses[code] = Press(code, other.controller).apply { handled = true }
             return true
         }
 
-        if (repeatCount > 0 || !shouldIntercept()) return false
+        if (repeatCount > 0) return false
+        val hold = prefs.action(if (code == KeyEvent.KEYCODE_VOLUME_UP) Gesture.HOLD_UP else Gesture.HOLD_DOWN)
+        if (hold == Action.NONE && bothAction == Action.NONE) return false
+        val target = media.resolve(prefs, lastCommandAt) ?: return false
 
-        val press = Press(code)
+        if (prefs.pocketGuard) proximity.arm()
+        val press = Press(code, target.controller)
         presses[code] = press
-        handler.postDelayed(press, prefs.longPressMs.toLong())
+        if (hold != Action.NONE) handler.postDelayed(press, prefs.longPressMs.toLong())
         return true
     }
 
@@ -90,30 +139,79 @@ class KnobService : AccessibilityService() {
         return true
     }
 
-    private fun shouldIntercept(): Boolean {
-        if (!prefs.enabled) return false
-        when (audio.mode) {
-            AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> return false
-        }
-        if (!prefs.onlyWhenPlaying) return true
-        return audio.isMusicActive ||
-            SystemClock.elapsedRealtime() - lastMediaCommandAt < RESUME_WINDOW_MS
-    }
-
-    private fun sendMediaKey(code: Int) {
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
-        lastMediaCommandAt = SystemClock.elapsedRealtime()
-        if (prefs.vibrate) {
-            getSystemService(Vibrator::class.java)
-                ?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
-        }
-    }
-
     private fun otherKey(code: Int) =
         if (code == KeyEvent.KEYCODE_VOLUME_UP) KeyEvent.KEYCODE_VOLUME_DOWN else KeyEvent.KEYCODE_VOLUME_UP
 
-    companion object {
-        private const val RESUME_WINDOW_MS = 5 * 60 * 1000L
+    /**
+     * Two quick presses in the same direction = gesture. A third change right after means the key is
+     * being held (auto-repeat) to ramp the volume, so the pending gesture is cancelled.
+     */
+    private fun onScreenOffVolumeChange(direction: Int, previous: Int) {
+        val now = SystemClock.elapsedRealtime()
+        if (now < ignoreVolumeUntil) return
+        if (power.isInteractive || !prefs.enabled || !prefs.screenOff) {
+            resetScreenOff()
+            return
+        }
+        if (now < rampUntil) {
+            rampUntil = now + RAMP_QUIET_MS
+            return
+        }
+        if (offCount > 0 && direction == offDirection && now - offLastAt <= DOUBLE_PRESS_MS) {
+            offCount++
+            offLastAt = now
+            if (offCount == 2) {
+                handler.postDelayed(offFire, CONFIRM_MS)
+            } else {
+                resetScreenOff()
+                rampUntil = now + RAMP_QUIET_MS
+            }
+        } else {
+            handler.removeCallbacks(offFire)
+            offDirection = direction
+            offCount = 1
+            offLastAt = now
+            offBaseVolume = previous
+            if (prefs.pocketGuard) proximity.arm()
+        }
+    }
+
+    private fun fireScreenOffGesture() {
+        val direction = offDirection
+        val base = offBaseVolume
+        resetScreenOff()
+        val action = prefs.action(if (direction > 0) Gesture.DOUBLE_UP_OFF else Gesture.DOUBLE_DOWN_OFF)
+        if (action == Action.NONE) return
+        val target = media.resolve(prefs, lastCommandAt) ?: return
+        if (prefs.pocketGuard && proximity.isCovered()) return
+        ignoreVolumeUntil = SystemClock.elapsedRealtime() + IGNORE_OWN_CHANGE_MS
+        audio.setStreamVolume(AudioManager.STREAM_MUSIC, base, 0)
+        fire(action, target.controller)
+    }
+
+    private fun resetScreenOff() {
+        handler.removeCallbacks(offFire)
+        offCount = 0
+        offDirection = 0
+    }
+
+    private fun fire(action: Action, controller: MediaController?) {
+        if (action == Action.NONE) return
+        if (prefs.pocketGuard && proximity.isCovered()) return
+        media.perform(action, controller)
+        lastCommandAt = SystemClock.elapsedRealtime()
+        if (prefs.vibrate) haptics.play(action)
+    }
+
+    private companion object {
+        const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+        const val EXTRA_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
+        const val EXTRA_VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE"
+        const val EXTRA_PREV_VALUE = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE"
+
+        const val DOUBLE_PRESS_MS = 450L
+        const val CONFIRM_MS = 250L
+        const val RAMP_QUIET_MS = 600L
+        const val IGNORE_OWN_CHANGE_MS = 400L
     }
 }

@@ -3,7 +3,11 @@
     <string name="app_name">KnobNext</string>
     <string name="tagline">Треки кнопками громкости</string>
     <string name="service_label">KnobNext — треки кнопками громкости</string>
-    <string name="service_description">Долгое нажатие кнопки громкости переключает трек или видео в любом плеере. Короткое нажатие меняет громкость как обычно. Сервис читает только нажатия кнопок громкости и не видит содержимое экрана.</string>
+    <string name="service_description">Удержание кнопок громкости переключает трек или видео в любом плеере. Короткое нажатие меняет громкость как обычно. Сервис читает только нажатия кнопок громкости и не видит содержимое экрана.</string>
+    <string name="listener_label">KnobNext — управление плеером</string>
+    <string name="tile_on">Включено</string>
+    <string name="tile_off">Выключено</string>
+    <string name="cancel">Отмена</string>
 
     <string name="status_on_title">Работает</string>
     <string name="status_on_body">Удерживайте кнопку громкости в любом плеере, чтобы переключить трек.</string>
@@ -16,25 +20,55 @@
     <string name="restricted_hint">Android блокирует службы у приложений, установленных из APK. Откройте «О приложении» → ⋮ → «Разрешить доступ к настройкам с ограниченным доступом», затем включите службу снова.</string>
     <string name="open_app_info">О приложении</string>
 
+    <string name="access_title">Подключите плеер</string>
+    <string name="access_body">Доступ к уведомлениям позволяет видеть, что играет, перематывать на 10 секунд, выбирать плееры и возобновлять музыку после паузы. Сами уведомления приложение не читает.</string>
+    <string name="access_button">Дать доступ</string>
+
+    <string name="update_title">Доступно обновление</string>
+    <string name="update_body">Версия %1$s</string>
+    <string name="update_download">Скачать</string>
+
+    <string name="now_playing_unknown">Без названия</string>
+
     <string name="gestures_title">Жесты</string>
+    <string name="gestures_hint">Нажмите на жест, чтобы выбрать действие. При выключенном экране система уже успевает изменить громкость — после жеста KnobNext вернёт её обратно. На максимальной и нулевой громкости жест в эту сторону не сработает.</string>
     <string name="gesture_hold_up">Удерживать «+»</string>
     <string name="gesture_hold_down">Удерживать «−»</string>
     <string name="gesture_both">«+» и «−» вместе</string>
+    <string name="gesture_double_up_off">Дважды «+» · экран выключен</string>
+    <string name="gesture_double_down_off">Дважды «−» · экран выключен</string>
     <string name="gesture_tap">Короткое нажатие</string>
+    <string name="action_none">Ничего</string>
     <string name="action_next">Следующий трек</string>
     <string name="action_prev">Предыдущий трек</string>
     <string name="action_play_pause">Пауза / воспроизведение</string>
+    <string name="action_seek_forward">Вперёд на 10 с</string>
+    <string name="action_seek_back">Назад на 10 с</string>
     <string name="action_volume">Громкость, как обычно</string>
 
     <string name="settings_title">Настройки</string>
     <string name="pref_enabled">Включено</string>
     <string name="pref_only_when_playing">Только когда играет звук</string>
     <string name="pref_only_when_playing_hint">Иначе кнопки работают полностью штатно</string>
-    <string name="pref_swap">Поменять направления</string>
-    <string name="pref_swap_hint">«+» — назад, «−» — вперёд</string>
-    <string name="pref_combo">Пауза двумя кнопками</string>
-    <string name="pref_vibrate">Вибрация при переключении</string>
+    <string name="pref_screen_off">При выключенном экране</string>
+    <string name="pref_screen_off_hint">Двойное нажатие «+» или «−»</string>
+    <string name="pref_headphones">Только с наушниками</string>
+    <string name="pref_headphones_hint">Проводные, Bluetooth или USB</string>
+    <string name="pref_pocket">Защита в кармане</string>
+    <string name="pref_pocket_hint">Не срабатывать, когда датчик приближения закрыт</string>
+    <string name="pref_vibrate">Вибрация</string>
+    <string name="pref_vibrate_hint">Вперёд — щелчок, назад — двойной, пауза — сильный, перемотка — тройной</string>
     <string name="pref_long_press">Длительность удержания</string>
     <string name="pref_long_press_hint">Меньше — быстрее переключение, больше — меньше случайных срабатываний</string>
     <string name="ms_value">%1$d мс</string>
+
+    <string name="players_title">Плееры</string>
+    <string name="pref_app_filter">Только выбранные плееры</string>
+    <string name="pref_app_filter_hint">Жесты работают только в отмеченных приложениях</string>
+    <string name="pref_app_filter_no_access">Нужен доступ к уведомлениям</string>
+    <string name="players_empty">Включите музыку в плеере — он появится здесь</string>
+
+    <string name="about_title">О приложении</string>
+    <string name="pref_check_updates">Проверять обновления</string>
+    <string name="version_value">Версия %1$s</string>
 </resources>
