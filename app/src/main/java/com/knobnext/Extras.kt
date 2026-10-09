@@ -60,16 +60,31 @@ class Extras(private val context: Context, private val media: Media, private val
         return null
     }
 
+    /**
+     * Players expose "like" differently: Spotify as "Add to Liked Songs" (ADD_TO_COLLECTION),
+     * YouTube Music as a thumbs-up, others as a heart / favourite, or through the rating API.
+     * Matching runs over both the action id and its (localized) label.
+     */
     private fun like(controller: MediaController?): String? {
         val c = controller ?: return context.getString(R.string.log_needs_access)
-        findCustomAction(c, LIKE_WORDS, exclude = listOf("dislike", "unlike", "thumbs_down", "thumb_down"))?.let {
-            c.transportControls.sendCustomAction(it, null)
+        val actions = c.playbackState?.customActions.orEmpty()
+        fun text(a: PlaybackState.CustomAction) = "${a.action} ${a.name}".lowercase()
+        fun isUndo(a: PlaybackState.CustomAction) = UNLIKE.any { it.containsMatchIn(text(a)) }
+        val undo = actions.firstOrNull { a -> isUndo(a) && LIKE.any { it.containsMatchIn(text(a)) } }
+        val add = actions.firstOrNull { a -> !isUndo(a) && LIKE.any { it.containsMatchIn(text(a)) } }
+        if (add != null) {
+            c.transportControls.sendCustomAction(add, null)
             return null
         }
         when (c.ratingType) {
             Rating.RATING_THUMB_UP_DOWN -> c.transportControls.setRating(Rating.newThumbRating(true))
             Rating.RATING_HEART -> c.transportControls.setRating(Rating.newHeartRating(true))
-            else -> return context.getString(R.string.log_unsupported)
+            else -> {
+                // The player shows only "remove from liked": the track is liked already.
+                if (undo != null) return context.getString(R.string.log_already_liked)
+                val offered = actions.joinToString { it.name.toString() }.ifEmpty { "—" }
+                return context.getString(R.string.log_unsupported_actions, offered)
+            }
         }
         return null
     }
@@ -150,7 +165,16 @@ class Extras(private val context: Context, private val media: Media, private val
         }
 
     companion object {
-        private val LIKE_WORDS = listOf("like", "thumb", "favorite", "favourite", "heart", "love", "нрав", "избран", "сохран")
+        private val LIKE = listOf(
+            Regex("like"), Regex("thumbs?_?up"), Regex("thumb up"), Regex("favou?rite"), Regex("heart"), Regex("love"),
+            Regex("collection"), Regex("library"), Regex("нрав"), Regex("любим"), Regex("избранн"), Regex("медиатек"),
+        )
+
+        /** "Remove from liked", "dislike", "Не нравится" — but not "мне нравится". */
+        private val UNLIKE = listOf(
+            Regex("dislike"), Regex("unlike"), Regex("remove"), Regex("thumbs?_?down"), Regex("thumb down"),
+            Regex("(^|[^а-яё])не нрав"), Regex("удал"), Regex("убрать"),
+        )
         private const val COMPAT_SET_SHUFFLE = "android.support.v4.media.session.action.SET_SHUFFLE_MODE"
         private const val COMPAT_SHUFFLE_ARG = "android.support.v4.media.session.action.ARGUMENT_SHUFFLE_MODE"
         private const val COMPAT_SET_REPEAT = "android.support.v4.media.session.action.SET_REPEAT_MODE"

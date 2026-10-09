@@ -11,6 +11,24 @@
 
     <string name="status_on_title">Работает</string>
     <string name="status_on_body">Удерживайте кнопку громкости в любом плеере, чтобы переключить трек.</string>
+    <string name="status_paused_title">На паузе</string>
+    <string name="status_paused_body">Жесты выключены, кнопки громкости работают как обычно.</string>
+    <string name="toggle_on">Жесты включены</string>
+    <string name="toggle_off">Жесты выключены</string>
+    <string name="back">Назад</string>
+    <string name="tile_keys">Удержание и комбинации · назначено: %1$d</string>
+    <string name="tile_off">Выключено</string>
+    <string name="tile_sequences">Работает %1$s</string>
+    <string name="mode_always_long">всегда</string>
+    <string name="mode_screen_off_long">при выключенном экране</string>
+    <string name="tile_motion">Включено: %1$d</string>
+    <string name="tile_players_all">Работает во всех плеерах</string>
+    <string name="tile_players_some">Выбрано плееров: %1$d</string>
+    <string name="tile_settings">Звук, наушники, вибрация, таймер сна</string>
+    <string name="players_hint">Плееры появляются в списке, когда в них начинает играть музыка.</string>
+    <string name="open_accessibility_hint">Включить или выключить службу KnobNext</string>
+    <string name="more_gestures">Ещё жесты</string>
+    <string name="more_gestures_hide">Скрыть</string>
     <string name="status_off_title">Выключено</string>
     <string name="status_off_body">Включите службу KnobNext в разделе «Специальные возможности» → «Скачанные приложения».</string>
     <string name="enable_service">Включить</string>
@@ -116,6 +134,8 @@
     <string name="log_no_metadata">нет данных о треке — нужен доступ к плееру</string>
     <string name="log_needs_access">нужен доступ к плееру</string>
     <string name="log_unsupported">плеер это не поддерживает</string>
+    <string name="log_unsupported_actions">плеер не даёт «нравится»; его действия: %1$s</string>
+    <string name="log_already_liked">уже нравится</string>
     <string name="log_sleep_set">таймер на %1$d мин</string>
     <string name="log_sleep_cancelled">таймер отменён</string>
     <string name="log_no_player">не найден плеер</string>

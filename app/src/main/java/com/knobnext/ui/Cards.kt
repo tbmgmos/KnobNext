@@ -48,6 +48,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,20 +68,21 @@ import com.knobnext.R
 import com.knobnext.Restricted
 import com.knobnext.Release
 
+/** Main status card; its toggle is the master switch for all gestures. */
 @Composable
-fun StatusHero(enabled: Boolean, onOpen: () -> Unit) {
+fun StatusHero(on: Boolean, onToggle: (Boolean) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     val container by animateColorAsState(
-        if (enabled) scheme.primaryContainer else scheme.errorContainer, motion.defaultEffectsSpec(), label = "c",
+        if (on) scheme.primaryContainer else scheme.surfaceContainerHighest, motion.defaultEffectsSpec(), label = "c",
     )
     val content by animateColorAsState(
-        if (enabled) scheme.onPrimaryContainer else scheme.onErrorContainer, motion.defaultEffectsSpec(), label = "t",
+        if (on) scheme.onPrimaryContainer else scheme.onSurface, motion.defaultEffectsSpec(), label = "t",
     )
     val badge by animateColorAsState(
-        if (enabled) scheme.primary else scheme.error, motion.defaultEffectsSpec(), label = "b",
+        if (on) scheme.primary else scheme.outline, motion.defaultEffectsSpec(), label = "b",
     )
-    val onBadge = if (enabled) scheme.onPrimary else scheme.onError
+    val onBadge = if (on) scheme.onPrimary else scheme.surface
     val rotation by rememberInfiniteTransition(label = "spin").animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -96,54 +98,54 @@ fun StatusHero(enabled: Boolean, onOpen: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(24.dp)) {
-            Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
-                AnimatedContent(
-                    targetState = enabled,
-                    transitionSpec = { (scaleIn(popIn) + fadeIn()).togetherWith(scaleOut() + fadeOut()) },
-                    label = "heroShape",
-                ) { on ->
-                    Box(
-                        Modifier
-                            .size(96.dp)
-                            .graphicsLayer { rotationZ = if (on) rotation else 0f }
-                            .clip((if (on) MaterialShapes.Cookie9Sided else MaterialShapes.Pentagon).toShape())
-                            .background(badge),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                    AnimatedContent(
+                        targetState = on,
+                        transitionSpec = { (scaleIn(popIn) + fadeIn()).togetherWith(scaleOut() + fadeOut()) },
+                        label = "heroShape",
+                    ) { active ->
+                        Box(
+                            Modifier
+                                .size(72.dp)
+                                .graphicsLayer { rotationZ = if (active) rotation else 0f }
+                                .clip((if (active) MaterialShapes.Cookie9Sided else MaterialShapes.Pentagon).toShape())
+                                .background(badge),
+                        )
+                    }
+                    Icon(
+                        if (on) KnobIcons.Check else KnobIcons.Pause,
+                        contentDescription = null,
+                        tint = onBadge,
+                        modifier = Modifier.size(32.dp),
                     )
                 }
-                Icon(
-                    if (enabled) KnobIcons.Check else KnobIcons.Close,
-                    contentDescription = null,
-                    tint = onBadge,
-                    modifier = Modifier.size(40.dp),
-                )
+                Spacer(Modifier.width(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(if (on) R.string.status_on_title else R.string.status_paused_title),
+                        style = MaterialTheme.typography.headlineLargeEmphasized,
+                    )
+                    Text(
+                        stringResource(if (on) R.string.status_on_body else R.string.status_paused_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
             Spacer(Modifier.height(20.dp))
-            Text(
-                stringResource(if (enabled) R.string.status_on_title else R.string.status_off_title),
-                style = MaterialTheme.typography.displaySmallEmphasized,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                stringResource(if (enabled) R.string.status_on_body else R.string.status_off_body),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            Spacer(Modifier.height(20.dp))
-            if (enabled) {
-                FilledTonalButton(onClick = onOpen, shapes = ButtonDefaults.shapes()) {
-                    Text(stringResource(R.string.open_accessibility))
-                }
-            } else {
-                Button(
-                    onClick = onOpen,
-                    shapes = ButtonDefaults.shapes(),
-                    colors = ButtonDefaults.buttonColors(containerColor = scheme.error, contentColor = scheme.onError),
-                    contentPadding = PaddingValues(horizontal = 28.dp, vertical = 18.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.enable_service), style = MaterialTheme.typography.titleMediumEmphasized)
-                    Spacer(Modifier.width(8.dp))
-                    Icon(KnobIcons.ArrowForward, contentDescription = null)
-                }
+            ToggleButton(
+                checked = on,
+                onCheckedChange = onToggle,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+            ) {
+                Icon(if (on) KnobIcons.Check else KnobIcons.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(if (on) R.string.toggle_on else R.string.toggle_off),
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                )
             }
         }
     }
