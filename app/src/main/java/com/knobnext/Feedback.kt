@@ -120,8 +120,36 @@ enum class CueStyle { OFF, SOFT, TWO_TONE, CLICK }
 /** How loud the cue is, relative to the music volume. */
 enum class CueVolume(val gain: Float) { LOW(0.12f), MEDIUM(0.25f), HIGH(0.5f) }
 
-/** Which actions make a sound. */
-enum class CueScope { TRACKS, ALL }
+/**
+ * Kinds of actions whose sound can be turned on or off separately. [sample] is what the preview plays;
+ * ERRORS is the "didn't work" sound of any action.
+ */
+enum class CueGroup(vararg val sample: Cue) {
+    TRACKS(Cue.FORWARD, Cue.BACK),
+    PLAYBACK(Cue.PAUSE, Cue.PLAY),
+    SEEK(Cue.SEEK_FORWARD, Cue.SEEK_BACK),
+    LIKE(Cue.LIKE),
+    MODES(Cue.TOGGLE),
+    TIMER(Cue.TIMER),
+    OTHER(Cue.TOGGLE),
+    ERRORS(Cue.ERROR),
+    ;
+
+    companion object {
+        /** The group an action's sound belongs to; null for actions that never make one. */
+        fun of(action: Action): CueGroup? = when (action) {
+            Action.NEXT, Action.PREVIOUS, Action.RESTART -> TRACKS
+            Action.PLAY_PAUSE -> PLAYBACK
+            Action.SEEK_FORWARD, Action.SEEK_BACK -> SEEK
+            Action.LIKE -> LIKE
+            Action.SHUFFLE, Action.REPEAT, Action.SWITCH_PLAYER -> MODES
+            Action.SLEEP_TIMER -> TIMER
+            Action.FLASHLIGHT, Action.RINGER, Action.OPEN_PLAYER -> OTHER
+            // Volume is heard anyway; "announce" speaks.
+            Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE -> null
+        }
+    }
+}
 
 /**
  * One motif per kind of result, as (frequency Hz, length ms) notes, so the ear can tell what happened

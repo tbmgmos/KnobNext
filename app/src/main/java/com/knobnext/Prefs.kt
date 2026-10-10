@@ -82,7 +82,7 @@ data class Settings(
     val cueStyle: CueStyle,
     val cueVolume: CueVolume,
     val cueScreenOffOnly: Boolean,
-    val cueScope: CueScope,
+    val cueGroups: Set<CueGroup>,
     val actions: Map<Gesture, Action>,
     /** Apps with their own gesture set → that set. */
     val profiles: Map<String, Map<Gesture, Action>>,
@@ -233,9 +233,13 @@ class Prefs(context: Context) {
         get() = CueVolume.entries.firstOrNull { it.name == sp.getString("cue_volume", null) } ?: CueVolume.LOW
         set(v) = sp.edit().putString("cue_volume", v.name).apply()
 
-    var cueScope: CueScope
-        get() = CueScope.entries.firstOrNull { it.name == sp.getString("cue_scope", null) } ?: CueScope.ALL
-        set(v) = sp.edit().putString("cue_scope", v.name).apply()
+    /** Which kinds of actions make a sound. All by default; the earlier "tracks only" choice carries over. */
+    var cueGroups: Set<CueGroup>
+        get() {
+            sp.getStringSet("cue_groups", null)?.let { names -> return CueGroup.entries.filter { it.name in names }.toSet() }
+            return if (sp.getString("cue_scope", null) == "TRACKS") setOf(CueGroup.TRACKS) else CueGroup.entries.toSet()
+        }
+        set(v) = sp.edit().putStringSet("cue_groups", v.map { it.name }.toSet()).apply()
 
     /** With the screen on the change is visible anyway, so by default the cue is only for the screen off. */
     var cueScreenOffOnly: Boolean
@@ -335,7 +339,7 @@ class Prefs(context: Context) {
         cueStyle = cueStyle,
         cueVolume = cueVolume,
         cueScreenOffOnly = cueScreenOffOnly,
-        cueScope = cueScope,
+        cueGroups = cueGroups,
         actions = Gesture.entries.associateWith { action(it) },
         profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )

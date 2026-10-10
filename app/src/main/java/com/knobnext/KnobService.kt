@@ -673,25 +673,26 @@ class KnobService : AccessibilityService() {
     private fun playCue(action: Action, outcome: Outcome, pausing: Boolean) {
         val style = prefs.cueStyle
         if (style == CueStyle.OFF || prefs.cueScreenOffOnly && power.isInteractive) return
+        val group = CueGroup.of(action) ?: return
+        val failed = outcome.result == Outcome.Result.FAILED
+        // A failure has its own switch: someone may want to hear only that something didn't work.
+        if ((if (failed) CueGroup.ERRORS else group) !in prefs.cueGroups) return
         val unchanged = outcome.result == Outcome.Result.UNCHANGED
         val cue = when {
-            outcome.result == Outcome.Result.FAILED -> Cue.ERROR
+            failed -> Cue.ERROR
+            unchanged -> Cue.NEUTRAL
             else -> when (action) {
                 Action.NEXT -> Cue.FORWARD
                 Action.PREVIOUS, Action.RESTART -> Cue.BACK
                 Action.PLAY_PAUSE -> if (pausing) Cue.PAUSE else Cue.PLAY
                 Action.SEEK_FORWARD -> Cue.SEEK_FORWARD
                 Action.SEEK_BACK -> Cue.SEEK_BACK
-                Action.LIKE -> if (unchanged) Cue.NEUTRAL else Cue.LIKE
-                Action.SHUFFLE, Action.REPEAT, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER ->
-                    if (unchanged) Cue.NEUTRAL else Cue.TOGGLE
-                Action.SLEEP_TIMER -> if (unchanged) Cue.NEUTRAL else Cue.TIMER
+                Action.LIKE -> Cue.LIKE
+                Action.SLEEP_TIMER -> Cue.TIMER
                 Action.OPEN_PLAYER -> Cue.NEUTRAL
-                // Volume is heard anyway; "announce" speaks.
-                Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE -> null
+                else -> Cue.TOGGLE
             }
-        } ?: return
-        if (prefs.cueScope == CueScope.TRACKS && cue != Cue.FORWARD && cue != Cue.BACK) return
+        }
         cues.play(cue, style, prefs.cueVolume)
     }
 

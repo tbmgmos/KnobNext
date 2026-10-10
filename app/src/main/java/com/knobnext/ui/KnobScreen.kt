@@ -54,7 +54,7 @@ import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
 import com.knobnext.Cue
-import com.knobnext.CueScope
+import com.knobnext.CueGroup
 import com.knobnext.CueStyle
 import com.knobnext.CueVolume
 import com.knobnext.Cues
@@ -854,7 +854,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     item { EventLog(prefs) }
 }
 
-/** The optional sounds after actions: timbre, which actions, loudness, when, and a preview. */
+/** The optional sounds after actions: timbre, loudness, when, and a switch (with a preview) per kind of action. */
 @Composable
 private fun CueCard(ctx: PageContext) {
     val s = ctx.s
@@ -863,75 +863,121 @@ private fun CueCard(ctx: PageContext) {
     val cues = remember { Cues() }
     DisposableEffect(cues) { onDispose { cues.release() } }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val preview: (CueStyle, CueScope, CueVolume) -> Unit = { style, which, volume ->
+    val preview: (List<Cue>, CueStyle, CueVolume) -> Unit = { sample, style, volume ->
         scope.launch {
-            val sample = if (which == CueScope.TRACKS) listOf(Cue.FORWARD, Cue.BACK) else listOf(Cue.FORWARD, Cue.BACK, Cue.LIKE, Cue.ERROR)
             sample.forEach {
                 cues.play(it, style, volume)
                 kotlinx.coroutines.delay(CUE_PREVIEW_GAP_MS)
             }
         }
     }
-    Group(if (on) 5 else 1) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            ControlRow(shape(0), stringResource(R.string.cue_title), caption = stringResource(R.string.cue_hint), enabled = s.enabled) {
-                ConnectedChoice(
-                    options = listOf(
-                        CueStyle.OFF to R.string.cue_off,
-                        CueStyle.SOFT to R.string.cue_soft,
-                        CueStyle.TWO_TONE to R.string.cue_two_tone,
-                        CueStyle.CLICK to R.string.cue_click,
-                    ),
-                    selected = s.cueStyle,
-                    onSelect = {
-                        prefs.cueStyle = it
-                        preview(it, s.cueScope, s.cueVolume)
-                    },
-                    enabled = s.enabled,
-                )
-            }
-            AnimatedVisibility(on) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    ControlRow(shape(1), stringResource(R.string.cue_scope), enabled = s.enabled) {
-                        ConnectedChoice(
-                            options = listOf(CueScope.TRACKS to R.string.cue_scope_tracks, CueScope.ALL to R.string.cue_scope_all),
-                            selected = s.cueScope,
-                            onSelect = { prefs.cueScope = it },
-                            enabled = s.enabled,
-                        )
-                    }
-                    ControlRow(shape(2), stringResource(R.string.cue_volume), enabled = s.enabled) {
-                        ConnectedChoice(
-                            options = listOf(
-                                CueVolume.LOW to R.string.cue_volume_low,
-                                CueVolume.MEDIUM to R.string.cue_volume_medium,
-                                CueVolume.HIGH to R.string.cue_volume_high,
-                            ),
-                            selected = s.cueVolume,
-                            onSelect = {
-                                prefs.cueVolume = it
-                                preview(s.cueStyle, s.cueScope, it)
-                            },
-                            enabled = s.enabled,
-                        )
-                    }
-                    SwitchRow(
-                        shape(3), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
-                        subtitle = stringResource(R.string.cue_screen_off_only_hint), enabled = s.enabled,
-                    )
-                    ListRow(
-                        shape(4), stringResource(R.string.cue_preview),
-                        subtitle = stringResource(
-                            if (s.cueScope == CueScope.TRACKS) R.string.cue_preview_hint_tracks else R.string.cue_preview_hint_all,
+    val tryAll = { style: CueStyle, volume: CueVolume ->
+        preview(listOf(Cue.FORWARD, Cue.LIKE, Cue.ERROR), style, volume)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Group(if (on) 3 else 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ControlRow(shape(0), stringResource(R.string.cue_title), caption = stringResource(R.string.cue_hint), enabled = s.enabled) {
+                    ConnectedChoice(
+                        options = listOf(
+                            CueStyle.OFF to R.string.cue_off,
+                            CueStyle.SOFT to R.string.cue_soft,
+                            CueStyle.TWO_TONE to R.string.cue_two_tone,
+                            CueStyle.CLICK to R.string.cue_click,
                         ),
+                        selected = s.cueStyle,
+                        onSelect = {
+                            prefs.cueStyle = it
+                            tryAll(it, s.cueVolume)
+                        },
                         enabled = s.enabled,
-                        onClick = { preview(s.cueStyle, s.cueScope, s.cueVolume) },
-                        leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.Play) },
                     )
+                }
+                AnimatedVisibility(on) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ControlRow(shape(1), stringResource(R.string.cue_volume), enabled = s.enabled) {
+                            ConnectedChoice(
+                                options = listOf(
+                                    CueVolume.LOW to R.string.cue_volume_low,
+                                    CueVolume.MEDIUM to R.string.cue_volume_medium,
+                                    CueVolume.HIGH to R.string.cue_volume_high,
+                                ),
+                                selected = s.cueVolume,
+                                onSelect = {
+                                    prefs.cueVolume = it
+                                    tryAll(s.cueStyle, it)
+                                },
+                                enabled = s.enabled,
+                            )
+                        }
+                        SwitchRow(
+                            shape(2), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
+                            subtitle = stringResource(R.string.cue_screen_off_only_hint), enabled = s.enabled,
+                        )
+                    }
                 }
             }
         }
+        AnimatedVisibility(on) {
+            Column {
+                SectionTitle(stringResource(R.string.cue_groups_title))
+                Group(CueGroup.entries.size) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        CueGroup.entries.forEachIndexed { i, group ->
+                            val checked = group in s.cueGroups
+                            val toggle = { enable: Boolean ->
+                                prefs.cueGroups = if (enable) s.cueGroups + group else s.cueGroups - group
+                            }
+                            // Tapping the row plays the sound; the switch turns it on or off.
+                            ListRow(
+                                shape = shape(i),
+                                title = stringResource(cueGroupLabel(group)),
+                                subtitle = stringResource(cueGroupSound(group)),
+                                enabled = s.enabled,
+                                onClick = { preview(group.sample.toList(), s.cueStyle, s.cueVolume) },
+                                leading = { Badge(MaterialShapes.Cookie6Sided, cueGroupIcon(group)) },
+                                trailing = { Switch(checked = checked, onCheckedChange = toggle, enabled = s.enabled) },
+                            )
+                        }
+                    }
+                }
+                Hint(stringResource(R.string.cue_groups_hint))
+            }
+        }
     }
+}
+
+private fun cueGroupLabel(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> R.string.cue_group_tracks
+    CueGroup.PLAYBACK -> R.string.cue_group_playback
+    CueGroup.SEEK -> R.string.cue_group_seek
+    CueGroup.LIKE -> R.string.cue_group_like
+    CueGroup.MODES -> R.string.cue_group_modes
+    CueGroup.TIMER -> R.string.cue_group_timer
+    CueGroup.OTHER -> R.string.cue_group_other
+    CueGroup.ERRORS -> R.string.cue_group_errors
+}
+
+private fun cueGroupSound(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> R.string.cue_sound_tracks
+    CueGroup.PLAYBACK -> R.string.cue_sound_playback
+    CueGroup.SEEK -> R.string.cue_sound_seek
+    CueGroup.LIKE -> R.string.cue_sound_like
+    CueGroup.MODES -> R.string.cue_sound_modes
+    CueGroup.TIMER -> R.string.cue_sound_timer
+    CueGroup.OTHER -> R.string.cue_sound_other
+    CueGroup.ERRORS -> R.string.cue_sound_errors
+}
+
+private fun cueGroupIcon(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> KnobIcons.SkipNext
+    CueGroup.PLAYBACK -> KnobIcons.PlayPause
+    CueGroup.SEEK -> KnobIcons.FastForward
+    CueGroup.LIKE -> KnobIcons.Favorite
+    CueGroup.MODES -> KnobIcons.Shuffle
+    CueGroup.TIMER -> KnobIcons.Bedtime
+    CueGroup.OTHER -> KnobIcons.Flashlight
+    CueGroup.ERRORS -> KnobIcons.Close
 }
 
 private const val CUE_PREVIEW_GAP_MS = 550L
