@@ -38,6 +38,8 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     TAP_HOLD_DOWN("action_tap_hold_down", GestureGroup.KEYS, Action.VOLUME_DOWN),
     BOTH("action_both", GestureGroup.KEYS, Action.PLAY_PAUSE),
     BOTH_HOLD("action_both_hold", GestureGroup.KEYS, Action.LIKE),
+    // Off by default: the system's own double press (camera) has to be turned off first.
+    POWER_DOUBLE("action_power_double", GestureGroup.KEYS, Action.NONE),
     DOUBLE_UP("action_double_up_off", GestureGroup.SEQUENCE, Action.NEXT),
     DOUBLE_DOWN("action_double_down_off", GestureGroup.SEQUENCE, Action.PREVIOUS),
     // Off by default: "+ then −" or three presses is also how people simply correct the volume.

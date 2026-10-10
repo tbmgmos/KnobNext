@@ -100,6 +100,14 @@
     <string name="gesture_long_hold_up">Удерживать «+» долго</string>
     <string name="gesture_long_hold_down">Удерживать «−» долго</string>
     <string name="gesture_both_hold">Удерживать «+» и «−»</string>
+    <string name="gesture_power_double">Питание дважды</string>
+    <string name="section_power">Кнопка питания</string>
+    <string name="power_system">Системное двойное нажатие</string>
+    <string name="power_system_on">Включено: двойное нажатие откроет камеру или Кошелёк. Нажмите, чтобы выключить его в настройках жестов</string>
+    <string name="power_system_off">Выключено — двойное нажатие свободно для жеста</string>
+    <string name="power_system_unknown">Проверьте, что «Быстрый запуск камеры» выключен в настройках жестов, иначе откроется камера. Нажмите, чтобы открыть</string>
+    <string name="power_hint">Саму кнопку питания Android приложениям не передаёт — KnobNext видит, как экран дважды быстро погас и включился. Одиночное нажатие работает как обычно. Если экран был выключен, он коротко мигнёт. Долгое нажатие (ассистент) перехватить нельзя. Жест работает, пока играет музыка.</string>
+    <string name="log_power_double">питание нажато дважды</string>
     <string name="gesture_triple_up">Трижды «+»</string>
     <string name="gesture_triple_down">Трижды «−»</string>
     <string name="gesture_up_down">«+», затем «−»</string>

@@ -28,7 +28,8 @@ class VolumeWatcher(
     private val context: Context,
     private val handler: Handler,
     private val shouldPoll: () -> Boolean,
-    private val onScreenOff: () -> Unit,
+    /** The screen turned off (false) or on (true). */
+    private val onScreen: (on: Boolean) -> Unit,
     private val onVolume: (value: Int, source: Source) -> Unit,
 ) {
     /** SYNC = a new baseline; it must not count as a press. KEY = a tap seen directly (gesture check). */
@@ -70,10 +71,11 @@ class VolumeWatcher(
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_SCREEN_OFF) {
-                onScreenOff()
+                onScreen(false)
                 startPolling()
             } else {
                 stopPolling()
+                onScreen(true)
             }
         }
     }

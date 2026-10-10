@@ -363,6 +363,11 @@ class KnobService : AccessibilityService() {
         override fun run() = checkPocket()
     }
 
+    // ---- Power button: seen only as the screen turning off and on ----
+    private var screenTurnedAt = 0L
+    private var ownScreenChangeAt = 0L
+    private var pocketPowerOffAt = 0L
+
     override fun onServiceConnected() {
         audio = getSystemService(AudioManager::class.java)
         power = getSystemService(PowerManager::class.java)
@@ -380,7 +385,7 @@ class KnobService : AccessibilityService() {
         }
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         pocket = PocketScreen(this, ::onPocketLeft)
-        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onScreenOff, ::onVolumeObserved)
+        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onScreen, ::onVolumeObserved)
         volumeWatcher.start()
         backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
@@ -738,12 +743,40 @@ class KnobService : AccessibilityService() {
     /** The screen is off, or as good as off: pocket mode's black screen. */
     private fun screenDark(): Boolean = !power.isInteractive || ::pocket.isInitialized && pocket.active
 
+    private fun onScreen(on: Boolean) {
+        if (!on) onScreenOff()
+        val now = SystemClock.elapsedRealtime()
+        // Turned on or off by us (pocket mode, locking): not the power button.
+        if (now - ownScreenChangeAt < OWN_SCREEN_CHANGE_MS) {
+            screenTurnedAt = 0L
+            return
+        }
+        if (screenTurnedAt != 0L && now - screenTurnedAt < POWER_DOUBLE_MS) {
+            screenTurnedAt = 0L
+            onPowerDouble(now)
+        } else {
+            screenTurnedAt = now
+        }
+    }
+
+    /** The power button pressed twice: off and on again, or on and off again. */
+    private fun onPowerDouble(now: Long) {
+        if (prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) == Action.NONE && !GestureTest.active) return
+        // The first press took the phone out of pocket mode; the gesture was meant, not leaving.
+        val fromPocket = now - pocketPowerOffAt < POWER_DOUBLE_MS * 2
+        log(getString(R.string.log_power_double))
+        if (fireGesture(Gesture.POWER_DOUBLE) && fromPocket) enterPocket()
+    }
+
+    private fun powerDoubleAssigned() = prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) != Action.NONE
+
     private fun onScreenOff() {
         forgetPresses()
         finishBlindHold()
         val now = SystemClock.elapsedRealtime()
         if (pocket.active) {
             // The power button in pocket mode: the screen goes off for real.
+            pocketPowerOffAt = now
             pocket.hide(PocketScreen.Reason.POWER)
             return
         }
@@ -753,11 +786,14 @@ class KnobService : AccessibilityService() {
         if (now - pocketLeftAt < POCKET_SETTLE_MS) return
         val auto = prefs.pocketAuto && prefs.enabled && audio.isMusicActive && !media.isInCall()
         if (requested || auto) {
-            handler.postDelayed({ if (!power.isInteractive && !pocket.active) enterPocket() }, POCKET_WAKE_DELAY_MS)
+            // A second press may follow (the power-button gesture): wait until it can't any more.
+            val wait = if (!requested && powerDoubleAssigned()) POWER_DOUBLE_MS + POCKET_WAKE_DELAY_MS else POCKET_WAKE_DELAY_MS
+            handler.postDelayed({ if (!power.isInteractive && !pocket.active) enterPocket() }, wait)
         }
     }
 
     private fun enterPocket(): Boolean {
+        if (!power.isInteractive) ownScreenChangeAt = SystemClock.elapsedRealtime()
         if (!pocket.show()) {
             log(getString(R.string.log_pocket_failed))
             return false
@@ -807,6 +843,7 @@ class KnobService : AccessibilityService() {
 
     private fun lockScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && power.isInteractive) {
+            ownScreenChangeAt = SystemClock.elapsedRealtime()
             performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
     }
@@ -825,6 +862,7 @@ class KnobService : AccessibilityService() {
         pocketPending = true
         handler.postDelayed({ pocketPending = false }, POCKET_SETTLE_MS)
         pocketLeftAt = 0L
+        ownScreenChangeAt = SystemClock.elapsedRealtime()
         performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         return Outcome.DONE
     }
@@ -1257,6 +1295,12 @@ class KnobService : AccessibilityService() {
         const val POCKET_CHECK_MS = 1_000L
         const val POCKET_SETTLE_MS = 2_000L
         const val POCKET_IDLE_MS = 2 * 60 * 1000L
+
+        /** The screen turned off and on (or on and off) within this: the power button pressed twice. */
+        const val POWER_DOUBLE_MS = 700L
+
+        /** Screen changes this soon after we turned it on or off ourselves are ours. */
+        const val OWN_SCREEN_CHANGE_MS = 1_500L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L
         const val IGNORE_OWN_CHANGE_MS = 400L

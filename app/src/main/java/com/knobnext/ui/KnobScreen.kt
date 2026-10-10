@@ -59,6 +59,7 @@ import com.knobnext.CueStyle
 import com.knobnext.CueVolume
 import com.knobnext.Cues
 import com.knobnext.PocketScreen
+import com.knobnext.PowerButton
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -423,8 +424,56 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
     }
     item { Group(1) { LongPressRow(shape(0), s.longPressMs, { ctx.prefs.longPressMs = it }, s.enabled) } }
     item { HoldAdvice(ctx) }
+    item { PowerCard(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
     item { Hint(stringResource(R.string.blind_keys_hint)) }
+}
+
+/** The power button pressed twice: its gesture, and whether the system's own double press is in the way. */
+@Composable
+private fun PowerCard(ctx: PageContext) {
+    val context = LocalContext.current
+    // Read again whenever the page comes back (after changing it in system settings).
+    var systemOn by remember { mutableStateOf(PowerButton.systemDoublePressOn(context)) }
+    DisposableEffect(context) {
+        val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) systemOn = PowerButton.systemDoublePressOn(context)
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    val scheme = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.section_power))
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                GestureRow(0, Gesture.POWER_DOUBLE, ctx.s, gestureShape(Gesture.POWER_DOUBLE), false, ctx.s.enabled, onEdit = ctx.edit)
+                ListRow(
+                    shape(1),
+                    stringResource(R.string.power_system),
+                    subtitle = stringResource(
+                        when (systemOn) {
+                            true -> R.string.power_system_on
+                            false -> R.string.power_system_off
+                            null -> R.string.power_system_unknown
+                        },
+                    ),
+                    highlighted = systemOn == true,
+                    onClick = { PowerButton.openGestureSettings(context) },
+                    leading = {
+                        if (systemOn == false) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                    trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.power_hint))
+    }
 }
 
 /** Pocket mode: turned on by the power button while music plays, or right now to try it. */
