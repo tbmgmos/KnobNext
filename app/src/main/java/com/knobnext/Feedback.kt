@@ -114,16 +114,37 @@ class ProximityProbe(context: Context) : SensorEventListener {
     }
 }
 
-/** Sound played when a track is switched; OFF plays nothing. */
+/** Timbre of the sound cues; OFF plays nothing. (TWO_TONE is shown as "melodic"; the name is kept for saved settings.) */
 enum class CueStyle { OFF, SOFT, TWO_TONE, CLICK }
 
 /** How loud the cue is, relative to the music volume. */
 enum class CueVolume(val gain: Float) { LOW(0.12f), MEDIUM(0.25f), HIGH(0.5f) }
 
+/** Which actions make a sound. */
+enum class CueScope { TRACKS, ALL }
+
+/**
+ * One motif per kind of result, as (frequency Hz, length ms) notes, so the ear can tell what happened
+ * without looking: up = forward, down = back, a chord = like, a low fall = it didn't work.
+ */
+enum class Cue(vararg val notes: Pair<Double, Int>) {
+    FORWARD(784.0 to 70, 1047.0 to 90),
+    BACK(1047.0 to 70, 784.0 to 90),
+    PLAY(880.0 to 140),
+    PAUSE(440.0 to 140),
+    SEEK_FORWARD(988.0 to 40, 988.0 to 40),
+    SEEK_BACK(659.0 to 40, 659.0 to 40),
+    LIKE(523.0 to 60, 659.0 to 60, 784.0 to 120),
+    TOGGLE(880.0 to 45, 698.0 to 45, 880.0 to 70),
+    TIMER(784.0 to 80, 659.0 to 80, 523.0 to 140),
+    NEUTRAL(698.0 to 60),
+    ERROR(330.0 to 90, 262.0 to 150),
+}
+
 /**
  * Short sounds generated on the fly (no audio files). They play with the navigation-guidance usage,
  * which follows the music volume and output (headphones), and without audio focus, so the music is
- * neither paused nor ducked. "Forward" goes up in pitch, "back" goes down.
+ * neither paused nor ducked.
  */
 class Cues {
     private val attributes = AudioAttributes.Builder()
@@ -132,9 +153,9 @@ class Cues {
         .build()
     private var track: AudioTrack? = null
 
-    fun play(style: CueStyle, forward: Boolean, volume: CueVolume) {
+    fun play(cue: Cue, style: CueStyle, volume: CueVolume) {
         if (style == CueStyle.OFF) return
-        val pcm = render(style, forward)
+        val pcm = render(cue, style)
         try {
             track?.release()
             val t = AudioTrack.Builder()
@@ -164,27 +185,33 @@ class Cues {
         track = null
     }
 
-    private fun render(style: CueStyle, forward: Boolean): ShortArray = when (style) {
-        CueStyle.SOFT -> tone(if (forward) 880.0 else 587.0, 110)
-        CueStyle.TWO_TONE ->
-            if (forward) tone(659.0, 70) + silence(35) + tone(880.0, 90) else tone(880.0, 70) + silence(35) + tone(659.0, 90)
-        CueStyle.CLICK -> tone(if (forward) 2_400.0 else 1_800.0, 20)
-        CueStyle.OFF -> ShortArray(0)
+    /** The same motif in each timbre: soft = plain sine, melodic = with overtones and a bit longer, click = short ticks. */
+    private fun render(cue: Cue, style: CueStyle): ShortArray {
+        var out = ShortArray(0)
+        cue.notes.forEachIndexed { i, (hz, ms) ->
+            if (i > 0) out += ShortArray(RATE * (if (style == CueStyle.CLICK) 45 else 30) / 1000)
+            out += when (style) {
+                CueStyle.CLICK -> tone(hz * 2, 20, overtones = false)
+                CueStyle.TWO_TONE -> tone(hz, ms * 6 / 5, overtones = true)
+                else -> tone(hz, ms, overtones = false)
+            }
+        }
+        return out
     }
 
-    /** A sine with a quick fade-in and a smooth fade-out, so it starts and ends without a click. */
-    private fun tone(hz: Double, ms: Int): ShortArray {
+    /** A note with a quick fade-in and a smooth fade-out, so it starts and ends without a click. */
+    private fun tone(hz: Double, ms: Int, overtones: Boolean): ShortArray {
         val n = RATE * ms / 1000
         val attack = minOf(RATE * 5 / 1000, n / 4)
         return ShortArray(n) { i ->
             val fadeIn = if (i < attack) i.toDouble() / attack else 1.0
             val fadeOut = Math.cos(Math.PI / 2 * i / n).let { it * it }
-            val sample = Math.sin(2 * Math.PI * hz * i / RATE) * fadeIn * fadeOut * 0.8
-            (sample * Short.MAX_VALUE).toInt().toShort()
+            val phase = 2 * Math.PI * hz * i / RATE
+            var wave = Math.sin(phase)
+            if (overtones) wave = (wave + 0.35 * Math.sin(2 * phase) + 0.15 * Math.sin(3 * phase)) / 1.5
+            (wave * fadeIn * fadeOut * 0.8 * Short.MAX_VALUE).toInt().toShort()
         }
     }
-
-    private fun silence(ms: Int) = ShortArray(RATE * ms / 1000)
 
     private companion object {
         const val RATE = 44_100

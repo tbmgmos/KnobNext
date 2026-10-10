@@ -82,6 +82,7 @@ data class Settings(
     val cueStyle: CueStyle,
     val cueVolume: CueVolume,
     val cueScreenOffOnly: Boolean,
+    val cueScope: CueScope,
     val actions: Map<Gesture, Action>,
     /** Apps with their own gesture set → that set. */
     val profiles: Map<String, Map<Gesture, Action>>,
@@ -223,7 +224,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("announce_skips", false)
         set(v) = sp.edit().putBoolean("announce_skips", v).apply()
 
-    /** Sound when a track is switched (next, previous, back to the start). */
+    /** Timbre of the sound cues after actions; OFF for none. */
     var cueStyle: CueStyle
         get() = CueStyle.entries.firstOrNull { it.name == sp.getString("cue_style", null) } ?: CueStyle.OFF
         set(v) = sp.edit().putString("cue_style", v.name).apply()
@@ -231,6 +232,10 @@ class Prefs(context: Context) {
     var cueVolume: CueVolume
         get() = CueVolume.entries.firstOrNull { it.name == sp.getString("cue_volume", null) } ?: CueVolume.LOW
         set(v) = sp.edit().putString("cue_volume", v.name).apply()
+
+    var cueScope: CueScope
+        get() = CueScope.entries.firstOrNull { it.name == sp.getString("cue_scope", null) } ?: CueScope.ALL
+        set(v) = sp.edit().putString("cue_scope", v.name).apply()
 
     /** With the screen on the change is visible anyway, so by default the cue is only for the screen off. */
     var cueScreenOffOnly: Boolean
@@ -330,6 +335,7 @@ class Prefs(context: Context) {
         cueStyle = cueStyle,
         cueVolume = cueVolume,
         cueScreenOffOnly = cueScreenOffOnly,
+        cueScope = cueScope,
         actions = Gesture.entries.associateWith { action(it) },
         profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )

@@ -23,6 +23,25 @@ import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
 import java.util.Locale
 
+/** What an action did: [message] goes to the event log, [result] picks the sound cue. */
+class Outcome(val message: String?, val result: Result) {
+    enum class Result { DONE, UNCHANGED, FAILED }
+
+    companion object {
+        val DONE = Outcome(null, Result.DONE)
+
+        fun done(message: String) = Outcome(message, Result.DONE)
+
+        /** Nothing needed doing (already liked, no other player) or it was undone (timer cancelled). */
+        fun unchanged(message: String) = Outcome(message, Result.UNCHANGED)
+
+        fun failed(message: String) = Outcome(message, Result.FAILED)
+
+        /** For actions whose only message is why they failed. */
+        fun of(problem: String?) = if (problem == null) DONE else failed(problem)
+    }
+}
+
 /**
  * Actions that need more than transport controls: speech, alarms, launching apps, player-specific
  * commands. Each returns a short message for the event log when it could not do what was asked.
@@ -38,18 +57,18 @@ class Extras(private val context: Context, private val media: Media, private val
 
     private val torch = Torch(context, handler)
 
-    fun perform(action: Action, controller: MediaController?): String? = when (action) {
-        Action.ANNOUNCE -> announce(controller)
+    fun perform(action: Action, controller: MediaController?): Outcome = when (action) {
+        Action.ANNOUNCE -> Outcome.of(announce(controller))
         Action.LIKE -> like(controller)
-        Action.SHUFFLE -> shuffle(controller)
-        Action.REPEAT -> repeat(controller)
+        Action.SHUFFLE -> Outcome.of(shuffle(controller))
+        Action.REPEAT -> Outcome.of(repeat(controller))
         Action.SLEEP_TIMER -> toggleSleepTimer()
-        Action.OPEN_PLAYER -> openPlayer(controller)
-        Action.RESTART -> restart(controller)
+        Action.OPEN_PLAYER -> Outcome.of(openPlayer(controller))
+        Action.RESTART -> Outcome.of(restart(controller))
         Action.SWITCH_PLAYER -> switchPlayer(controller)
-        Action.FLASHLIGHT -> torch.toggle()
+        Action.FLASHLIGHT -> Outcome.of(torch.toggle())
         Action.RINGER -> toggleRinger()
-        else -> null
+        else -> Outcome.DONE
     }
 
     fun release() {
@@ -69,34 +88,34 @@ class Extras(private val context: Context, private val media: Media, private val
     }
 
     /** Pauses this player and resumes the next one that has a session, in a stable order. */
-    private fun switchPlayer(controller: MediaController?): String? {
+    private fun switchPlayer(controller: MediaController?): Outcome {
         val filtering = prefs.appFilter
         val players = media.controllers()
             .filter { !filtering || it.packageName in prefs.allowedApps }
             .distinctBy { it.packageName }
             .sortedBy { it.packageName }
-        if (players.isEmpty()) return context.getString(R.string.log_needs_access)
+        if (players.isEmpty()) return Outcome.failed(context.getString(R.string.log_needs_access))
         val current = players.indexOfFirst { it.packageName == controller?.packageName }
         val next = players[(current + 1) % players.size]
-        if (next.packageName == controller?.packageName) return context.getString(R.string.log_no_other_player)
+        if (next.packageName == controller?.packageName) return Outcome.unchanged(context.getString(R.string.log_no_other_player))
         controller?.transportControls?.pause()
         next.transportControls.play()
         prefs.lastPlayer = next.packageName
-        return context.getString(R.string.log_switched_to, appLabel(context, next.packageName))
+        return Outcome.done(context.getString(R.string.log_switched_to, appLabel(context, next.packageName)))
     }
 
     /** Sound ↔ vibrate. Leaving "silent" may need Do Not Disturb access, which the app doesn't ask for. */
-    private fun toggleRinger(): String =
+    private fun toggleRinger(): Outcome =
         try {
             if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
                 audio.ringerMode = AudioManager.RINGER_MODE_VIBRATE
-                context.getString(R.string.log_ringer_vibrate)
+                Outcome.done(context.getString(R.string.log_ringer_vibrate))
             } else {
                 audio.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                context.getString(R.string.log_ringer_normal)
+                Outcome.done(context.getString(R.string.log_ringer_normal))
             }
         } catch (_: SecurityException) {
-            context.getString(R.string.log_ringer_dnd)
+            Outcome.failed(context.getString(R.string.log_ringer_dnd))
         }
 
     private fun announce(controller: MediaController?): String? {
@@ -136,29 +155,29 @@ class Extras(private val context: Context, private val media: Media, private val
      *  2. the session's custom action (Spotify "ADD_TO_COLLECTION", thumbs-up, heart, favourite…);
      *  3. the rating API.
      */
-    private fun like(controller: MediaController?): String? {
-        val c = controller ?: return context.getString(R.string.log_needs_access)
+    private fun like(controller: MediaController?): Outcome {
+        val c = controller ?: return Outcome.failed(context.getString(R.string.log_needs_access))
         val buttons = notificationButtons(c.packageName)
-        buttons.firstOrNull { (title, _) -> isLike(title) }?.let { (_, action) -> if (press(action)) return null }
-        if (buttons.any { (title, _) -> isUnlike(title) }) return context.getString(R.string.log_already_liked)
+        buttons.firstOrNull { (title, _) -> isLike(title) }?.let { (_, action) -> if (press(action)) return Outcome.DONE }
+        if (buttons.any { (title, _) -> isUnlike(title) }) return Outcome.unchanged(context.getString(R.string.log_already_liked))
 
         val custom = c.playbackState?.customActions.orEmpty()
         fun text(a: PlaybackState.CustomAction) = "${a.action} ${a.name}".lowercase()
         custom.firstOrNull { isLike(text(it)) }?.let {
             c.transportControls.sendCustomAction(it, null)
-            return null
+            return Outcome.DONE
         }
         when (c.ratingType) {
             Rating.RATING_THUMB_UP_DOWN -> c.transportControls.setRating(Rating.newThumbRating(true))
             Rating.RATING_HEART -> c.transportControls.setRating(Rating.newHeartRating(true))
             else -> {
-                if (custom.any { isUnlike(text(it)) }) return context.getString(R.string.log_already_liked)
+                if (custom.any { isUnlike(text(it)) }) return Outcome.unchanged(context.getString(R.string.log_already_liked))
                 val offered = (buttons.map { it.first } + custom.map { it.name.toString() })
                     .filter { it.isNotBlank() }.distinct().joinToString().ifEmpty { "—" }
-                return context.getString(R.string.log_unsupported_actions, offered)
+                return Outcome.failed(context.getString(R.string.log_unsupported_actions, offered))
             }
         }
-        return null
+        return Outcome.DONE
     }
 
     /** Notification button first, then the session's custom action, then the generic compat command. */
@@ -200,16 +219,16 @@ class Extras(private val context: Context, private val media: Media, private val
         return null
     }
 
-    private fun toggleSleepTimer(): String? {
+    private fun toggleSleepTimer(): Outcome {
         if (SleepTimer.active(prefs)) {
             SleepTimer.cancel(context, prefs)
             speaker.say(context.getString(R.string.speak_sleep_cancelled))
-            return context.getString(R.string.log_sleep_cancelled)
+            return Outcome.unchanged(context.getString(R.string.log_sleep_cancelled))
         }
         val minutes = prefs.sleepMinutes
         SleepTimer.start(context, prefs, minutes)
         speaker.say(context.getString(R.string.speak_sleep_set, minutes))
-        return context.getString(R.string.log_sleep_set, minutes)
+        return Outcome.done(context.getString(R.string.log_sleep_set, minutes))
     }
 
     private fun openPlayer(controller: MediaController?): String? {

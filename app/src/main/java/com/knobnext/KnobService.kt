@@ -543,20 +543,16 @@ class KnobService : AccessibilityService() {
             return log(getString(R.string.log_pocket, name))
         }
         restoreVolumeTo?.let(::restoreVolume)
+        // Same decision as Media.perform: the player's own state, or the audio when there is no player.
+        val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: audio.isMusicActive)
         if (action == Action.PLAY_PAUSE) {
-            // Same decision as Media.perform: the player's own state, or the audio when there is no player.
-            val pausing = player?.isPlaying() ?: audio.isMusicActive
             pausedAt = if (pausing) SystemClock.elapsedRealtime() else 0L
             if (pausing) stayAwake()
         }
-        val problem = execute(action, player)
-        log(problem?.let { "$name → ${getString(actionLabel(action))}: $it" }
+        val outcome = execute(action, player)
+        log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" }
             ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
-        if (action == Action.NEXT || action == Action.PREVIOUS || action == Action.RESTART) {
-            if (!prefs.cueScreenOffOnly || !power.isInteractive) {
-                cues.play(prefs.cueStyle, forward = action == Action.NEXT, prefs.cueVolume)
-            }
-        }
+        playCue(action, outcome, pausing)
         if ((action == Action.NEXT || action == Action.PREVIOUS) && prefs.announceSkips && !power.isInteractive) {
             announceNewTrack(player)
         }
@@ -659,18 +655,44 @@ class KnobService : AccessibilityService() {
     private fun pocketCovered(): Boolean =
         prefs.pocketGuard && if (wave.running) wave.covered else proximity.isCovered()
 
-    private fun execute(action: Action, controller: MediaController?): String? {
-        val problem = when (action) {
+    private fun execute(action: Action, controller: MediaController?): Outcome {
+        val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
             Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER ->
                 extras.perform(action, controller)
             else -> {
                 media.perform(action, controller)
-                null
+                Outcome.DONE
             }
         }
         if (prefs.vibrate) haptics.play(action)
-        return problem
+        return outcome
+    }
+
+    /** The sound for what just happened, if cues are on for it. */
+    private fun playCue(action: Action, outcome: Outcome, pausing: Boolean) {
+        val style = prefs.cueStyle
+        if (style == CueStyle.OFF || prefs.cueScreenOffOnly && power.isInteractive) return
+        val unchanged = outcome.result == Outcome.Result.UNCHANGED
+        val cue = when {
+            outcome.result == Outcome.Result.FAILED -> Cue.ERROR
+            else -> when (action) {
+                Action.NEXT -> Cue.FORWARD
+                Action.PREVIOUS, Action.RESTART -> Cue.BACK
+                Action.PLAY_PAUSE -> if (pausing) Cue.PAUSE else Cue.PLAY
+                Action.SEEK_FORWARD -> Cue.SEEK_FORWARD
+                Action.SEEK_BACK -> Cue.SEEK_BACK
+                Action.LIKE -> if (unchanged) Cue.NEUTRAL else Cue.LIKE
+                Action.SHUFFLE, Action.REPEAT, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER ->
+                    if (unchanged) Cue.NEUTRAL else Cue.TOGGLE
+                Action.SLEEP_TIMER -> if (unchanged) Cue.NEUTRAL else Cue.TIMER
+                Action.OPEN_PLAYER -> Cue.NEUTRAL
+                // Volume is heard anyway; "announce" speaks.
+                Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE -> null
+            }
+        } ?: return
+        if (prefs.cueScope == CueScope.TRACKS && cue != Cue.FORWARD && cue != Cue.BACK) return
+        cues.play(cue, style, prefs.cueVolume)
     }
 
     private fun log(message: String) {

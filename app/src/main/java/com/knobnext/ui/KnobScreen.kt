@@ -53,6 +53,8 @@ import com.knobnext.GestureGroup
 import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
+import com.knobnext.Cue
+import com.knobnext.CueScope
 import com.knobnext.CueStyle
 import com.knobnext.CueVolume
 import com.knobnext.Cues
@@ -852,7 +854,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     item { EventLog(prefs) }
 }
 
-/** The optional sound on track changes: style, loudness, when, and a preview. */
+/** The optional sounds after actions: timbre, which actions, loudness, when, and a preview. */
 @Composable
 private fun CueCard(ctx: PageContext) {
     val s = ctx.s
@@ -861,14 +863,16 @@ private fun CueCard(ctx: PageContext) {
     val cues = remember { Cues() }
     DisposableEffect(cues) { onDispose { cues.release() } }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val preview: (CueStyle, CueVolume) -> Unit = { style, volume ->
+    val preview: (CueStyle, CueScope, CueVolume) -> Unit = { style, which, volume ->
         scope.launch {
-            cues.play(style, forward = true, volume)
-            kotlinx.coroutines.delay(CUE_PREVIEW_GAP_MS)
-            cues.play(style, forward = false, volume)
+            val sample = if (which == CueScope.TRACKS) listOf(Cue.FORWARD, Cue.BACK) else listOf(Cue.FORWARD, Cue.BACK, Cue.LIKE, Cue.ERROR)
+            sample.forEach {
+                cues.play(it, style, volume)
+                kotlinx.coroutines.delay(CUE_PREVIEW_GAP_MS)
+            }
         }
     }
-    Group(if (on) 4 else 1) {
+    Group(if (on) 5 else 1) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ControlRow(shape(0), stringResource(R.string.cue_title), caption = stringResource(R.string.cue_hint), enabled = s.enabled) {
                 ConnectedChoice(
@@ -881,14 +885,22 @@ private fun CueCard(ctx: PageContext) {
                     selected = s.cueStyle,
                     onSelect = {
                         prefs.cueStyle = it
-                        preview(it, s.cueVolume)
+                        preview(it, s.cueScope, s.cueVolume)
                     },
                     enabled = s.enabled,
                 )
             }
             AnimatedVisibility(on) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    ControlRow(shape(1), stringResource(R.string.cue_volume), enabled = s.enabled) {
+                    ControlRow(shape(1), stringResource(R.string.cue_scope), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(CueScope.TRACKS to R.string.cue_scope_tracks, CueScope.ALL to R.string.cue_scope_all),
+                            selected = s.cueScope,
+                            onSelect = { prefs.cueScope = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    ControlRow(shape(2), stringResource(R.string.cue_volume), enabled = s.enabled) {
                         ConnectedChoice(
                             options = listOf(
                                 CueVolume.LOW to R.string.cue_volume_low,
@@ -898,20 +910,22 @@ private fun CueCard(ctx: PageContext) {
                             selected = s.cueVolume,
                             onSelect = {
                                 prefs.cueVolume = it
-                                preview(s.cueStyle, it)
+                                preview(s.cueStyle, s.cueScope, it)
                             },
                             enabled = s.enabled,
                         )
                     }
                     SwitchRow(
-                        shape(2), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
+                        shape(3), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
                         subtitle = stringResource(R.string.cue_screen_off_only_hint), enabled = s.enabled,
                     )
                     ListRow(
-                        shape(3), stringResource(R.string.cue_preview),
-                        subtitle = stringResource(R.string.cue_preview_hint),
+                        shape(4), stringResource(R.string.cue_preview),
+                        subtitle = stringResource(
+                            if (s.cueScope == CueScope.TRACKS) R.string.cue_preview_hint_tracks else R.string.cue_preview_hint_all,
+                        ),
                         enabled = s.enabled,
-                        onClick = { preview(s.cueStyle, s.cueVolume) },
+                        onClick = { preview(s.cueStyle, s.cueScope, s.cueVolume) },
                         leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.Play) },
                     )
                 }
@@ -920,7 +934,7 @@ private fun CueCard(ctx: PageContext) {
     }
 }
 
-private const val CUE_PREVIEW_GAP_MS = 450L
+private const val CUE_PREVIEW_GAP_MS = 550L
 
 // ---------------------------------------------------------------- Building blocks
 
