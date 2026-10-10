@@ -360,4 +360,67 @@
     <string name="hold_advice_title">Подстроить удержание</string>
     <string name="hold_advice_body">Ваши короткие нажатия длятся до %1$d мс. Удержание %2$d мс подойдёт лучше: без случайных срабатываний и без лишнего ожидания.</string>
     <string name="hold_advice_button">Поставить %1$d мс</string>
+
+    <!-- Improvements: actions -->
+    <string name="action_time_left">Сколько осталось</string>
+    <string name="log_unliked">убрано из любимого</string>
+    <string name="log_like_not_confirmed">плеер не подтвердил «нравится»</string>
+    <string name="log_no_duration">плеер не сообщает длительность</string>
+    <string name="log_time_left">осталось %1$d:%2$02d</string>
+    <string name="speak_time_left">Осталось</string>
+    <plurals name="minutes">
+        <item quantity="one">%d минута</item>
+        <item quantity="few">%d минуты</item>
+        <item quantity="many">%d минут</item>
+        <item quantity="other">%d минуты</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d секунда</item>
+        <item quantity="few">%d секунды</item>
+        <item quantity="many">%d секунд</item>
+        <item quantity="other">%d секунды</item>
+    </plurals>
+    <string name="speak_sleep_extended">Таймер сна: ещё %1$d минут</string>
+    <string name="log_sleep_extended">таймер +%1$d мин, пауза в %2$s</string>
+    <string name="speak_sleep_track_end">Пауза в конце трека</string>
+    <string name="log_sleep_track_end">пауза в конце трека, в %1$s</string>
+    <string name="log_sleep_no_length">длина трека неизвестна — таймер на %1$d мин</string>
+    <string name="log_shake_extended">встряхнули — таймер +%1$d мин</string>
+    <string name="minutes_track">Трек</string>
+    <string name="pref_sleep_extend">Повтор жеста продлевает</string>
+    <string name="pref_sleep_extend_hint">Повторный жест добавляет 15 минут, а не отменяет таймер. Пока музыка затихает, можно встряхнуть телефон — тоже +15 минут. Отменить — в приложении.</string>
+
+    <!-- Improvements: settings -->
+    <string name="actions_title">Действия</string>
+    <string name="pref_seek_step">Шаг перемотки</string>
+    <string name="pref_seek_step_hint">Удержание с перемоткой перематывает, пока держите кнопку, всё быстрее</string>
+    <string name="seek_5">5 с</string>
+    <string name="seek_10">10 с</string>
+    <string name="seek_15">15 с</string>
+    <string name="seek_30">30 с</string>
+    <string name="seek_common">Общий</string>
+    <string name="pref_like_toggle">Повторный «нравится» снимает лайк</string>
+    <string name="pref_like_toggle_hint">Если трек уже нравится, жест убирает его из любимого</string>
+    <string name="pref_announce_all">Называть каждый новый трек</string>
+    <string name="pref_announce_all_hint">При выключенном экране — и когда трек сменился сам</string>
+    <string name="back_tap_eco">Экономить батарею</string>
+    <string name="back_tap_eco_hint">При выключенном экране реже читать датчик. Постукивание может срабатывать хуже.</string>
+
+    <!-- Improvements: profiles -->
+    <string name="profile_seek_step">Шаг перемотки в этом приложении</string>
+    <string name="profile_cues_off">Без звуковых сигналов</string>
+    <string name="profile_cues_off_hint">В этом приложении сигналы после жестов не звучат</string>
+    <string name="suggest_title">%1$s: перемотка вместо треков?</string>
+    <string name="suggest_body">Для видео и подкастов удобнее, когда удержание и двойное нажатие перематывают, а долгое удержание переключает. Профиль включится сам, когда играет это приложение.</string>
+    <string name="suggest_yes">Сделать</string>
+    <string name="suggest_no">Не надо</string>
+
+    <!-- Improvements: updates, diagnostics, tile -->
+    <string name="update_channel">Обновления</string>
+    <string name="update_notification_title">Вышла версия %1$s</string>
+    <string name="update_notification_text">Нажмите, чтобы обновить KnobNext</string>
+    <string name="diag_fix_all">Исправить</string>
+    <string name="diag_fix_hint">Нажмите на строку с ошибкой — откроется место, где это исправить</string>
+    <string name="tile_on_screen_off">Вкл · без экрана</string>
+    <string name="tile_on_always">Вкл · подряд всегда</string>
 </resources>

@@ -19,11 +19,20 @@ class KnobTileService : TileService() {
 
     private fun render() {
         val tile = qsTile ?: return
-        val enabled = Prefs(this).enabled
+        val prefs = Prefs(this)
+        val enabled = prefs.enabled
         tile.state = if (enabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = getString(R.string.app_name)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = getString(if (enabled) R.string.tile_on else R.string.tile_off)
+            // The subtitle also tells whether press sequences listen, the setting people forget about.
+            tile.subtitle = getString(
+                when {
+                    !enabled -> R.string.tile_off
+                    prefs.doubleMode == DoubleMode.SCREEN_OFF -> R.string.tile_on_screen_off
+                    prefs.doubleMode == DoubleMode.ALWAYS -> R.string.tile_on_always
+                    else -> R.string.tile_on
+                },
+            )
         }
         tile.updateTile()
     }

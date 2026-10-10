@@ -37,16 +37,40 @@ import com.knobnext.ScreenOffService
 import com.knobnext.Settings
 
 /** One line of the diagnostics: [ok] null means "just information". */
-private class Check(val title: String, val value: String, val ok: Boolean?)
+/** [fix] opens the place where a failing check is fixed. */
+private class Check(val title: String, val value: String, val ok: Boolean?, val fix: (() -> Unit)? = null)
 
 /** Everything that decides whether gestures work, in one list, plus a report to send. */
 @Composable
-fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: NowPlaying?, versionName: String) {
+fun DiagnosticsCard(
+    s: Settings,
+    prefs: Prefs,
+    setup: SetupState,
+    actions: ScreenActions,
+    nowPlaying: NowPlaying?,
+    versionName: String,
+) {
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
     val backgroundRunning by ScreenOffService.runningFlow.collectAsState()
-    val checks = buildChecks(context, s, setup, nowPlaying, versionName, backgroundRunning)
+    val checks = buildChecks(context, s, prefs, setup, actions, nowPlaying, versionName, backgroundRunning)
+    val firstFix = checks.firstOrNull { it.ok == false && it.fix != null }?.fix
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (firstFix != null) {
+            Button(
+                onClick = firstFix,
+                shapes = ButtonDefaults.shapes(),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.diag_fix_all), style = MaterialTheme.typography.titleSmall)
+            }
+            Text(
+                stringResource(R.string.diag_fix_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
         Group(checks.size) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 checks.forEachIndexed { i, c ->
@@ -54,6 +78,7 @@ fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: No
                         shape = shape(i),
                         title = c.title,
                         subtitle = c.value,
+                        onClick = if (c.ok == false) c.fix else null,
                         leading = {
                             when (c.ok) {
                                 true -> ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
@@ -85,7 +110,9 @@ fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: No
 private fun buildChecks(
     context: Context,
     s: Settings,
+    prefs: Prefs,
     setup: SetupState,
+    actions: ScreenActions,
     nowPlaying: NowPlaying?,
     versionName: String,
     backgroundRunning: Boolean,
@@ -95,6 +122,7 @@ private fun buildChecks(
             stringResource(R.string.diag_gestures),
             stringResource(if (s.enabled) R.string.diag_gestures_on else R.string.diag_gestures_off),
             s.enabled,
+            fix = { prefs.enabled = true },
         ),
     )
     add(
@@ -108,10 +136,11 @@ private fun buildChecks(
                 },
             ),
             setup.serviceEnabled && setup.serviceRunning,
+            fix = actions.openAccessibility,
         ),
     )
     if (setup.restricted == Restricted.BLOCKED && !setup.serviceEnabled) {
-        add(Check(stringResource(R.string.diag_restricted), stringResource(R.string.diag_restricted_blocked), false))
+        add(Check(stringResource(R.string.diag_restricted), stringResource(R.string.diag_restricted_blocked), false, actions.openAppInfo))
     }
     val needsBackground = s.doubleMode != DoubleMode.OFF || s.backTap || s.flip || s.twist || s.wave
     add(
@@ -122,6 +151,8 @@ private fun buildChecks(
                 stringResource(R.string.diag_background),
                 stringResource(if (backgroundRunning) R.string.diag_background_ok else R.string.diag_background_stopped),
                 backgroundRunning,
+                // Usually stopped because the system may not start it from the background.
+                fix = if (setup.batteryUnrestricted) null else actions.openBattery,
             )
         },
     )
@@ -130,6 +161,7 @@ private fun buildChecks(
             stringResource(R.string.diag_battery),
             stringResource(if (setup.batteryUnrestricted) R.string.diag_battery_ok else R.string.diag_battery_limited),
             if (needsBackground) setup.batteryUnrestricted else null,
+            fix = actions.openBattery,
         ),
     )
     add(
@@ -137,6 +169,7 @@ private fun buildChecks(
             stringResource(R.string.diag_player_access),
             stringResource(if (setup.playerAccess) R.string.diag_player_ok else R.string.diag_player_missing),
             setup.playerAccess,
+            fix = actions.openNotificationAccess,
         ),
     )
     add(

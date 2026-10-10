@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
@@ -87,6 +87,16 @@ data class Settings(
     val cleanTitles: Boolean,
     val ttsEngine: String?,
     val ttsRate: Float,
+    val seekStepSec: Int,
+    val likeToggle: Boolean,
+    val sleepExtend: Boolean,
+    val announceAllTracks: Boolean,
+    val backTapEco: Boolean,
+    val dismissedSuggestions: Set<String>,
+    /** Apps with their own seek step → seconds. */
+    val profileSeekSteps: Map<String, Int>,
+    /** Apps whose sound cues are off. */
+    val cuesOffApps: Set<String>,
     val actions: Map<Gesture, Action>,
     /** Apps with their own gesture set → that set. */
     val profiles: Map<String, Map<Gesture, Action>>,
@@ -211,6 +221,7 @@ class Prefs(context: Context) {
         get() = sp.getInt("wave_count", 2).coerceIn(1, 2)
         set(v) = sp.edit().putInt("wave_count", v).apply()
 
+    /** Sleep-timer length in minutes; [SLEEP_TO_TRACK_END] pauses when the current track ends. */
     var sleepMinutes: Int
         get() = sp.getInt("sleep_minutes", 30)
         set(v) = sp.edit().putInt("sleep_minutes", v).apply()
@@ -268,6 +279,78 @@ class Prefs(context: Context) {
     var ttsRate: Float
         get() = sp.getFloat("tts_rate", 1.0f)
         set(v) = sp.edit().putFloat("tts_rate", v).apply()
+
+    /** How far one seek jumps, in seconds. */
+    var seekStepSec: Int
+        get() = sp.getInt("seek_step_sec", 10)
+        set(v) = sp.edit().putInt("seek_step_sec", v).apply()
+
+    /** The seek step while [pkg] plays: its own if set, otherwise the common one. */
+    fun seekStepMs(pkg: String?): Long {
+        val own = pkg?.let { sp.getInt("seek_step_sec@$it", 0) } ?: 0
+        return (if (own > 0) own else seekStepSec) * 1000L
+    }
+
+    /** 0 = use the common step. */
+    fun setSeekStep(pkg: String, sec: Int) = sp.edit().putInt("seek_step_sec@$pkg", sec).apply()
+
+    /** Sound cues are off while [pkg] plays. */
+    fun cuesOff(pkg: String?): Boolean = pkg != null && sp.getBoolean("cues_off@$pkg", false)
+
+    fun setCuesOff(pkg: String, off: Boolean) = sp.edit().putBoolean("cues_off@$pkg", off).apply()
+
+    /** A repeated "like" removes the like. */
+    var likeToggle: Boolean
+        get() = sp.getBoolean("like_toggle", false)
+        set(v) = sp.edit().putBoolean("like_toggle", v).apply()
+
+    /** Repeating the sleep-timer gesture adds time instead of cancelling. */
+    var sleepExtend: Boolean
+        get() = sp.getBoolean("sleep_extend", true)
+        set(v) = sp.edit().putBoolean("sleep_extend", v).apply()
+
+    /** With the screen off, say the name of every new track, not only after a gesture. */
+    var announceAllTracks: Boolean
+        get() = sp.getBoolean("announce_all_tracks", false)
+        set(v) = sp.edit().putBoolean("announce_all_tracks", v).apply()
+
+    /** With the screen off, read the accelerometer for back taps less often (less battery, less sensitive). */
+    var backTapEco: Boolean
+        get() = sp.getBoolean("back_tap_eco", false)
+        set(v) = sp.edit().putBoolean("back_tap_eco", v).apply()
+
+    /** Apps for which the "make a profile" suggestion was dismissed. */
+    var dismissedSuggestions: Set<String>
+        get() = sp.getStringSet("dismissed_suggestions", null)?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("dismissed_suggestions", v).apply()
+
+    /** Gaps between presses of recent recognized sequences, ms. */
+    val sequenceGaps: List<Int>
+        get() = statsSp.getString("sequence_gaps", null)?.split(',')?.mapNotNull { it.toIntOrNull() }.orEmpty()
+
+    fun recordSequenceGaps(gaps: List<Int>) {
+        if (gaps.isEmpty()) return
+        val kept = (sequenceGaps + gaps).takeLast(TAP_SAMPLES)
+        statsSp.edit().putString("sequence_gaps", kept.joinToString(",")).apply()
+    }
+
+    /** Players whose notification shows whether the track is liked (seen flipping after a like). */
+    val likeReflectingPlayers: Set<String>
+        get() = statsSp.getStringSet("like_reflecting", null)?.toSet() ?: emptySet()
+
+    fun markLikeReflecting(pkg: String) {
+        if (pkg !in likeReflectingPlayers) statsSp.edit().putStringSet("like_reflecting", likeReflectingPlayers + pkg).apply()
+    }
+
+    /** The newest release a notification was already shown for. */
+    var updateNotified: String?
+        get() = statsSp.getString("update_notified", null)
+        set(v) = statsSp.edit().putString("update_notified", v).apply()
+
+    /** Whether the notification permission was already asked for (it is asked once). */
+    var notificationsAsked: Boolean
+        get() = statsSp.getBoolean("notifications_asked", false)
+        set(v) = statsSp.edit().putBoolean("notifications_asked", v).apply()
 
     /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
     var sleepUntil: Long
@@ -334,6 +417,7 @@ class Prefs(context: Context) {
     fun deleteProfile(pkg: String) {
         val edit = sp.edit()
         Gesture.entries.forEach { edit.remove(profileKey(it, pkg)) }
+        edit.remove("seek_step_sec@$pkg").remove("cues_off@$pkg")
         edit.putStringSet("profile_apps", profileApps - pkg).apply()
     }
 
@@ -367,6 +451,14 @@ class Prefs(context: Context) {
         cleanTitles = cleanTitles,
         ttsEngine = ttsEngine,
         ttsRate = ttsRate,
+        seekStepSec = seekStepSec,
+        likeToggle = likeToggle,
+        sleepExtend = sleepExtend,
+        announceAllTracks = announceAllTracks,
+        backTapEco = backTapEco,
+        dismissedSuggestions = dismissedSuggestions,
+        profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },
+        cuesOffApps = profileApps.filter { cuesOff(it) }.toSet(),
         actions = Gesture.entries.associateWith { action(it) },
         profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )
@@ -396,6 +488,7 @@ class Prefs(context: Context) {
         )
 
         const val TAP_SAMPLES = 30
+        const val SLEEP_TO_TRACK_END = -1
         const val LONG_PRESS_MIN = 250
         const val LONG_PRESS_MAX = 1500
         const val LONG_PRESS_STEP = 50

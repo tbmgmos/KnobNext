@@ -20,7 +20,7 @@ import android.view.KeyEvent
 
 /** What an action did: [message] goes to the event log, [result] picks the sound cue. */
 class Outcome(val message: String?, val result: Result) {
-    enum class Result { DONE, UNCHANGED, FAILED }
+    enum class Result { DONE, UNCHANGED, UNDONE, FAILED }
 
     companion object {
         val DONE = Outcome(null, Result.DONE)
@@ -31,6 +31,9 @@ class Outcome(val message: String?, val result: Result) {
         fun unchanged(message: String) = Outcome(message, Result.UNCHANGED)
 
         fun failed(message: String) = Outcome(message, Result.FAILED)
+
+        /** The opposite happened on purpose: a like removed, a timer cancelled. */
+        fun undone(message: String) = Outcome(message, Result.UNDONE)
 
         /** For actions whose only message is why they failed. */
         fun of(problem: String?) = if (problem == null) DONE else failed(problem)
@@ -52,12 +55,16 @@ class Extras(private val context: Context, private val media: Media, private val
 
     private val torch = Torch(context, handler)
 
+    /** Called when a player that normally shows a liked track didn't, a moment after "like". */
+    var onLikeNotConfirmed: ((pkg: String) -> Unit)? = null
+
     fun perform(action: Action, controller: MediaController?): Outcome = when (action) {
         Action.ANNOUNCE -> Outcome.of(announce(controller))
         Action.LIKE -> like(controller)
         Action.SHUFFLE -> Outcome.of(shuffle(controller))
         Action.REPEAT -> Outcome.of(repeat(controller))
-        Action.SLEEP_TIMER -> toggleSleepTimer()
+        Action.SLEEP_TIMER -> toggleSleepTimer(controller)
+        Action.TIME_LEFT -> timeLeft(controller)
         Action.OPEN_PLAYER -> Outcome.of(openPlayer(controller))
         Action.RESTART -> Outcome.of(restart(controller))
         Action.SWITCH_PLAYER -> switchPlayer(controller)
@@ -130,6 +137,42 @@ class Extras(private val context: Context, private val media: Media, private val
     private fun isLike(text: String) = LIKE.any { it.containsMatchIn(text) } && UNLIKE.none { it.containsMatchIn(text) }
     private fun isUnlike(text: String) = LIKE.any { it.containsMatchIn(text) } && UNLIKE.any { it.containsMatchIn(text) }
 
+    /** "Remove from Liked Songs" — not "dislike", which is a different button. */
+    private fun isRemoveLike(text: String) = LIKE.any { it.containsMatchIn(text) } && REMOVE.any { it.containsMatchIn(text) }
+
+    /**
+     * A moment after pressing "like", look at the player's notification again. Players that show the
+     * liked state change their buttons; once a player has been seen doing that, unchanged buttons mean
+     * the like didn't go through. Players that never change them are never reported.
+     */
+    private fun verifyLike(pkg: String, before: List<String>) {
+        handler.postDelayed({
+            val after = notificationButtons(pkg).map { it.first }
+            when {
+                after.isEmpty() -> Unit
+                after != before -> prefs.markLikeReflecting(pkg)
+                pkg in prefs.likeReflectingPlayers -> onLikeNotConfirmed?.invoke(pkg)
+            }
+        }, LIKE_CHECK_MS)
+    }
+
+    /** Speaks how much of the track is left. */
+    private fun timeLeft(controller: MediaController?): Outcome {
+        val (position, duration) = media.progress(controller)
+            ?: return Outcome.failed(context.getString(R.string.log_no_duration))
+        val left = ((duration - position) / 1000).toInt()
+        val minutes = left / 60
+        val seconds = left % 60
+        val res = context.resources
+        val phrase = buildString {
+            append(context.getString(R.string.speak_time_left))
+            if (minutes > 0) append(' ').append(res.getQuantityString(R.plurals.minutes, minutes, minutes))
+            if (seconds > 0 || minutes == 0) append(' ').append(res.getQuantityString(R.plurals.seconds, seconds, seconds))
+        }
+        speaker.say(phrase)
+        return Outcome.done(context.getString(R.string.log_time_left, minutes, seconds))
+    }
+
     /** Buttons of the player's own notification, as (lower-cased title, action). */
     private fun notificationButtons(pkg: String) =
         KnobNotificationListener.instance?.playerActions(pkg).orEmpty()
@@ -152,8 +195,19 @@ class Extras(private val context: Context, private val media: Media, private val
      */
     private fun like(controller: MediaController?): Outcome {
         val c = controller ?: return Outcome.failed(context.getString(R.string.log_needs_access))
-        val buttons = notificationButtons(c.packageName)
-        buttons.firstOrNull { (title, _) -> isLike(title) }?.let { (_, action) -> if (press(action)) return Outcome.DONE }
+        val pkg = c.packageName
+        val buttons = notificationButtons(pkg)
+        buttons.firstOrNull { (title, _) -> isLike(title) }?.let { (_, action) ->
+            if (press(action)) {
+                verifyLike(pkg, buttons.map { it.first })
+                return Outcome.DONE
+            }
+        }
+        // "Remove from liked" is there: the track is liked already; with the toggle on, unlike it.
+        buttons.firstOrNull { (title, _) -> isRemoveLike(title) }?.let { (_, action) ->
+            if (prefs.likeToggle && press(action)) return Outcome.undone(context.getString(R.string.log_unliked))
+            return Outcome.unchanged(context.getString(R.string.log_already_liked))
+        }
         if (buttons.any { (title, _) -> isUnlike(title) }) return Outcome.unchanged(context.getString(R.string.log_already_liked))
 
         val custom = c.playbackState?.customActions.orEmpty()
@@ -161,6 +215,12 @@ class Extras(private val context: Context, private val media: Media, private val
         custom.firstOrNull { isLike(text(it)) }?.let {
             c.transportControls.sendCustomAction(it, null)
             return Outcome.DONE
+        }
+        if (prefs.likeToggle) {
+            custom.firstOrNull { isRemoveLike(text(it)) }?.let {
+                c.transportControls.sendCustomAction(it, null)
+                return Outcome.undone(context.getString(R.string.log_unliked))
+            }
         }
         when (c.ratingType) {
             Rating.RATING_THUMB_UP_DOWN -> c.transportControls.setRating(Rating.newThumbRating(true))
@@ -214,17 +274,37 @@ class Extras(private val context: Context, private val media: Media, private val
         return null
     }
 
-    private fun toggleSleepTimer(): Outcome {
+    private fun toggleSleepTimer(controller: MediaController?): Outcome {
         if (SleepTimer.active(prefs)) {
+            if (prefs.sleepExtend) {
+                SleepTimer.extend(context, prefs, SleepTimer.EXTEND_MINUTES)
+                speaker.say(context.getString(R.string.speak_sleep_extended, SleepTimer.EXTEND_MINUTES))
+                return Outcome.done(context.getString(R.string.log_sleep_extended, SleepTimer.EXTEND_MINUTES, clock(prefs.sleepUntil)))
+            }
             SleepTimer.cancel(context, prefs)
             speaker.say(context.getString(R.string.speak_sleep_cancelled))
-            return Outcome.unchanged(context.getString(R.string.log_sleep_cancelled))
+            return Outcome.undone(context.getString(R.string.log_sleep_cancelled))
         }
         val minutes = prefs.sleepMinutes
+        if (minutes == Prefs.SLEEP_TO_TRACK_END) {
+            val progress = media.progress(controller)
+            if (progress != null) {
+                SleepTimer.startIn(context, prefs, progress.second - progress.first)
+                speaker.say(context.getString(R.string.speak_sleep_track_end))
+                return Outcome.done(context.getString(R.string.log_sleep_track_end, clock(prefs.sleepUntil)))
+            }
+            // The player doesn't say how long the track is: fall back to a fixed time.
+            SleepTimer.start(context, prefs, SleepTimer.FALLBACK_MINUTES)
+            speaker.say(context.getString(R.string.speak_sleep_set, SleepTimer.FALLBACK_MINUTES))
+            return Outcome.done(context.getString(R.string.log_sleep_no_length, SleepTimer.FALLBACK_MINUTES))
+        }
         SleepTimer.start(context, prefs, minutes)
         speaker.say(context.getString(R.string.speak_sleep_set, minutes))
         return Outcome.done(context.getString(R.string.log_sleep_set, minutes))
     }
+
+    private fun clock(wallMs: Long): String =
+        java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(wallMs))
 
     private fun openPlayer(controller: MediaController?): String? {
         val pkg = controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player)
@@ -246,6 +326,9 @@ class Extras(private val context: Context, private val media: Media, private val
             Regex("collection"), Regex("library"), Regex("save"), Regex("нрав"), Regex("любим"), Regex("избранн"),
             Regex("медиатек"), Regex("сохран"),
         )
+        /** Words of a "remove from liked" button. */
+        private val REMOVE = listOf(Regex("remove"), Regex("unlike"), Regex("удал"), Regex("убрать"))
+        private const val LIKE_CHECK_MS = 1_500L
         private val SHUFFLE = listOf(Regex("shuffle"), Regex("перемеш"), Regex("случайн"))
         private val REPEAT = listOf(Regex("repeat"), Regex("повтор"))
 
@@ -275,11 +358,26 @@ object SleepTimer {
     @Volatile
     var fader: (() -> Unit)? = null
 
-    fun start(context: Context, prefs: Prefs, minutes: Int) {
-        val delay = minutes * 60_000L
+    /** Added by a repeated gesture (or a shake while the music fades out). */
+    const val EXTEND_MINUTES = 15
+
+    /** "Until the end of the track" when the player doesn't tell the track's length. */
+    const val FALLBACK_MINUTES = 30
+
+    fun start(context: Context, prefs: Prefs, minutes: Int) = startIn(context, prefs, minutes * 60_000L)
+
+    fun startIn(context: Context, prefs: Prefs, delayMs: Long) {
+        val delay = delayMs.coerceAtLeast(0L)
+        context.getSystemService(AlarmManager::class.java).cancel(alarm(context, ACTION_PAUSE))
         // Fires when the fade has to begin, so the music is paused right at the time shown.
         setAlarm(context, ACTION_FADE, (delay - FADE_MS).coerceAtLeast(0L))
         prefs.sleepUntil = System.currentTimeMillis() + delay
+    }
+
+    /** Moves the pause [minutes] later (from now, if the timer has already gone off). */
+    fun extend(context: Context, prefs: Prefs, minutes: Int) {
+        val now = System.currentTimeMillis()
+        startIn(context, prefs, maxOf(prefs.sleepUntil, now) - now + minutes * 60_000L)
     }
 
     fun cancel(context: Context, prefs: Prefs) {

@@ -414,6 +414,7 @@ fun actionLabel(a: Action) = when (a) {
     Action.SWITCH_PLAYER -> R.string.action_switch_player
     Action.FLASHLIGHT -> R.string.action_flashlight
     Action.RINGER -> R.string.action_ringer
+    Action.TIME_LEFT -> R.string.action_time_left
 }
 
 fun actionIcon(a: Action) = when (a) {
@@ -435,6 +436,7 @@ fun actionIcon(a: Action) = when (a) {
     Action.SWITCH_PLAYER -> KnobIcons.SwapHoriz
     Action.FLASHLIGHT -> KnobIcons.Flashlight
     Action.RINGER -> KnobIcons.Vibration
+    Action.TIME_LEFT -> KnobIcons.Schedule
 }
 
 fun gestureLabel(g: Gesture) = when (g) {

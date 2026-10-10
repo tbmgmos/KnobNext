@@ -145,8 +145,8 @@ enum class CueGroup(vararg val sample: Cue) {
             Action.SHUFFLE, Action.REPEAT, Action.SWITCH_PLAYER -> MODES
             Action.SLEEP_TIMER -> TIMER
             Action.FLASHLIGHT, Action.RINGER, Action.OPEN_PLAYER -> OTHER
-            // Volume is heard anyway; "announce" speaks.
-            Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE -> null
+            // Volume is heard anyway; "announce" and "time left" speak.
+            Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE, Action.TIME_LEFT -> null
         }
     }
 }
@@ -163,6 +163,7 @@ enum class Cue(vararg val notes: Pair<Double, Int>) {
     SEEK_FORWARD(988.0 to 40, 988.0 to 40),
     SEEK_BACK(659.0 to 40, 659.0 to 40),
     LIKE(523.0 to 60, 659.0 to 60, 784.0 to 120),
+    UNLIKE(784.0 to 60, 659.0 to 60, 523.0 to 120),
     TOGGLE(880.0 to 45, 698.0 to 45, 880.0 to 70),
     TIMER(784.0 to 80, 659.0 to 80, 523.0 to 140),
     NEUTRAL(698.0 to 60),

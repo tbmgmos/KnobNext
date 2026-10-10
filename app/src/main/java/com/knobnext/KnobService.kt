@@ -53,6 +53,23 @@ class KnobService : AccessibilityService() {
         private var rampSteps = 0
         private val up = keyCode == KeyEvent.KEYCODE_VOLUME_UP
 
+        // Seeking held down: repeats, a bigger jump the longer the key is held. Capped like the ramp.
+        private var seekRepeats = 0
+        private var seekAction = Action.NONE
+        val seekRamp = object : Runnable {
+            override fun run() {
+                seekRepeats++
+                val factor = when {
+                    seekRepeats < SEEK_FASTER_AFTER -> 1
+                    seekRepeats < SEEK_FASTER_AFTER * 2 -> 2
+                    else -> 3
+                }
+                media.perform(seekAction, controller, prefs.seekStepMs(controller?.packageName) * factor)
+                if (prefs.vibrate) haptics.tick()
+                if (seekRepeats < SEEK_MAX_REPEATS) handler.postDelayed(this, SEEK_REPEAT_MS)
+            }
+        }
+
         // Capped: if the release is ever lost, the volume must not keep changing on its own.
         val ramp = object : Runnable {
             override fun run() {
@@ -78,10 +95,22 @@ class KnobService : AccessibilityService() {
             val action = prefs.action(gesture, pkg)
             val long = prefs.action(if (up) Gesture.LONG_HOLD_UP else Gesture.LONG_HOLD_DOWN, pkg)
             val volume = action == Action.VOLUME_UP || action == Action.VOLUME_DOWN
+            val seek = action == Action.SEEK_FORWARD || action == Action.SEEK_BACK
             when {
                 volume && !GestureTest.active -> {
                     rampDirection = if (action == Action.VOLUME_UP) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                    // The ramp itself is silent at first; a tick says the hold was taken.
+                    if (prefs.vibrate) haptics.tick()
                     ramp.run()
+                }
+                seek && (tapHold || long == Action.NONE) && !GestureTest.active -> {
+                    holdFired = !tapHold
+                    // The first jump goes through the normal path (log, sound, checks); the rest repeat it.
+                    if (fireGesture(gesture, controller)) {
+                        seekAction = action
+                        seekRepeats = 0
+                        handler.postDelayed(seekRamp, SEEK_REPEAT_MS)
+                    }
                 }
                 !tapHold && long != Action.NONE -> {
                     holdArmed = action
@@ -115,6 +144,7 @@ class KnobService : AccessibilityService() {
         fun cancel() {
             handler.removeCallbacks(this)
             handler.removeCallbacks(ramp)
+            handler.removeCallbacks(seekRamp)
             handler.removeCallbacks(longHold)
         }
     }
@@ -155,9 +185,17 @@ class KnobService : AccessibilityService() {
 
     // The sleep timer is fading the music out.
     private var fading = false
+    private var fadeVolume = -1
+    private var fadeStep: Runnable? = null
+    private val shake by lazy { ShakeDetector(this) { extendDuringFade(viaShake = true) } }
 
-    // Read by the sensor thread at ~400 Hz, so it is cached here instead of hitting preferences.
+    // Read by the sensor thread at ~400 Hz, so they are cached here instead of hitting preferences.
     @Volatile private var tapThreshold = TapSensitivity.MEDIUM.threshold
+    @Volatile private var backTapTriple = true
+
+    // Speaks every new track with the screen off, when that option is on.
+    private var trackWatcher: NowPlayingTracker? = null
+    private var announcedTrack: String? = null
 
     private val motionCheck = object : Runnable {
         override fun run() {
@@ -176,6 +214,8 @@ class KnobService : AccessibilityService() {
     private var ignoreVolumeUntil = 0L
     private var lastVolume = -1
     private val sequenceFire = Runnable { fireSequence() }
+    private val sequenceGaps = ArrayList<Int>()
+    private var sequenceGap = SEQUENCE_GAP_MS
     private lateinit var volumeWatcher: VolumeWatcher
 
     override fun onServiceConnected() {
@@ -195,7 +235,7 @@ class KnobService : AccessibilityService() {
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::forgetPresses, ::onVolumeObserved)
         volumeWatcher.start()
-        backTap = BackTapDetector(this, { tapThreshold }) { count ->
+        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
         flip = FlipDetector(this, ::onFlip)
@@ -204,6 +244,12 @@ class KnobService : AccessibilityService() {
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:sensors").apply {
             setReferenceCounted(false)
         }
+        extras.onLikeNotConfirmed = { pkg ->
+            val reason = getString(R.string.log_like_not_confirmed)
+            log(reason)
+            playCue(Action.LIKE, Outcome.failed(reason), pausing = false, pkg = pkg)
+        }
+        sequenceGap = learnedSequenceGap()
         handler.post(motionCheck)
         GestureTest.onChange = { handler.post { updateSensors() } }
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
@@ -219,10 +265,12 @@ class KnobService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             volumeWatcher.stop()
+            trackWatcher?.stop()
             backTap.release()
             flip.stop()
             twist.stop()
             wave.stop()
+            if (fading) shake.stop()
             if (wakeLock.isHeld) wakeLock.release()
             extras.release()
             proximity.release()
@@ -413,7 +461,7 @@ class KnobService : AccessibilityService() {
             rampUntil = now + RAMP_QUIET_MS
             return
         }
-        if (sequence.isNotEmpty() && now - sequenceLastAt > SEQUENCE_GAP_MS) resetSequence()
+        if (sequence.isNotEmpty() && now - sequenceLastAt > sequenceGap) resetSequence()
         val tooFast = sequence.isNotEmpty() && now - sequenceLastAt < HUMAN_MIN_GAP_MS &&
             source != VolumeWatcher.Source.BROADCAST
         if (tooFast || sequence.size >= 3) {
@@ -425,12 +473,35 @@ class KnobService : AccessibilityService() {
         }
         if (sequence.isEmpty()) {
             sequenceBase = previous
+            sequenceGaps.clear()
             armPocketGuard()
+        } else {
+            sequenceGaps += (now - sequenceLastAt).toInt()
         }
         sequence += direction
         sequenceLastAt = now
         handler.removeCallbacks(sequenceFire)
-        if (sequence.size >= 2) handler.postDelayed(sequenceFire, CONFIRM_MS)
+        // Two presses with no three-press gesture that could still follow: no reason to wait for a third.
+        if (sequence.size >= 2) handler.postDelayed(sequenceFire, if (longerSequencePossible()) CONFIRM_MS else 0L)
+    }
+
+    private fun longerSequencePossible(): Boolean {
+        if (sequence.size >= 3) return true
+        if (GestureTest.active) return true
+        val longer = when (sequence) {
+            listOf(1, 1) -> Gesture.TRIPLE_UP
+            listOf(-1, -1) -> Gesture.TRIPLE_DOWN
+            else -> return false
+        }
+        return prefs.action(longer, prefs.lastPlayer) != Action.NONE
+    }
+
+    /** Time allowed between presses of a sequence: learned from this person's own presses. */
+    private fun learnedSequenceGap(): Long {
+        val gaps = prefs.sequenceGaps
+        if (gaps.size < MIN_GAP_SAMPLES) return SEQUENCE_GAP_MS
+        val slow = gaps.sorted()[((gaps.size - 1) * 0.9).toInt()]
+        return (slow * 1.6).toLong().coerceIn(SEQUENCE_GAP_MIN_MS, SEQUENCE_GAP_MAX_MS)
     }
 
     private fun fireSequence() {
@@ -444,9 +515,13 @@ class KnobService : AccessibilityService() {
             else -> null
         }
         val base = sequenceBase
+        val gaps = sequenceGaps.toList()
         resetSequence()
         gesture ?: return
-        fireGesture(gesture, restoreVolumeTo = base)
+        if (fireGesture(gesture, restoreVolumeTo = base)) {
+            prefs.recordSequenceGaps(gaps)
+            sequenceGap = learnedSequenceGap()
+        }
     }
 
     private fun resetSequence() {
@@ -473,7 +548,8 @@ class KnobService : AccessibilityService() {
 
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
-        if (tap) backTap.start() else backTap.stop()
+        backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
+        if (tap) backTap.start(fastRate = !(prefs.backTapEco && !power.isInteractive)) else backTap.stop()
         if (turn) twist.start() else twist.stop()
         if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
         // Taps and twists have no key press to arm the pocket check, so keep it on while they run
@@ -481,6 +557,8 @@ class KnobService : AccessibilityService() {
         proximity.keep(prefs.pocketGuard && (tap || turn) && !wave.running && !testing)
         val flipPending = flipPausedAt != 0L && now - flipPausedAt < FLIP_RESUME_WINDOW_MS
         if (enabled && prefs.flip && (playing || flipPending)) flip.start() else flip.stop()
+
+        updateTrackWatcher()
 
         // The accelerometer and gyroscope don't wake the CPU; without sound playing it may sleep.
         // (The proximity sensor used for the wave does wake it.) Right after a pause, stay up until
@@ -492,6 +570,29 @@ class KnobService : AccessibilityService() {
         } else if (!keepAwake && wakeLock.isHeld) {
             wakeLock.release()
         }
+    }
+
+    private fun updateTrackWatcher() {
+        val want = prefs.enabled && prefs.announceAllTracks && media.hasAccess()
+        if (want && trackWatcher == null) {
+            announcedTrack = null
+            trackWatcher = NowPlayingTracker(this, prefs, ::onTrack).also { it.start() }
+        } else if (!want && trackWatcher != null) {
+            trackWatcher?.stop()
+            trackWatcher = null
+        }
+    }
+
+    /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
+    private fun onTrack(now: NowPlaying?) {
+        val title = now?.title ?: return
+        val key = now.controller.packageName + "/" + title
+        if (key == announcedTrack) return
+        val first = announcedTrack == null
+        announcedTrack = key
+        // The track already playing when the option was turned on is not news.
+        if (first || power.isInteractive || !now.playing || GestureTest.active) return
+        extras.perform(Action.ANNOUNCE, now.controller)
     }
 
     /** Face down pauses; turning the phone back up resumes, but only playback that we paused. */
@@ -521,7 +622,8 @@ class KnobService : AccessibilityService() {
     // ---- Firing ----
 
     /** Runs the action assigned to [gesture], logging why it didn't when it doesn't. */
-    private fun fireGesture(gesture: Gesture, controller: MediaController? = null, restoreVolumeTo: Int? = null) {
+    /** Returns whether the action actually ran (not blocked, not just checked). */
+    private fun fireGesture(gesture: Gesture, controller: MediaController? = null, restoreVolumeTo: Int? = null): Boolean {
         val name = getString(gestureLabel(gesture))
         val target = media.resolve(prefs)
         val player = controller ?: target?.controller
@@ -531,18 +633,29 @@ class KnobService : AccessibilityService() {
             restoreVolumeTo?.let(::restoreVolume)
             if (prefs.vibrate) haptics.tick()
             GestureTest.report(GestureTest.Event.Recognized(gesture, action))
-            return log(getString(R.string.log_test, name))
+            log(getString(R.string.log_test, name))
+            return false
         }
-        if (action == Action.NONE) return log(getString(R.string.log_no_action, name))
+        if (action == Action.NONE) {
+            log(getString(R.string.log_no_action, name))
+            return false
+        }
         if (target == null || (target.mode == Mode.COMBO_ONLY && !action.worksWhenIdle)) {
-            return log(getString(R.string.log_not_playing, name))
+            log(getString(R.string.log_not_playing, name))
+            return false
         }
         if (pocketCovered()) {
             // The presses were accidental: undo their volume change too.
             restoreVolumeTo?.let(::restoreVolume)
-            return log(getString(R.string.log_pocket, name))
+            log(getString(R.string.log_pocket, name))
+            return false
         }
         restoreVolumeTo?.let(::restoreVolume)
+        if (action == Action.SLEEP_TIMER && fading) {
+            // The music is already fading out: the gesture means "not yet".
+            extendDuringFade(viaShake = false)
+            return true
+        }
         // Same decision as Media.perform: the player's own state, or the audio when there is no player.
         val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: audio.isMusicActive)
         if (action == Action.PLAY_PAUSE) {
@@ -552,10 +665,13 @@ class KnobService : AccessibilityService() {
         val outcome = execute(action, player)
         log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" }
             ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
-        playCue(action, outcome, pausing)
-        if ((action == Action.NEXT || action == Action.PREVIOUS) && prefs.announceSkips && !power.isInteractive) {
+        playCue(action, outcome, pausing, player?.packageName)
+        // With "every new track" on, the track watcher speaks anyway.
+        val skipped = action == Action.NEXT || action == Action.PREVIOUS
+        if (skipped && prefs.announceSkips && !prefs.announceAllTracks && !power.isInteractive) {
             announceNewTrack(player)
         }
+        return true
     }
 
     /** Says the new track's name once the player reports it (or after a short wait, whatever it is then). */
@@ -593,9 +709,12 @@ class KnobService : AccessibilityService() {
             return
         }
         fading = true
+        fadeVolume = start
         // Written down first: if the process dies mid-fade, the next start puts the volume back.
         prefs.fadeRestoreVolume = start
         stayAwake()
+        // Heard the music fading and not asleep yet: a shake gives 15 more minutes.
+        shake.start()
         val interval = SleepTimer.FADE_MS / start
         var level = start
         var silentSince = 0L
@@ -626,10 +745,28 @@ class KnobService : AccessibilityService() {
                 }
             }
         }
+        fadeStep = step
         handler.post(step)
     }
 
+    /** "Not yet" while the music fades out: put the volume back and pause later instead. */
+    private fun extendDuringFade(viaShake: Boolean) {
+        if (!fading) return
+        finishFade(fadeVolume)
+        SleepTimer.startIn(this, prefs, SleepTimer.EXTEND_MINUTES * 60_000L)
+        if (prefs.vibrate) haptics.play(Action.SLEEP_TIMER)
+        playCue(Action.SLEEP_TIMER, Outcome.DONE, pausing = false, pkg = prefs.lastPlayer)
+        val clock = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(prefs.sleepUntil))
+        log(
+            if (viaShake) getString(R.string.log_shake_extended, SleepTimer.EXTEND_MINUTES)
+            else getString(R.string.log_sleep_extended, SleepTimer.EXTEND_MINUTES, clock),
+        )
+    }
+
     private fun finishFade(volume: Int) {
+        fadeStep?.let { handler.removeCallbacks(it) }
+        fadeStep = null
+        shake.stop()
         restoreVolume(volume)
         prefs.fadeRestoreVolume = -1
         fading = false
@@ -658,10 +795,10 @@ class KnobService : AccessibilityService() {
     private fun execute(action: Action, controller: MediaController?): Outcome {
         val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER ->
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT ->
                 extras.perform(action, controller)
             else -> {
-                media.perform(action, controller)
+                media.perform(action, controller, prefs.seekStepMs(controller?.packageName))
                 Outcome.DONE
             }
         }
@@ -670,17 +807,17 @@ class KnobService : AccessibilityService() {
     }
 
     /** The sound for what just happened, if cues are on for it. */
-    private fun playCue(action: Action, outcome: Outcome, pausing: Boolean) {
+    private fun playCue(action: Action, outcome: Outcome, pausing: Boolean, pkg: String?) {
         val style = prefs.cueStyle
-        if (style == CueStyle.OFF || prefs.cueScreenOffOnly && power.isInteractive) return
+        if (style == CueStyle.OFF || prefs.cueScreenOffOnly && power.isInteractive || prefs.cuesOff(pkg)) return
         val group = CueGroup.of(action) ?: return
         val failed = outcome.result == Outcome.Result.FAILED
         // A failure has its own switch: someone may want to hear only that something didn't work.
         if ((if (failed) CueGroup.ERRORS else group) !in prefs.cueGroups) return
-        val unchanged = outcome.result == Outcome.Result.UNCHANGED
         val cue = when {
             failed -> Cue.ERROR
-            unchanged -> Cue.NEUTRAL
+            outcome.result == Outcome.Result.UNCHANGED -> Cue.NEUTRAL
+            outcome.result == Outcome.Result.UNDONE -> if (action == Action.LIKE) Cue.UNLIKE else Cue.NEUTRAL
             else -> when (action) {
                 Action.NEXT -> Cue.FORWARD
                 Action.PREVIOUS, Action.RESTART -> Cue.BACK
@@ -719,6 +856,12 @@ class KnobService : AccessibilityService() {
         const val MAX_REPLAYED_STEPS = 4
         const val LOG_LINES = 10
         const val SEQUENCE_GAP_MS = 450L
+        const val SEQUENCE_GAP_MIN_MS = 350L
+        const val SEQUENCE_GAP_MAX_MS = 700L
+        const val MIN_GAP_SAMPLES = 8
+        const val SEEK_REPEAT_MS = 500L
+        const val SEEK_FASTER_AFTER = 4
+        const val SEEK_MAX_REPEATS = 40
         const val HUMAN_MIN_GAP_MS = 70L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L

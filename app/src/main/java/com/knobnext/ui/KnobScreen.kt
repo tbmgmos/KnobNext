@@ -243,7 +243,7 @@ fun KnobScreen(
                     Page.SETTINGS -> settingsPage(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
                     Page.DIAGNOSTICS -> {
-                        item { DiagnosticsCard(s, prefs, setup, nowPlaying, versionName) }
+                        item { DiagnosticsCard(s, prefs, setup, actions, nowPlaying, versionName) }
                         item { Hint(stringResource(R.string.diag_hint)) }
                     }
                 }
@@ -300,6 +300,24 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
         }
     }
     nowPlaying?.let { now -> item { NowPlayingCard(now, media, ownGestures = now.controller.packageName in s.profiles) } }
+    // A video or podcast app seen for the first time: offer seeking instead of track switching.
+    val suggested = if (setup.serviceEnabled && setup.playerAccess) {
+        SEEK_APPS.firstOrNull { it in s.seenPlayers && it !in s.profiles && it !in s.dismissedSuggestions }
+    } else {
+        null
+    }
+    suggested?.let { pkg ->
+        item {
+            val context = LocalContext.current
+            InfoCard(
+                title = stringResource(R.string.suggest_title, remember(pkg) { appLabel(context, pkg) }),
+                body = stringResource(R.string.suggest_body),
+                button = stringResource(R.string.suggest_yes),
+                onClick = { ctx.prefs.createProfile(pkg, ProfilePreset.SEEK) },
+                secondary = stringResource(R.string.suggest_no) to { ctx.prefs.dismissedSuggestions = s.dismissedSuggestions + pkg },
+            ) { Badge(MaterialShapes.Pill, KnobIcons.FastForward) }
+        }
+    }
 
     item {
         Column {
@@ -353,6 +371,20 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
         }
     }
 }
+
+/** Video and podcast apps, where seeking is usually more useful than switching tracks. */
+private val SEEK_APPS = listOf(
+    "com.google.android.youtube",
+    "app.revanced.android.youtube",
+    "org.schabi.newpipe",
+    "com.vk.vkvideo",
+    "ru.rutube.app",
+    "au.com.shiftyjelly.pocketcasts",
+    "de.danoeh.antennapod",
+    "com.bambuna.podcastaddict",
+    "fm.castbox.audiobook.radio.podcast",
+    "com.audible.application",
+)
 
 private fun assigned(s: com.knobnext.Settings, group: GestureGroup) =
     s.actions.count { (g, a) -> g.group == group && a != Action.NONE }
@@ -464,7 +496,7 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(if (s.backTap) 4 else 1) {
+        Group(if (s.backTap) 5 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -487,6 +519,10 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                         }
                         GestureRow(2, Gesture.BACK_TAP_2, s, MaterialShapes.Puffy, accent = true, onEdit = ctx.edit)
                         GestureRow(3, Gesture.BACK_TAP_3, s, MaterialShapes.Flower, accent = true, onEdit = ctx.edit)
+                        SwitchRow(
+                            shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
+                            subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
+                        )
                     }
                 }
             }
@@ -646,6 +682,7 @@ private fun LazyListScope.profilePage(ctx: PageContext, pkg: String) {
     if (own == null) {
         item { ProfilePresets(ctx, pkg) }
     } else {
+        item { ProfileOptions(ctx, pkg) }
         listOf(
             GestureGroup.KEYS to R.string.section_keys,
             GestureGroup.SEQUENCE to R.string.section_double,
@@ -685,6 +722,34 @@ private fun ProfileHeader(ctx: PageContext, pkg: String, own: Boolean) {
             enabled = ctx.s.enabled,
             leading = { AppIcon(icon, size = 48) },
         )
+    }
+}
+
+/** Per-app settings beside the gestures: seek step and sound cues. */
+@Composable
+private fun ProfileOptions(ctx: PageContext, pkg: String) {
+    val s = ctx.s
+    Group(2) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ControlRow(shape(0), stringResource(R.string.profile_seek_step), enabled = s.enabled) {
+                ConnectedChoice(
+                    options = listOf(
+                        0 to R.string.seek_common,
+                        5 to R.string.seek_5,
+                        10 to R.string.seek_10,
+                        15 to R.string.seek_15,
+                        30 to R.string.seek_30,
+                    ),
+                    selected = s.profileSeekSteps[pkg] ?: 0,
+                    onSelect = { ctx.prefs.setSeekStep(pkg, it) },
+                    enabled = s.enabled,
+                )
+            }
+            SwitchRow(
+                shape(1), stringResource(R.string.profile_cues_off), pkg in s.cuesOffApps, { ctx.prefs.setCuesOff(pkg, it) },
+                subtitle = stringResource(R.string.profile_cues_off_hint), enabled = s.enabled,
+            )
+        }
     }
 }
 
@@ -777,6 +842,31 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item {
+        Column {
+            SectionTitle(stringResource(R.string.actions_title))
+            Group(3) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(0), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(5 to R.string.seek_5, 10 to R.string.seek_10, 15 to R.string.seek_15, 30 to R.string.seek_30),
+                            selected = s.seekStepSec,
+                            onSelect = { prefs.seekStepSec = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    SwitchRow(
+                        shape(1), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
+                        subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
+                    )
+                    SwitchRow(
+                        shape(2), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                        subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
+                    )
+                }
+            }
+        }
+    }
     item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }
     item {
@@ -800,7 +890,8 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     val sleepActive = s.sleepUntil > System.currentTimeMillis()
     if (sleepActive || Action.SLEEP_TIMER in s.actions.values) item {
         val context = LocalContext.current
-        Group(1) {
+        Group(2) {
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ControlRow(
                 shape(0),
                 stringResource(R.string.pref_sleep),
@@ -814,7 +905,12 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                 },
             ) {
                 ConnectedChoice(
-                    options = listOf(15 to R.string.minutes_15, 30 to R.string.minutes_30, 60 to R.string.minutes_60),
+                    options = listOf(
+                        15 to R.string.minutes_15,
+                        30 to R.string.minutes_30,
+                        60 to R.string.minutes_60,
+                        Prefs.SLEEP_TO_TRACK_END to R.string.minutes_track,
+                    ),
                     selected = s.sleepMinutes,
                     onSelect = { prefs.sleepMinutes = it },
                 )
@@ -824,6 +920,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     }
                 }
             }
+            SwitchRow(
+                shape(1), stringResource(R.string.pref_sleep_extend), s.sleepExtend, { prefs.sleepExtend = it },
+                subtitle = stringResource(R.string.pref_sleep_extend_hint),
+            )
+          }
         }
     }
     item {
