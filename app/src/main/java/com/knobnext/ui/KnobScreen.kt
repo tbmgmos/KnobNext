@@ -845,7 +845,9 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     item {
         Column {
             SectionTitle(stringResource(R.string.actions_title))
-            Group(4) {
+            // The two smooth-seeking options only show when smooth seeking is chosen.
+            val extra = if (s.seekSmooth) 2 else 0
+            Group(4 + extra) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.pref_seek_hold), caption = stringResource(R.string.pref_seek_hold_hint), enabled = s.enabled) {
                         ConnectedChoice(
@@ -855,7 +857,17 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                             enabled = s.enabled,
                         )
                     }
-                    ControlRow(shape(1), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
+                    if (s.seekSmooth) {
+                        SwitchRow(
+                            shape(1), stringResource(R.string.pref_scrub_duck), s.scrubDuck, { prefs.scrubDuck = it },
+                            subtitle = stringResource(R.string.pref_scrub_duck_hint), enabled = s.enabled,
+                        )
+                        SwitchRow(
+                            shape(2), stringResource(R.string.pref_scrub_speak), s.scrubSpeak, { prefs.scrubSpeak = it },
+                            subtitle = stringResource(R.string.pref_scrub_speak_hint), enabled = s.enabled,
+                        )
+                    }
+                    ControlRow(shape(1 + extra), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
                         ConnectedChoice(
                             options = listOf(5 to R.string.seek_5, 10 to R.string.seek_10, 15 to R.string.seek_15, 30 to R.string.seek_30),
                             selected = s.seekStepSec,
@@ -864,11 +876,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                         )
                     }
                     SwitchRow(
-                        shape(2), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
+                        shape(2 + extra), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
                         subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
                     )
                     SwitchRow(
-                        shape(3), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                        shape(3 + extra), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
                         subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
                     )
                 }

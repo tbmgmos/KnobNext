@@ -89,6 +89,8 @@ data class Settings(
     val ttsRate: Float,
     val seekStepSec: Int,
     val seekSmooth: Boolean,
+    val scrubDuck: Boolean,
+    val scrubSpeak: Boolean,
     val likeToggle: Boolean,
     val sleepExtend: Boolean,
     val announceAllTracks: Boolean,
@@ -291,6 +293,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("seek_smooth", true)
         set(v) = sp.edit().putBoolean("seek_smooth", v).apply()
 
+    /** Smooth seeking turns the music down while it runs, so the chopped sound isn't harsh. */
+    var scrubDuck: Boolean
+        get() = sp.getBoolean("scrub_duck", true)
+        set(v) = sp.edit().putBoolean("scrub_duck", v).apply()
+
+    /** After smooth seeking, say where it stopped. */
+    var scrubSpeak: Boolean
+        get() = sp.getBoolean("scrub_speak", false)
+        set(v) = sp.edit().putBoolean("scrub_speak", v).apply()
+
     /** The seek step while [pkg] plays: its own if set, otherwise the common one. */
     fun seekStepMs(pkg: String?): Long {
         val own = pkg?.let { sp.getInt("seek_step_sec@$it", 0) } ?: 0
@@ -459,6 +471,8 @@ class Prefs(context: Context) {
         ttsRate = ttsRate,
         seekStepSec = seekStepSec,
         seekSmooth = seekSmooth,
+        scrubDuck = scrubDuck,
+        scrubSpeak = scrubSpeak,
         likeToggle = likeToggle,
         sleepExtend = sleepExtend,
         announceAllTracks = announceAllTracks,

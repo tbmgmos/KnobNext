@@ -28,16 +28,30 @@ class Haptics(context: Context) {
      * One notch of the seek "wheel": a light tick, or a firmer click on [strong] (every minute). Uses the
      * crisp haptic primitives where the phone has them.
      */
-    fun detent(strong: Boolean) {
+    fun detent(strong: Boolean, lightness: Float = 0.5f) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
         val primitive = if (strong) VibrationEffect.Composition.PRIMITIVE_CLICK else VibrationEffect.Composition.PRIMITIVE_LOW_TICK
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && v.areAllPrimitivesSupported(primitive)) {
-            v.vibrate(VibrationEffect.startComposition().addPrimitive(primitive, if (strong) 0.8f else 0.5f).compose())
+            v.vibrate(VibrationEffect.startComposition().addPrimitive(primitive, if (strong) 0.8f else lightness).compose())
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             v.vibrate(VibrationEffect.createPredefined(if (strong) VibrationEffect.EFFECT_CLICK else VibrationEffect.EFFECT_TICK))
         } else {
             v.vibrate(VibrationEffect.createOneShot(if (strong) 20L else 8L, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+
+    /** Seeking let go: a soft double tick, "landed here". */
+    fun landing() {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        val tick = VibrationEffect.Composition.PRIMITIVE_TICK
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && v.areAllPrimitivesSupported(tick)) {
+            v.vibrate(VibrationEffect.startComposition().addPrimitive(tick, 0.6f).addPrimitive(tick, 0.6f, 60).compose())
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
+        } else {
+            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 12, 60, 12), -1))
         }
     }
 

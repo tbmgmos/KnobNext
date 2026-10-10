@@ -73,6 +73,9 @@ class Extras(private val context: Context, private val media: Media, private val
         else -> Outcome.DONE
     }
 
+    /** Speaks [text] the same way as the announcements. */
+    fun say(text: String) = speaker.say(text)
+
     fun release() {
         speaker.release()
         torch.release()

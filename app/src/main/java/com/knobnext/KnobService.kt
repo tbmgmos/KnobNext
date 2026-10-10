@@ -81,6 +81,12 @@ class KnobService : AccessibilityService() {
         private var scrubLastNotch = 0L
         private var scrubLastMinute = 0L
         private var scrubSteps = 0
+        private var scrubVolume = -1
+
+        /** Smooth seeking is running (the other key reverses it instead of making a combo). */
+        var scrubbing = false
+            private set
+
         val scrub = object : Runnable {
             override fun run() {
                 val c = controller ?: return
@@ -93,10 +99,12 @@ class KnobService : AccessibilityService() {
                 if (prefs.vibrate) {
                     val notch = target / scrubNotchMs
                     val minute = target / 60_000
+                    // Like a wheel spinning faster: the faster it goes, the lighter each notch.
+                    val lightness = (0.6f - (scrubSpeed(held) / 60.0).toFloat() * 0.3f).coerceIn(0.3f, 0.6f)
                     when {
                         atBound -> haptics.bump()
                         minute != scrubLastMinute -> haptics.detent(strong = true)
-                        notch != scrubLastNotch -> haptics.detent(strong = false)
+                        notch != scrubLastNotch -> haptics.detent(strong = false, lightness = lightness)
                     }
                     scrubLastNotch = notch
                     scrubLastMinute = minute
@@ -117,8 +125,41 @@ class KnobService : AccessibilityService() {
             scrubLastNotch = position / scrubNotchMs
             scrubLastMinute = position / 60_000
             scrubSteps = 0
+            scrubbing = true
+            if (prefs.scrubDuck) {
+                scrubVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                val quieter = maxOf(1, scrubVolume * SCRUB_DUCK_PERCENT / 100)
+                if (quieter < scrubVolume) {
+                    ignoreVolumeUntil = Long.MAX_VALUE
+                    audio.setStreamVolume(AudioManager.STREAM_MUSIC, quieter, 0)
+                    lastVolume = quieter
+                } else {
+                    scrubVolume = -1
+                }
+            }
             handler.post(scrub)
             return true
+        }
+
+        /** The other key pressed while seeking: turn around, slowly again, for fine positioning. */
+        fun reverseScrub() {
+            scrubDirection = -scrubDirection
+            scrubStartedAt = SystemClock.elapsedRealtime()
+            if (prefs.vibrate) haptics.detent(strong = true)
+        }
+
+        /** Ends smooth seeking; [landed] when the key was let go (not when the press was dropped). */
+        fun stopScrub(landed: Boolean) {
+            if (!scrubbing) return
+            scrubbing = false
+            handler.removeCallbacks(scrub)
+            if (scrubVolume >= 0) {
+                restoreVolume(scrubVolume)
+                scrubVolume = -1
+            }
+            if (!landed) return
+            if (prefs.vibrate) haptics.landing()
+            if (prefs.scrubSpeak) extras.say(positionPhrase(scrubPosition.toLong()))
         }
 
         // Capped: if the release is ever lost, the volume must not keep changing on its own.
@@ -181,6 +222,7 @@ class KnobService : AccessibilityService() {
 
         /** Key released: a hold that was waiting to see whether it becomes a long hold fires now. */
         fun release() {
+            stopScrub(landed = true)
             cancel()
             holdArmed?.let { action ->
                 val canRun = action != Action.NONE && (!idleOnly || action.worksWhenIdle)
@@ -200,7 +242,7 @@ class KnobService : AccessibilityService() {
             handler.removeCallbacks(this)
             handler.removeCallbacks(ramp)
             handler.removeCallbacks(seekRamp)
-            handler.removeCallbacks(scrub)
+            stopScrub(landed = false)
             handler.removeCallbacks(longHold)
         }
     }
@@ -362,6 +404,11 @@ class KnobService : AccessibilityService() {
         }
 
         val other = presses[otherKey(code)]
+        if (other != null && other.scrubbing) {
+            other.reverseScrub()
+            presses[code] = Press(code, other.controller).apply { handled = true }
+            return true
+        }
         if (other != null) {
             val pkg = other.controller?.packageName
             val bothAction = prefs.action(Gesture.BOTH, pkg)
@@ -462,9 +509,22 @@ class KnobService : AccessibilityService() {
 
     /** How fast smooth seeking runs, in track milliseconds per real millisecond, after holding [heldMs]. */
     private fun scrubSpeed(heldMs: Long): Double = when {
-        heldMs < 1_000 -> 8.0
-        heldMs < 3_000 -> 8.0 + (heldMs - 1_000) / 2_000.0 * 22.0
-        else -> 30.0 + minOf((heldMs - 3_000) / 3_000.0, 1.0) * 30.0
+        // A slow start to land precisely, then faster and faster.
+        heldMs < 700 -> 3.0
+        heldMs < 2_000 -> 3.0 + (heldMs - 700) / 1_300.0 * 9.0
+        heldMs < 4_000 -> 12.0 + (heldMs - 2_000) / 2_000.0 * 18.0
+        else -> 30.0 + minOf((heldMs - 4_000) / 3_000.0, 1.0) * 30.0
+    }
+
+    /** "12 минут 34 секунды" for a track position. */
+    private fun positionPhrase(positionMs: Long): String {
+        val total = (positionMs / 1000).toInt()
+        val minutes = total / 60
+        val seconds = total % 60
+        return buildList {
+            if (minutes > 0) add(resources.getQuantityString(R.plurals.minutes, minutes, minutes))
+            if (seconds > 0 || minutes == 0) add(resources.getQuantityString(R.plurals.seconds, seconds, seconds))
+        }.joinToString(" ")
     }
 
     private fun longHoldMs() = maxOf(prefs.longPressMs + LONG_HOLD_EXTRA_MS, LONG_HOLD_MIN_MS)
@@ -939,6 +999,7 @@ class KnobService : AccessibilityService() {
         const val SCRUB_TICK_MS = 200L
         const val SCRUB_MAX_STEPS = 600
         const val SCRUB_END_MARGIN_MS = 1_500L
+        const val SCRUB_DUCK_PERCENT = 40
         const val HUMAN_MIN_GAP_MS = 70L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L
