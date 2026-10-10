@@ -70,6 +70,57 @@ class KnobService : AccessibilityService() {
             }
         }
 
+        // Smooth seeking held down: small seeks five times a second, faster the longer it is held, with a
+        // vibration notch at every seek step of the track and a firmer one at every minute.
+        private var scrubDirection = 0
+        private var scrubPosition = 0.0
+        private var scrubEnd = 0L
+        private var scrubStartedAt = 0L
+        private var scrubScale = 1.0
+        private var scrubNotchMs = 10_000L
+        private var scrubLastNotch = 0L
+        private var scrubLastMinute = 0L
+        private var scrubSteps = 0
+        val scrub = object : Runnable {
+            override fun run() {
+                val c = controller ?: return
+                val held = SystemClock.elapsedRealtime() - scrubStartedAt
+                scrubPosition += scrubDirection * scrubSpeed(held) * scrubScale * SCRUB_TICK_MS
+                val atBound = scrubPosition <= 0.0 || scrubPosition >= scrubEnd
+                scrubPosition = scrubPosition.coerceIn(0.0, scrubEnd.toDouble())
+                val target = scrubPosition.toLong()
+                c.transportControls.seekTo(target)
+                if (prefs.vibrate) {
+                    val notch = target / scrubNotchMs
+                    val minute = target / 60_000
+                    when {
+                        atBound -> haptics.bump()
+                        minute != scrubLastMinute -> haptics.detent(strong = true)
+                        notch != scrubLastNotch -> haptics.detent(strong = false)
+                    }
+                    scrubLastNotch = notch
+                    scrubLastMinute = minute
+                }
+                if (!atBound && ++scrubSteps < SCRUB_MAX_STEPS) handler.postDelayed(this, SCRUB_TICK_MS)
+            }
+        }
+
+        /** Starts smooth seeking from the player's position; false when the player doesn't report it. */
+        fun startScrub(action: Action): Boolean {
+            val (position, duration) = media.progress(controller) ?: return false
+            scrubDirection = if (action == Action.SEEK_FORWARD) 1 else -1
+            scrubPosition = position.toDouble()
+            scrubEnd = (duration - SCRUB_END_MARGIN_MS).coerceAtLeast(0L)
+            scrubStartedAt = SystemClock.elapsedRealtime()
+            scrubNotchMs = prefs.seekStepMs(controller?.packageName)
+            scrubScale = scrubNotchMs / 10_000.0
+            scrubLastNotch = position / scrubNotchMs
+            scrubLastMinute = position / 60_000
+            scrubSteps = 0
+            handler.post(scrub)
+            return true
+        }
+
         // Capped: if the release is ever lost, the volume must not keep changing on its own.
         val ramp = object : Runnable {
             override fun run() {
@@ -105,11 +156,15 @@ class KnobService : AccessibilityService() {
                 }
                 seek && (tapHold || long == Action.NONE) && !GestureTest.active -> {
                     holdFired = !tapHold
-                    // The first jump goes through the normal path (log, sound, checks); the rest repeat it.
-                    if (fireGesture(gesture, controller)) {
+                    // Smooth needs the player's position; without it, jumps it is.
+                    val smooth = prefs.seekSmooth && media.progress(controller) != null
+                    // The start goes through the normal path (checks, log, sound); then the hold drives it.
+                    if (fireGesture(gesture, controller, startOnly = smooth)) {
                         seekAction = action
-                        seekRepeats = 0
-                        handler.postDelayed(seekRamp, SEEK_REPEAT_MS)
+                        if (!smooth || !startScrub(action)) {
+                            seekRepeats = 0
+                            handler.postDelayed(seekRamp, SEEK_REPEAT_MS)
+                        }
                     }
                 }
                 !tapHold && long != Action.NONE -> {
@@ -145,6 +200,7 @@ class KnobService : AccessibilityService() {
             handler.removeCallbacks(this)
             handler.removeCallbacks(ramp)
             handler.removeCallbacks(seekRamp)
+            handler.removeCallbacks(scrub)
             handler.removeCallbacks(longHold)
         }
     }
@@ -404,6 +460,13 @@ class KnobService : AccessibilityService() {
     private fun otherKey(code: Int) =
         if (code == KeyEvent.KEYCODE_VOLUME_UP) KeyEvent.KEYCODE_VOLUME_DOWN else KeyEvent.KEYCODE_VOLUME_UP
 
+    /** How fast smooth seeking runs, in track milliseconds per real millisecond, after holding [heldMs]. */
+    private fun scrubSpeed(heldMs: Long): Double = when {
+        heldMs < 1_000 -> 8.0
+        heldMs < 3_000 -> 8.0 + (heldMs - 1_000) / 2_000.0 * 22.0
+        else -> 30.0 + minOf((heldMs - 3_000) / 3_000.0, 1.0) * 30.0
+    }
+
     private fun longHoldMs() = maxOf(prefs.longPressMs + LONG_HOLD_EXTRA_MS, LONG_HOLD_MIN_MS)
 
     // ---- Press sequences ----
@@ -623,7 +686,13 @@ class KnobService : AccessibilityService() {
 
     /** Runs the action assigned to [gesture], logging why it didn't when it doesn't. */
     /** Returns whether the action actually ran (not blocked, not just checked). */
-    private fun fireGesture(gesture: Gesture, controller: MediaController? = null, restoreVolumeTo: Int? = null): Boolean {
+    private fun fireGesture(
+        gesture: Gesture,
+        controller: MediaController? = null,
+        restoreVolumeTo: Int? = null,
+        /** Only check and announce the start: the caller performs the action itself (smooth seeking). */
+        startOnly: Boolean = false,
+    ): Boolean {
         val name = getString(gestureLabel(gesture))
         val target = media.resolve(prefs)
         val player = controller ?: target?.controller
@@ -654,6 +723,11 @@ class KnobService : AccessibilityService() {
         if (action == Action.SLEEP_TIMER && fading) {
             // The music is already fading out: the gesture means "not yet".
             extendDuringFade(viaShake = false)
+            return true
+        }
+        if (startOnly) {
+            log(getString(R.string.log_fired, name, getString(actionLabel(action))))
+            playCue(action, Outcome.DONE, pausing = false, pkg = player?.packageName)
             return true
         }
         // Same decision as Media.perform: the player's own state, or the audio when there is no player.
@@ -862,6 +936,9 @@ class KnobService : AccessibilityService() {
         const val SEEK_REPEAT_MS = 500L
         const val SEEK_FASTER_AFTER = 4
         const val SEEK_MAX_REPEATS = 40
+        const val SCRUB_TICK_MS = 200L
+        const val SCRUB_MAX_STEPS = 600
+        const val SCRUB_END_MARGIN_MS = 1_500L
         const val HUMAN_MIN_GAP_MS = 70L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L

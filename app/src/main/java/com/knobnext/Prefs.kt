@@ -88,6 +88,7 @@ data class Settings(
     val ttsEngine: String?,
     val ttsRate: Float,
     val seekStepSec: Int,
+    val seekSmooth: Boolean,
     val likeToggle: Boolean,
     val sleepExtend: Boolean,
     val announceAllTracks: Boolean,
@@ -285,6 +286,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("seek_step_sec", 10)
         set(v) = sp.edit().putInt("seek_step_sec", v).apply()
 
+    /** Held seeking glides with notches felt by vibration; off = jumps every half second. */
+    var seekSmooth: Boolean
+        get() = sp.getBoolean("seek_smooth", true)
+        set(v) = sp.edit().putBoolean("seek_smooth", v).apply()
+
     /** The seek step while [pkg] plays: its own if set, otherwise the common one. */
     fun seekStepMs(pkg: String?): Long {
         val own = pkg?.let { sp.getInt("seek_step_sec@$it", 0) } ?: 0
@@ -452,6 +458,7 @@ class Prefs(context: Context) {
         ttsEngine = ttsEngine,
         ttsRate = ttsRate,
         seekStepSec = seekStepSec,
+        seekSmooth = seekSmooth,
         likeToggle = likeToggle,
         sleepExtend = sleepExtend,
         announceAllTracks = announceAllTracks,

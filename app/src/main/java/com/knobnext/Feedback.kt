@@ -24,6 +24,36 @@ class Haptics(context: Context) {
         vibrator.vibrate(effect(action))
     }
 
+    /**
+     * One notch of the seek "wheel": a light tick, or a firmer click on [strong] (every minute). Uses the
+     * crisp haptic primitives where the phone has them.
+     */
+    fun detent(strong: Boolean) {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        val primitive = if (strong) VibrationEffect.Composition.PRIMITIVE_CLICK else VibrationEffect.Composition.PRIMITIVE_LOW_TICK
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && v.areAllPrimitivesSupported(primitive)) {
+            v.vibrate(VibrationEffect.startComposition().addPrimitive(primitive, if (strong) 0.8f else 0.5f).compose())
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            v.vibrate(VibrationEffect.createPredefined(if (strong) VibrationEffect.EFFECT_CLICK else VibrationEffect.EFFECT_TICK))
+        } else {
+            v.vibrate(VibrationEffect.createOneShot(if (strong) 20L else 8L, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+
+    /** The start or the end of the track: nowhere further to go. */
+    fun bump() {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        v.vibrate(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
+            } else {
+                VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE)
+            },
+        )
+    }
+
     /** A light tick: "you've reached the long-hold threshold, keep holding for the second action". */
     fun tick() {
         if (vibrator?.hasVibrator() != true) return

@@ -845,9 +845,17 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     item {
         Column {
             SectionTitle(stringResource(R.string.actions_title))
-            Group(3) {
+            Group(4) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    ControlRow(shape(0), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
+                    ControlRow(shape(0), stringResource(R.string.pref_seek_hold), caption = stringResource(R.string.pref_seek_hold_hint), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(true to R.string.seek_hold_smooth, false to R.string.seek_hold_steps),
+                            selected = s.seekSmooth,
+                            onSelect = { prefs.seekSmooth = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    ControlRow(shape(1), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
                         ConnectedChoice(
                             options = listOf(5 to R.string.seek_5, 10 to R.string.seek_10, 15 to R.string.seek_15, 30 to R.string.seek_30),
                             selected = s.seekStepSec,
@@ -856,11 +864,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                         )
                     }
                     SwitchRow(
-                        shape(1), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
+                        shape(2), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
                         subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
                     )
                     SwitchRow(
-                        shape(2), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                        shape(3), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
                         subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
                     )
                 }

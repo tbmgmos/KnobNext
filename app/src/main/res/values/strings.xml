@@ -393,7 +393,11 @@
     <!-- Improvements: settings -->
     <string name="actions_title">Действия</string>
     <string name="pref_seek_step">Шаг перемотки</string>
-    <string name="pref_seek_step_hint">Удержание с перемоткой перематывает, пока держите кнопку, всё быстрее</string>
+    <string name="pref_seek_step_hint">Для нажатий и жестов — на сколько прыгать; для плавной перемотки — шаг «зубчиков» вибрации</string>
+    <string name="pref_seek_hold">Перемотка удержанием</string>
+    <string name="pref_seek_hold_hint">«Плавно»: пока держите кнопку, трек едет всё быстрее, а вибрация щёлкает на каждом шаге и сильнее — на каждой минуте, как колёсико с зубчиками. Работает при включённом экране.</string>
+    <string name="seek_hold_smooth">Плавно</string>
+    <string name="seek_hold_steps">Шагами</string>
     <string name="seek_5">5 с</string>
     <string name="seek_10">10 с</string>
     <string name="seek_15">15 с</string>
