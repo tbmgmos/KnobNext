@@ -75,7 +75,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        GestureTest.setVisible(false)
+        // By the time the screen-off stop arrives, the device is already non-interactive.
+        val screenOff = !getSystemService(android.os.PowerManager::class.java).isInteractive
+        GestureTest.setVisible(false, screenOff)
         super.onStop()
     }
 

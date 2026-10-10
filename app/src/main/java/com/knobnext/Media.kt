@@ -66,8 +66,10 @@ class Media(private val context: Context) {
         if (filtering && controller == null) return null
         controller?.packageName?.let { if (it != prefs.lastPlayer) prefs.lastPlayer = it }
 
-        // isMusicActive is the ground truth that sound is audible; some players report stale states.
-        val playing = audio.isMusicActive && (!filtering || controller?.isPlaying() == true)
+        // Sound must be audible, and it must be the player's: a game or a video without a media session
+        // also makes sound, and then a hold would skip (and start) a paused player. Without player
+        // access there is no player to ask, so the sound alone decides.
+        val playing = audio.isMusicActive && (controller?.isPlaying() ?: !filtering)
         val mode = if (playing || !prefs.onlyWhenPlaying) Mode.FULL else Mode.COMBO_ONLY
         return Target(controller, mode)
     }

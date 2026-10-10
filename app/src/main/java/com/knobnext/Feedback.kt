@@ -62,7 +62,24 @@ class ProximityProbe(context: Context) : SensorEventListener {
     private val handler = Handler(Looper.getMainLooper())
     private var registered = false
     private var covered = false
-    private val disarm = Runnable { release() }
+    private var kept = false
+    private val disarm = Runnable { if (!kept) release() }
+
+    /** Keeps the sensor on (for motion gestures, which have no key press to arm it) or lets it go. */
+    fun keep(on: Boolean) {
+        if (on == kept) return
+        kept = on
+        if (on) {
+            val s = sensor ?: return
+            handler.removeCallbacks(disarm)
+            if (!registered) {
+                covered = false
+                registered = sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+        } else {
+            release()
+        }
+    }
 
     fun arm() {
         val s = sensor ?: return
@@ -76,6 +93,7 @@ class ProximityProbe(context: Context) : SensorEventListener {
     fun isCovered(): Boolean = registered && covered
 
     fun release() {
+        kept = false
         handler.removeCallbacks(disarm)
         if (registered) sensors?.unregisterListener(this)
         registered = false

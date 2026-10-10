@@ -38,8 +38,13 @@ class KnobService : AccessibilityService() {
         val controller: MediaController?,
         val passive: Boolean = false,
         val tapHold: Boolean = false,
+        /** Nothing plays: only actions that work without playback may run. */
+        val idleOnly: Boolean = false,
     ) : Runnable {
         var handled = false
+
+        /** A hold gesture (not a volume ramp or a combo) went off: release time tells how deliberate it was. */
+        var holdFired = false
 
         /** Hold reached, but a long-hold action exists: the hold action waits for release. */
         private var holdArmed: Action? = null
@@ -82,14 +87,27 @@ class KnobService : AccessibilityService() {
                     if (prefs.vibrate) haptics.tick()
                     handler.postDelayed(longHold, longHoldMs() - prefs.longPressMs)
                 }
-                else -> fireGesture(gesture, controller)
+                else -> {
+                    holdFired = !tapHold
+                    fireGesture(gesture, controller)
+                }
             }
         }
 
         /** Key released: a hold that was waiting to see whether it becomes a long hold fires now. */
         fun release() {
             cancel()
-            holdArmed?.let { fireGesture(if (up) Gesture.HOLD_UP else Gesture.HOLD_DOWN, controller) }
+            holdArmed?.let { action ->
+                val canRun = action != Action.NONE && (!idleOnly || action.worksWhenIdle)
+                if (canRun || GestureTest.active) {
+                    holdFired = true
+                    fireGesture(if (up) Gesture.HOLD_UP else Gesture.HOLD_DOWN, controller)
+                } else {
+                    // Only the long hold was meant to work now (nothing assigned to the hold, or it needs
+                    // playback): a press released before it is just a volume press, not a swallowed key.
+                    media.volumeStep(if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER)
+                }
+            }
             holdArmed = null
         }
 
@@ -134,6 +152,9 @@ class KnobService : AccessibilityService() {
     // can resume it — see resumeWindowOpen.
     private var pausedAt = 0L
 
+    // The sleep timer is fading the music out.
+    private var fading = false
+
     // Read by the sensor thread at ~400 Hz, so it is cached here instead of hitting preferences.
     @Volatile private var tapThreshold = TapSensitivity.MEDIUM.threshold
 
@@ -165,6 +186,11 @@ class KnobService : AccessibilityService() {
         extras = Extras(this, media, prefs)
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
+        // A sleep-timer fade was cut short by the process dying: the music is at a low volume.
+        prefs.fadeRestoreVolume.takeIf { it >= 0 }?.let {
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, it, 0)
+            prefs.fadeRestoreVolume = -1
+        }
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::forgetPresses, ::onVolumeObserved)
         volumeWatcher.start()
@@ -276,7 +302,7 @@ class KnobService : AccessibilityService() {
         }
 
         armPocketGuard()
-        val press = Press(code, target.controller, tapHold = tapHold)
+        val press = Press(code, target.controller, tapHold = tapHold, idleOnly = target.mode == Mode.COMBO_ONLY && !testing)
         presses[code] = press
         when {
             tapHold -> handler.postDelayed(press, TAP_HOLD_DELAY_MS)
@@ -296,6 +322,7 @@ class KnobService : AccessibilityService() {
         if (press.passive) return false
         if (press.handled) {
             lastTapUpAt.remove(code)
+            if (press.holdFired && !GestureTest.active) prefs.recordHoldOvershoot(heldMs - prefs.longPressMs)
         } else {
             val direction = if (code == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
             if (GestureTest.active) {
@@ -447,6 +474,9 @@ class KnobService : AccessibilityService() {
         if (tap) backTap.start() else backTap.stop()
         if (turn) twist.start() else twist.stop()
         if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
+        // Taps and twists have no key press to arm the pocket check, so keep it on while they run
+        // (unless the wave detector already watches the same sensor).
+        proximity.keep(prefs.pocketGuard && (tap || turn) && !wave.running && !testing)
         val flipPending = flipPausedAt != 0L && now - flipPausedAt < FLIP_RESUME_WINDOW_MS
         if (enabled && prefs.flip && (playing || flipPending)) flip.start() else flip.stop()
 
@@ -454,7 +484,7 @@ class KnobService : AccessibilityService() {
         // (The proximity sensor used for the wave does wake it.) Right after a pause, stay up until
         // the sensors have been rearranged for the silence.
         val settling = pausedAt != 0L && now - pausedAt < PAUSE_SETTLE_MS * 2
-        val keepAwake = flip.running && flipPending || !playing && (tap || turn) || settling
+        val keepAwake = flip.running && flipPending || !playing && (tap || turn) || settling || fading
         if (keepAwake && !wakeLock.isHeld) {
             wakeLock.acquire(WAKE_LOCK_MAX_MS)
         } else if (!keepAwake && wakeLock.isHeld) {
@@ -512,8 +542,10 @@ class KnobService : AccessibilityService() {
         }
         restoreVolumeTo?.let(::restoreVolume)
         if (action == Action.PLAY_PAUSE) {
-            pausedAt = if (audio.isMusicActive) SystemClock.elapsedRealtime() else 0L
-            if (pausedAt != 0L) stayAwake()
+            // Same decision as Media.perform: the player's own state, or the audio when there is no player.
+            val pausing = player?.isPlaying() ?: audio.isMusicActive
+            pausedAt = if (pausing) SystemClock.elapsedRealtime() else 0L
+            if (pausing) stayAwake()
         }
         val problem = execute(action, player)
         log(problem?.let { "$name → ${getString(actionLabel(action))}: $it" }
@@ -550,35 +582,54 @@ class KnobService : AccessibilityService() {
 
     /** Sleep timer: lower the volume step by step, pause, then put the volume back for next time. */
     private fun fadeOutAndPause() {
+        if (fading) return
         val start = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         log(getString(R.string.log_sleep_fade))
         if (!audio.isMusicActive || start <= 0) {
             media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
             return
         }
+        fading = true
+        // Written down first: if the process dies mid-fade, the next start puts the volume back.
+        prefs.fadeRestoreVolume = start
         stayAwake()
         val interval = SleepTimer.FADE_MS / start
         var level = start
+        var silentSince = 0L
         val step = object : Runnable {
             override fun run() {
+                val now = SystemClock.elapsedRealtime()
                 if (!audio.isMusicActive) {
-                    // Paused by hand meanwhile.
-                    restoreVolume(start)
+                    // A moment of silence is usually the next track loading; only a longer one means the
+                    // music was paused by hand, and then the fade is over.
+                    if (silentSince == 0L) silentSince = now
+                    if (now - silentSince < FADE_SILENCE_MS) {
+                        handler.postDelayed(this, minOf(interval, FADE_SILENCE_CHECK_MS))
+                    } else {
+                        finishFade(start)
+                    }
                     return
                 }
+                silentSince = 0L
                 level--
-                ignoreVolumeUntil = SystemClock.elapsedRealtime() + interval + IGNORE_OWN_CHANGE_MS
+                ignoreVolumeUntil = now + interval + IGNORE_OWN_CHANGE_MS
                 audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0)
                 lastVolume = level
                 if (level > 0) {
                     handler.postDelayed(this, interval)
                 } else {
                     media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
-                    handler.postDelayed({ restoreVolume(start) }, RESTORE_AFTER_FADE_MS)
+                    handler.postDelayed({ finishFade(start) }, RESTORE_AFTER_FADE_MS)
                 }
             }
         }
         handler.post(step)
+    }
+
+    private fun finishFade(volume: Int) {
+        restoreVolume(volume)
+        prefs.fadeRestoreVolume = -1
+        fading = false
     }
 
     /** Until the next sensor check decides; with the screen off the CPU could otherwise sleep before it. */
@@ -644,5 +695,7 @@ class KnobService : AccessibilityService() {
         const val IGNORE_OWN_CHANGE_MS = 400L
         const val ANNOUNCE_WAIT_MS = 2_500L
         const val RESTORE_AFTER_FADE_MS = 1_000L
+        const val FADE_SILENCE_MS = 4_000L
+        const val FADE_SILENCE_CHECK_MS = 500L
     }
 }

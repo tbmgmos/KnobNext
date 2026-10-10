@@ -264,27 +264,46 @@ object SleepTimer {
     fun start(context: Context, prefs: Prefs, minutes: Int) {
         val delay = minutes * 60_000L
         // Fires when the fade has to begin, so the music is paused right at the time shown.
-        val fireIn = (delay - FADE_MS).coerceAtLeast(0L)
-        context.getSystemService(AlarmManager::class.java)
-            .setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + fireIn, alarm(context))
+        setAlarm(context, ACTION_FADE, (delay - FADE_MS).coerceAtLeast(0L))
         prefs.sleepUntil = System.currentTimeMillis() + delay
     }
 
     fun cancel(context: Context, prefs: Prefs) {
-        context.getSystemService(AlarmManager::class.java).cancel(alarm(context))
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        // null: an alarm set by a version before the fade existed.
+        listOf(ACTION_FADE, ACTION_PAUSE, null).forEach { alarms.cancel(alarm(context, it)) }
         prefs.sleepUntil = 0L
     }
 
-    private fun alarm(context: Context) = PendingIntent.getBroadcast(
-        context, 0, Intent(context, SleepReceiver::class.java), PendingIntent.FLAG_IMMUTABLE,
+    /** No service to fade out: pause plainly at the time shown instead. */
+    internal fun pauseLater(context: Context) = setAlarm(context, ACTION_PAUSE, FADE_MS)
+
+    private fun setAlarm(context: Context, action: String, inMs: Long) {
+        context.getSystemService(AlarmManager::class.java).setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + inMs, alarm(context, action),
+        )
+    }
+
+    private fun alarm(context: Context, action: String?) = PendingIntent.getBroadcast(
+        context, 0, Intent(context, SleepReceiver::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE,
     )
+
+    internal const val ACTION_FADE = "com.knobnext.action.SLEEP_FADE"
+    internal const val ACTION_PAUSE = "com.knobnext.action.SLEEP_PAUSE"
 }
 
-/** Fades out and pauses when the sleep timer fires (or just pauses if the service isn't running). */
+/** Fades out and pauses when the sleep timer fires (or pauses at the end if the service isn't running). */
 class SleepReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        Prefs(context).sleepUntil = 0L
-        SleepTimer.fader?.let { return it() }
+        val prefs = Prefs(context)
+        if (intent.action != SleepTimer.ACTION_PAUSE) {
+            SleepTimer.fader?.let {
+                prefs.sleepUntil = 0L
+                return it()
+            }
+            return SleepTimer.pauseLater(context)
+        }
+        prefs.sleepUntil = 0L
         val audio = context.getSystemService(AudioManager::class.java)
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))

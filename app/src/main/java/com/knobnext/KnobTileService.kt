@@ -11,7 +11,9 @@ class KnobTileService : TileService() {
     override fun onClick() {
         val prefs = Prefs(this)
         prefs.enabled = !prefs.enabled
-        ScreenOffService.sync(this)
+        // A tap on the tile is the user acting, so try the start even with battery optimization on;
+        // if the system still refuses, the app retries when it is opened.
+        ScreenOffService.sync(this, inForeground = true)
         render()
     }
 

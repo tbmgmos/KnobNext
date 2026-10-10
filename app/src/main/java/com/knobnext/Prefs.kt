@@ -40,10 +40,11 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     BOTH_HOLD("action_both_hold", GestureGroup.KEYS, Action.LIKE),
     DOUBLE_UP("action_double_up_off", GestureGroup.SEQUENCE, Action.NEXT),
     DOUBLE_DOWN("action_double_down_off", GestureGroup.SEQUENCE, Action.PREVIOUS),
-    TRIPLE_UP("action_triple_up", GestureGroup.SEQUENCE, Action.SEEK_FORWARD),
-    TRIPLE_DOWN("action_triple_down", GestureGroup.SEQUENCE, Action.SEEK_BACK),
-    UP_DOWN("action_up_down", GestureGroup.SEQUENCE, Action.PLAY_PAUSE),
-    DOWN_UP("action_down_up", GestureGroup.SEQUENCE, Action.LIKE),
+    // Off by default: "+ then −" or three presses is also how people simply correct the volume.
+    TRIPLE_UP("action_triple_up", GestureGroup.SEQUENCE, Action.NONE),
+    TRIPLE_DOWN("action_triple_down", GestureGroup.SEQUENCE, Action.NONE),
+    UP_DOWN("action_up_down", GestureGroup.SEQUENCE, Action.NONE),
+    DOWN_UP("action_down_up", GestureGroup.SEQUENCE, Action.NONE),
     BACK_TAP_2("action_back_tap_2", GestureGroup.MOTION, Action.NEXT),
     BACK_TAP_3("action_back_tap_3", GestureGroup.MOTION, Action.PREVIOUS),
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
@@ -102,6 +103,23 @@ class Prefs(context: Context) {
         statsSp.edit().putString("taps", kept.joinToString(",")).apply()
     }
 
+    /**
+     * How long after the hold time recent holds were released. A deliberate hold is let go only after the
+     * vibration is felt; one released almost at once was probably a tap that ran a little long.
+     */
+    val holdOvershoots: List<Int>
+        get() = statsSp.getString("holds", null)?.split(',')?.mapNotNull { it.toIntOrNull() }.orEmpty()
+
+    fun recordHoldOvershoot(ms: Int) {
+        val kept = (holdOvershoots + ms).takeLast(TAP_SAMPLES)
+        statsSp.edit().putString("holds", kept.joinToString(",")).apply()
+    }
+
+    /** Volume to put back after a sleep-timer fade that didn't finish, or -1. */
+    var fadeRestoreVolume: Int
+        get() = statsSp.getInt("fade_restore", -1)
+        set(v) = statsSp.edit().putInt("fade_restore", v).apply()
+
     var enabled: Boolean
         get() = sp.getBoolean("enabled", true)
         set(v) = sp.edit().putBoolean("enabled", v).apply()
@@ -138,7 +156,11 @@ class Prefs(context: Context) {
 
     var longPressMs: Int
         get() = sp.getInt("long_press_ms", 500).coerceIn(LONG_PRESS_MIN, LONG_PRESS_MAX)
-        set(v) = sp.edit().putInt("long_press_ms", v).apply()
+        set(v) {
+            sp.edit().putInt("long_press_ms", v).apply()
+            // Overshoots are measured from the old hold time and say nothing about the new one.
+            statsSp.edit().remove("holds").apply()
+        }
 
     var appFilter: Boolean
         get() = sp.getBoolean("app_filter", false)

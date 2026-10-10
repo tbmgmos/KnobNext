@@ -391,13 +391,13 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
 @Composable
 private fun HoldAdvice(ctx: PageContext) {
     val current = ctx.s.longPressMs
-    val taps = remember(current) { ctx.prefs.tapDurations }
-    val suggested = suggestLongPress(taps, current) ?: return
+    val advice = remember(current) { suggestLongPress(ctx.prefs.tapDurations, ctx.prefs.holdOvershoots, current) } ?: return
     InfoCard(
         title = stringResource(R.string.hold_advice_title),
-        body = stringResource(R.string.hold_advice_body, longTapMs(taps), suggested),
-        button = stringResource(R.string.hold_advice_button, suggested),
-        onClick = { ctx.prefs.longPressMs = suggested },
+        body = advice.longTap?.let { stringResource(R.string.hold_advice_body, it, advice.ms) }
+            ?: stringResource(R.string.hold_advice_body_hasty, advice.ms),
+        button = stringResource(R.string.hold_advice_button, advice.ms),
+        onClick = { ctx.prefs.longPressMs = advice.ms },
     ) { Badge(MaterialShapes.Cookie4Sided, KnobIcons.TouchApp) }
 }
 
@@ -722,18 +722,21 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
         }
     }
     item { CheckHero(check) }
-    item { CheckList(stringResource(R.string.section_keys), Gesture.entries.filter { it.group == GestureGroup.KEYS }, s.actions, check) }
+    // The same set the service uses: the playing app's own gestures when it has them.
+    val actions = ctx.prefs.lastPlayer?.let { s.profiles[it] } ?: s.actions
+    item { CheckList(stringResource(R.string.section_keys), Gesture.entries.filter { it.group == GestureGroup.KEYS }, actions, check) }
     if (s.doubleMode != DoubleMode.OFF) {
         item {
-            CheckList(stringResource(R.string.section_double), Gesture.entries.filter { it.group == GestureGroup.SEQUENCE }, s.actions, check)
+            CheckList(stringResource(R.string.section_double), Gesture.entries.filter { it.group == GestureGroup.SEQUENCE }, actions, check)
         }
+        if (s.doubleMode == DoubleMode.SCREEN_OFF) item { Hint(stringResource(R.string.test_screen_off_mode)) }
     }
     val motion = buildList {
         if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
         if (s.twist) add(Gesture.TWIST)
         if (s.wave) add(Gesture.WAVE)
     }
-    if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, s.actions, check) }
+    if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, actions, check) }
     item { Hint(stringResource(R.string.test_hint)) }
 }
 

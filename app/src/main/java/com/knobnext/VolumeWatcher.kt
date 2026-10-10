@@ -130,8 +130,10 @@ class VolumeWatcher(
     }
 
     private fun register(receiver: BroadcastReceiver, filter: IntentFilter) {
+        // Both broadcasts come from the system, which reaches non-exported receivers too; other apps
+        // must not be able to fake volume changes (they would fire gestures).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             context.registerReceiver(receiver, filter)
         }
