@@ -1,6 +1,9 @@
 package com.knobnext
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -108,5 +111,82 @@ class ProximityProbe(context: Context) : SensorEventListener {
 
     private companion object {
         const val ARM_MS = 3_000L
+    }
+}
+
+/** Sound played when a track is switched; OFF plays nothing. */
+enum class CueStyle { OFF, SOFT, TWO_TONE, CLICK }
+
+/** How loud the cue is, relative to the music volume. */
+enum class CueVolume(val gain: Float) { LOW(0.12f), MEDIUM(0.25f), HIGH(0.5f) }
+
+/**
+ * Short sounds generated on the fly (no audio files). They play with the navigation-guidance usage,
+ * which follows the music volume and output (headphones), and without audio focus, so the music is
+ * neither paused nor ducked. "Forward" goes up in pitch, "back" goes down.
+ */
+class Cues {
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+    private var track: AudioTrack? = null
+
+    fun play(style: CueStyle, forward: Boolean, volume: CueVolume) {
+        if (style == CueStyle.OFF) return
+        val pcm = render(style, forward)
+        try {
+            track?.release()
+            val t = AudioTrack.Builder()
+                .setAudioAttributes(attributes)
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(RATE)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build(),
+                )
+                .setBufferSizeInBytes(pcm.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            t.write(pcm, 0, pcm.size)
+            t.setVolume(volume.gain)
+            t.play()
+            track = t
+        } catch (_: Exception) {
+            // No audio output right now (e.g. during a call): a cue is not worth an error.
+            track = null
+        }
+    }
+
+    fun release() {
+        track?.release()
+        track = null
+    }
+
+    private fun render(style: CueStyle, forward: Boolean): ShortArray = when (style) {
+        CueStyle.SOFT -> tone(if (forward) 880.0 else 587.0, 110)
+        CueStyle.TWO_TONE ->
+            if (forward) tone(659.0, 70) + silence(35) + tone(880.0, 90) else tone(880.0, 70) + silence(35) + tone(659.0, 90)
+        CueStyle.CLICK -> tone(if (forward) 2_400.0 else 1_800.0, 20)
+        CueStyle.OFF -> ShortArray(0)
+    }
+
+    /** A sine with a quick fade-in and a smooth fade-out, so it starts and ends without a click. */
+    private fun tone(hz: Double, ms: Int): ShortArray {
+        val n = RATE * ms / 1000
+        val attack = minOf(RATE * 5 / 1000, n / 4)
+        return ShortArray(n) { i ->
+            val fadeIn = if (i < attack) i.toDouble() / attack else 1.0
+            val fadeOut = Math.cos(Math.PI / 2 * i / n).let { it * it }
+            val sample = Math.sin(2 * Math.PI * hz * i / RATE) * fadeIn * fadeOut * 0.8
+            (sample * Short.MAX_VALUE).toInt().toShort()
+        }
+    }
+
+    private fun silence(ms: Int) = ShortArray(RATE * ms / 1000)
+
+    private companion object {
+        const val RATE = 44_100
     }
 }

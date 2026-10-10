@@ -22,6 +22,7 @@ class KnobService : AccessibilityService() {
     private lateinit var extras: Extras
     private lateinit var haptics: Haptics
     private lateinit var proximity: ProximityProbe
+    private val cues = Cues()
     private val handler = Handler(Looper.getMainLooper())
 
     // ---- Screen on: key events from the accessibility framework ----
@@ -225,6 +226,7 @@ class KnobService : AccessibilityService() {
             if (wakeLock.isHeld) wakeLock.release()
             extras.release()
             proximity.release()
+            cues.release()
         }
         super.onDestroy()
     }
@@ -550,6 +552,11 @@ class KnobService : AccessibilityService() {
         val problem = execute(action, player)
         log(problem?.let { "$name → ${getString(actionLabel(action))}: $it" }
             ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
+        if (action == Action.NEXT || action == Action.PREVIOUS || action == Action.RESTART) {
+            if (!prefs.cueScreenOffOnly || !power.isInteractive) {
+                cues.play(prefs.cueStyle, forward = action == Action.NEXT, prefs.cueVolume)
+            }
+        }
         if ((action == Action.NEXT || action == Action.PREVIOUS) && prefs.announceSkips && !power.isInteractive) {
             announceNewTrack(player)
         }

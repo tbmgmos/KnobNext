@@ -53,6 +53,9 @@ import com.knobnext.GestureGroup
 import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
+import com.knobnext.CueStyle
+import com.knobnext.CueVolume
+import com.knobnext.Cues
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -62,6 +65,7 @@ import com.knobnext.TapSensitivity
 import com.knobnext.Updates
 import com.knobnext.appIcon
 import com.knobnext.appLabel
+import kotlinx.coroutines.launch
 
 class ScreenActions(
     val openAccessibility: () -> Unit,
@@ -771,6 +775,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item { CueCard(ctx) }
     item {
         Group(1) {
             ControlRow(shape(0), stringResource(R.string.pref_resume), caption = stringResource(R.string.pref_resume_hint), enabled = s.enabled) {
@@ -846,6 +851,76 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     }
     item { EventLog(prefs) }
 }
+
+/** The optional sound on track changes: style, loudness, when, and a preview. */
+@Composable
+private fun CueCard(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    val on = s.cueStyle != CueStyle.OFF
+    val cues = remember { Cues() }
+    DisposableEffect(cues) { onDispose { cues.release() } }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val preview: (CueStyle, CueVolume) -> Unit = { style, volume ->
+        scope.launch {
+            cues.play(style, forward = true, volume)
+            kotlinx.coroutines.delay(CUE_PREVIEW_GAP_MS)
+            cues.play(style, forward = false, volume)
+        }
+    }
+    Group(if (on) 4 else 1) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ControlRow(shape(0), stringResource(R.string.cue_title), caption = stringResource(R.string.cue_hint), enabled = s.enabled) {
+                ConnectedChoice(
+                    options = listOf(
+                        CueStyle.OFF to R.string.cue_off,
+                        CueStyle.SOFT to R.string.cue_soft,
+                        CueStyle.TWO_TONE to R.string.cue_two_tone,
+                        CueStyle.CLICK to R.string.cue_click,
+                    ),
+                    selected = s.cueStyle,
+                    onSelect = {
+                        prefs.cueStyle = it
+                        preview(it, s.cueVolume)
+                    },
+                    enabled = s.enabled,
+                )
+            }
+            AnimatedVisibility(on) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(1), stringResource(R.string.cue_volume), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(
+                                CueVolume.LOW to R.string.cue_volume_low,
+                                CueVolume.MEDIUM to R.string.cue_volume_medium,
+                                CueVolume.HIGH to R.string.cue_volume_high,
+                            ),
+                            selected = s.cueVolume,
+                            onSelect = {
+                                prefs.cueVolume = it
+                                preview(s.cueStyle, it)
+                            },
+                            enabled = s.enabled,
+                        )
+                    }
+                    SwitchRow(
+                        shape(2), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
+                        subtitle = stringResource(R.string.cue_screen_off_only_hint), enabled = s.enabled,
+                    )
+                    ListRow(
+                        shape(3), stringResource(R.string.cue_preview),
+                        subtitle = stringResource(R.string.cue_preview_hint),
+                        enabled = s.enabled,
+                        onClick = { preview(s.cueStyle, s.cueVolume) },
+                        leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.Play) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val CUE_PREVIEW_GAP_MS = 450L
 
 // ---------------------------------------------------------------- Building blocks
 

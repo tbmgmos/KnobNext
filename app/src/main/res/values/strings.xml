@@ -233,6 +233,20 @@
     <string name="log_no_other_player">другого плеера нет</string>
     <string name="log_switched_to">теперь %1$s</string>
     <string name="log_sleep_fade">таймер сна: плавно выключаю</string>
+    <string name="cue_title">Звук при переключении</string>
+    <string name="cue_hint">Короткий сигнал поверх музыки: «вперёд» — выше, «назад» — ниже. Музыка не приглушается.</string>
+    <string name="cue_off">Выкл</string>
+    <string name="cue_soft">Мягкий</string>
+    <string name="cue_two_tone">Два тона</string>
+    <string name="cue_click">Щелчок</string>
+    <string name="cue_volume">Громкость сигнала</string>
+    <string name="cue_volume_low">Тихо</string>
+    <string name="cue_volume_medium">Средне</string>
+    <string name="cue_volume_high">Громко</string>
+    <string name="cue_screen_off_only">Только при выключенном экране</string>
+    <string name="cue_screen_off_only_hint">С включённым экраном переключение и так видно</string>
+    <string name="cue_preview">Прослушать</string>
+    <string name="cue_preview_hint">«Вперёд», затем «назад» — громкость зависит от громкости музыки</string>
     <string name="pref_announce_skips">Называть трек после переключения</string>
     <string name="pref_announce_skips_hint">При выключенном экране — чтобы знать, что заиграло</string>
 

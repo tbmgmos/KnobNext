@@ -79,6 +79,9 @@ data class Settings(
     val sleepUntil: Long,
     val resumeMinutes: Int,
     val announceSkips: Boolean,
+    val cueStyle: CueStyle,
+    val cueVolume: CueVolume,
+    val cueScreenOffOnly: Boolean,
     val actions: Map<Gesture, Action>,
     /** Apps with their own gesture set → that set. */
     val profiles: Map<String, Map<Gesture, Action>>,
@@ -220,6 +223,20 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("announce_skips", false)
         set(v) = sp.edit().putBoolean("announce_skips", v).apply()
 
+    /** Sound when a track is switched (next, previous, back to the start). */
+    var cueStyle: CueStyle
+        get() = CueStyle.entries.firstOrNull { it.name == sp.getString("cue_style", null) } ?: CueStyle.OFF
+        set(v) = sp.edit().putString("cue_style", v.name).apply()
+
+    var cueVolume: CueVolume
+        get() = CueVolume.entries.firstOrNull { it.name == sp.getString("cue_volume", null) } ?: CueVolume.LOW
+        set(v) = sp.edit().putString("cue_volume", v.name).apply()
+
+    /** With the screen on the change is visible anyway, so by default the cue is only for the screen off. */
+    var cueScreenOffOnly: Boolean
+        get() = sp.getBoolean("cue_screen_off_only", true)
+        set(v) = sp.edit().putBoolean("cue_screen_off_only", v).apply()
+
     /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
     var sleepUntil: Long
         get() = sp.getLong("sleep_until", 0L)
@@ -310,6 +327,9 @@ class Prefs(context: Context) {
         sleepUntil = sleepUntil,
         resumeMinutes = resumeMinutes,
         announceSkips = announceSkips,
+        cueStyle = cueStyle,
+        cueVolume = cueVolume,
+        cueScreenOffOnly = cueScreenOffOnly,
         actions = Gesture.entries.associateWith { action(it) },
         profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )
