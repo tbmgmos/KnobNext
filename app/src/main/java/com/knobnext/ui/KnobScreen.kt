@@ -252,7 +252,7 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
     val s = ctx.s
     val setup = ctx.setup
     update?.let { release ->
-        item { UpdateCard(release) { ctx.actions.openUrl(release.apkUrl ?: release.pageUrl) } }
+        item { UpdateCard(release) { ctx.actions.openUrl(release.pageUrl) } }
     }
     if (!setup.serviceEnabled) {
         item { SetupCard(setup, ctx.actions) }

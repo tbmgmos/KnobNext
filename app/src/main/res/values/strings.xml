@@ -67,6 +67,21 @@
     <string name="update_title">Доступно обновление</string>
     <string name="update_body">Версия %1$s</string>
     <string name="update_download">Скачать</string>
+    <string name="update_install">Обновить</string>
+    <string name="update_whats_new">Что нового</string>
+    <string name="update_downloading_start">Загрузка…</string>
+    <string name="update_downloading">Загрузка… %1$d%%</string>
+    <string name="update_permission">Разрешите KnobNext устанавливать приложения — это нужно один раз. Затем вернитесь и нажмите «Продолжить».</string>
+    <string name="update_continue">Продолжить</string>
+    <string name="update_installing">Подтвердите установку в окне системы. Настройки сохранятся.</string>
+    <string name="update_failed">Не получилось: %1$s</string>
+    <string name="update_retry">Повторить</string>
+    <string name="update_err_network">нет связи с GitHub</string>
+    <string name="update_err_install">система отказала в установке</string>
+    <string name="update_err_broken">файл повреждён, попробуйте ещё раз</string>
+    <string name="update_err_other_app">скачан не тот файл</string>
+    <string name="update_err_not_newer">эта версия уже установлена</string>
+    <string name="update_err_signature">новая версия подписана другим ключом. Удалите приложение и установите её заново со страницы «Что нового»</string>
 
     <string name="now_playing_unknown">Без названия</string>
 

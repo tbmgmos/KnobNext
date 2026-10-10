@@ -48,6 +48,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.knobnext.SelfUpdate
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -152,28 +155,93 @@ fun StatusHero(on: Boolean, onToggle: (Boolean) -> Unit) {
 }
 
 @Composable
-fun UpdateCard(release: Release, onDownload: () -> Unit) {
+fun UpdateCard(release: Release, onOpenPage: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val state by SelfUpdate.state.collectAsState()
+    val update = {
+        val apk = release.apkUrl
+        when {
+            apk == null -> onOpenPage()
+            !SelfUpdate.canInstall(context) -> {
+                SelfUpdate.start(context, apk)
+                try {
+                    context.startActivity(SelfUpdate.permissionIntent(context))
+                } catch (_: Exception) {
+                }
+            }
+            else -> SelfUpdate.start(context, apk)
+        }
+    }
+    val onPrimaryButtons = ButtonDefaults.buttonColors(containerColor = scheme.onPrimary, contentColor = scheme.primary)
     Surface(
         shape = RoundedCornerShape(28.dp),
         color = scheme.primary,
         contentColor = scheme.onPrimary,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            ShapeBadge(MaterialShapes.SoftBurst, KnobIcons.Download, scheme.onPrimary, scheme.primary)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.update_title), style = MaterialTheme.typography.titleMediumEmphasized)
-                Text(stringResource(R.string.update_body, release.version), style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeBadge(MaterialShapes.SoftBurst, KnobIcons.Download, scheme.onPrimary, scheme.primary)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.update_title), style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text(
+                        when (val st = state) {
+                            is SelfUpdate.State.Downloading ->
+                                if (st.progress < 0) {
+                                    stringResource(R.string.update_downloading_start)
+                                } else {
+                                    stringResource(R.string.update_downloading, (st.progress * 100).toInt())
+                                }
+                            SelfUpdate.State.NeedsPermission -> stringResource(R.string.update_permission)
+                            SelfUpdate.State.Installing -> stringResource(R.string.update_installing)
+                            is SelfUpdate.State.Failed -> stringResource(R.string.update_failed, st.reason)
+                            SelfUpdate.State.Idle -> stringResource(R.string.update_body, release.version)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
-            Spacer(Modifier.width(12.dp))
-            Button(
-                onClick = onDownload,
-                shapes = ButtonDefaults.shapes(),
-                colors = ButtonDefaults.buttonColors(containerColor = scheme.onPrimary, contentColor = scheme.primary),
-            ) {
-                Text(stringResource(R.string.update_download))
+            when (val st = state) {
+                is SelfUpdate.State.Downloading -> {
+                    Spacer(Modifier.height(16.dp))
+                    if (st.progress < 0) {
+                        LinearWavyProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = scheme.onPrimary,
+                            trackColor = scheme.onPrimary.copy(alpha = 0.3f),
+                        )
+                    } else {
+                        LinearWavyProgressIndicator(
+                            progress = { st.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = scheme.onPrimary,
+                            trackColor = scheme.onPrimary.copy(alpha = 0.3f),
+                        )
+                    }
+                }
+                SelfUpdate.State.Installing -> Unit
+                else -> {
+                    Spacer(Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = update, shapes = ButtonDefaults.shapes(), colors = onPrimaryButtons) {
+                            Text(
+                                stringResource(
+                                    when (state) {
+                                        SelfUpdate.State.NeedsPermission -> R.string.update_continue
+                                        is SelfUpdate.State.Failed -> R.string.update_retry
+                                        else -> R.string.update_install
+                                    },
+                                ),
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = onOpenPage) {
+                            Text(stringResource(R.string.update_whats_new), color = scheme.onPrimary)
+                        }
+                    }
+                }
             }
         }
     }
