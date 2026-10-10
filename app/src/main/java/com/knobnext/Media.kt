@@ -43,8 +43,13 @@ class Media(private val context: Context) {
             }
         }
 
-    /** Active sessions are ordered by priority; prefer one that is actually playing. */
-    fun pick(list: List<MediaController>): MediaController? = list.firstOrNull { it.isPlaying() } ?: list.firstOrNull()
+    /**
+     * Prefer a session that is actually playing; among several, the one that started last. Otherwise
+     * the one played most recently. Ties keep the system's priority order (maxBy keeps the first).
+     */
+    fun pick(list: List<MediaController>): MediaController? =
+        list.filter { it.isPlaying() }.maxByOrNull { PlayOrder.of(it.packageName) }
+            ?: list.maxByOrNull { PlayOrder.of(it.packageName) }
 
     fun isInCall(): Boolean = when (audio.mode) {
         AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> true
@@ -91,7 +96,7 @@ class Media(private val context: Context) {
             Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
             // Handled by Extras: they need the service (speech, alarms, launching apps).
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT -> Unit
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET -> Unit
         }
     }
 
@@ -121,8 +126,9 @@ class Media(private val context: Context) {
         return Unit
     }
 
-    fun volumeStep(direction: Int) {
-        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
+    /** [showUi] false keeps the volume panel away (pocket mode: the screen stays black). */
+    fun volumeStep(direction: Int, showUi: Boolean = true) {
+        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
     }
 
     fun sendKey(code: Int) {

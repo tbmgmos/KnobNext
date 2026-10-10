@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
@@ -95,6 +95,7 @@ data class Settings(
     val sleepExtend: Boolean,
     val announceAllTracks: Boolean,
     val backTapEco: Boolean,
+    val pocketAuto: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
     val profileSeekSteps: Map<String, Int>,
@@ -337,6 +338,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("back_tap_eco", false)
         set(v) = sp.edit().putBoolean("back_tap_eco", v).apply()
 
+    /** While music plays, the power button turns on pocket mode first; a second press turns the screen off. */
+    var pocketAuto: Boolean
+        get() = sp.getBoolean("pocket_auto", false)
+        set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
+
     /** Apps for which the "make a profile" suggestion was dismissed. */
     var dismissedSuggestions: Set<String>
         get() = sp.getStringSet("dismissed_suggestions", null)?.toSet() ?: emptySet()
@@ -499,6 +505,7 @@ class Prefs(context: Context) {
         sleepExtend = sleepExtend,
         announceAllTracks = announceAllTracks,
         backTapEco = backTapEco,
+        pocketAuto = pocketAuto,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },
         cuesOffApps = profileApps.filter { cuesOff(it) }.toSet(),

@@ -58,6 +58,7 @@ import com.knobnext.CueGroup
 import com.knobnext.CueStyle
 import com.knobnext.CueVolume
 import com.knobnext.Cues
+import com.knobnext.PocketScreen
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -423,6 +424,33 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
     item { Group(1) { LongPressRow(shape(0), s.longPressMs, { ctx.prefs.longPressMs = it }, s.enabled) } }
     item { HoldAdvice(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
+    item { Hint(stringResource(R.string.blind_keys_hint)) }
+}
+
+/** Pocket mode: turned on by the power button while music plays, or right now to try it. */
+@Composable
+private fun PocketCard(ctx: PageContext) {
+    val s = ctx.s
+    val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.pocket_title))
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pocket_auto), s.pocketAuto, { ctx.prefs.pocketAuto = it },
+                    subtitle = stringResource(R.string.pocket_auto_hint), enabled = s.enabled,
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.pocket_try),
+                    subtitle = stringResource(if (running) R.string.pocket_try_hint else R.string.pocket_need_service),
+                    enabled = running,
+                    onClick = { PocketScreen.toggle?.invoke() },
+                    trailing = { Icon(KnobIcons.PhoneDark, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.pocket_intro))
+    }
 }
 
 /** Suggests a hold time from how long this person's short taps actually last. */
@@ -887,6 +915,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item { PocketCard(ctx) }
     item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }
     item {

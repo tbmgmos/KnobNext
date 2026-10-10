@@ -112,6 +112,12 @@ object KnobIcons {
         "M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z",
     )
     val SwapHoriz = icon("SwapHoriz", "M6.99,11L3,15l3.99,4v-3H14v-2H6.99v-3zM21,9l-3.99,-4v3H10v2h7.01v3L21,9z")
+    /** A phone with its screen dark: pocket mode. */
+    val PhoneDark = icon(
+        "PhoneDark",
+        "M17,1H7C5.9,1 5,1.9 5,3v18c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V3C19,1.9 18.1,1 17,1zM12,21.5" +
+            "c-0.55,0 -1,-0.45 -1,-1s0.45,-1 1,-1 1,0.45 1,1 -0.45,1 -1,1z",
+    )
     val Flashlight = icon(
         "Flashlight",
         "M6,2h12v3H6V2zM6,7h12v1l-2,3v11H8V11L6,8V7zM12,15.5c0.83,0 1.5,-0.67 1.5,-1.5s-0.67,-1.5 -1.5,-1.5 " +

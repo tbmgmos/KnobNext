@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Keeps the CPU awake for a while after "flip to pause", to notice the phone being turned back. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Pocket mode turns the screen back on (black) when it was just turned off. -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
 
     <!-- Lets the app show names and icons of players (package visibility on Android 11+). -->
     <queries>

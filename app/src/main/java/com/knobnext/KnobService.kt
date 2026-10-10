@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -165,7 +166,7 @@ class KnobService : AccessibilityService() {
         // Capped: if the release is ever lost, the volume must not keep changing on its own.
         val ramp = object : Runnable {
             override fun run() {
-                media.volumeStep(rampDirection)
+                media.volumeStep(rampDirection, showUi = !screenDark())
                 if (++rampSteps < RAMP_MAX_STEPS) handler.postDelayed(this, RAMP_STEP_MS)
             }
         }
@@ -246,7 +247,7 @@ class KnobService : AccessibilityService() {
                 } else {
                     // Only the long hold was meant to work now (nothing assigned to the hold, or it needs
                     // playback): a press released before it is just a volume press, not a swallowed key.
-                    media.volumeStep(if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER)
+                    media.volumeStep(if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, showUi = !screenDark())
                 }
             }
             holdArmed = null
@@ -305,9 +306,10 @@ class KnobService : AccessibilityService() {
     @Volatile private var tapThreshold = TapSensitivity.MEDIUM.threshold
     @Volatile private var backTapTriple = true
 
-    // Speaks every new track with the screen off, when that option is on.
+    // Follows every player: which one plays now, and new tracks to speak when that option is on.
     private var trackWatcher: NowPlayingTracker? = null
     private var announcedTrack: String? = null
+    private var trackPlayer: String? = null
 
     private val motionCheck = object : Runnable {
         override fun run() {
@@ -330,6 +332,37 @@ class KnobService : AccessibilityService() {
     private var sequenceGap = SEQUENCE_GAP_MS
     private lateinit var volumeWatcher: VolumeWatcher
 
+    // ---- Screen off, key held: the system repeats the volume step, and nothing else does that fast. ----
+    private var blindHold = 0
+    private var blindHoldBase = 0
+    private var blindHoldStepAt = 0L
+    private var blindSeek = Action.NONE
+    private val blindHoldEnd = object : Runnable {
+        override fun run() {
+            val quiet = SystemClock.elapsedRealtime() - blindHoldStepAt
+            if (quiet >= BLIND_RELEASE_MS) finishBlindHold() else handler.postDelayed(this, BLIND_RELEASE_MS - quiet)
+        }
+    }
+    private val blindSeekRepeat = object : Runnable {
+        override fun run() {
+            if (blindHold == 0) return
+            val controller = media.resolve(prefs)?.controller
+            media.perform(blindSeek, controller, prefs.seekStepMs(controller?.packageName))
+            if (prefs.vibrate) haptics.tick()
+            handler.postDelayed(this, SEEK_REPEAT_MS)
+        }
+    }
+
+    // ---- Pocket mode ----
+    private lateinit var pocket: PocketScreen
+    private var pocketShownAt = 0L
+    private var pocketLeftAt = 0L
+    private var pocketQuietSince = 0L
+    private var pocketPending = false
+    private val pocketCheck = object : Runnable {
+        override fun run() = checkPocket()
+    }
+
     override fun onServiceConnected() {
         audio = getSystemService(AudioManager::class.java)
         power = getSystemService(PowerManager::class.java)
@@ -346,7 +379,8 @@ class KnobService : AccessibilityService() {
             prefs.fadeRestoreVolume = -1
         }
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::forgetPresses, ::onVolumeObserved)
+        pocket = PocketScreen(this, ::onPocketLeft)
+        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onScreenOff, ::onVolumeObserved)
         volumeWatcher.start()
         backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
@@ -366,6 +400,7 @@ class KnobService : AccessibilityService() {
         handler.post(motionCheck)
         GestureTest.onChange = { handler.post { updateSensors() } }
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
+        PocketScreen.toggle = { handler.post { togglePocket() } }
         ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
@@ -375,8 +410,10 @@ class KnobService : AccessibilityService() {
         ScreenOffService.stop(this)
         GestureTest.onChange = null
         SleepTimer.fader = null
+        PocketScreen.toggle = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
+            pocket.hide(PocketScreen.Reason.STOPPED)
             volumeWatcher.stop()
             trackWatcher?.stop()
             backTap.release()
@@ -499,7 +536,7 @@ class KnobService : AccessibilityService() {
                 val volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
                 onVolumeChange(direction, volume, volume, VolumeWatcher.Source.KEY)
             } else {
-                media.volumeStep(if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER)
+                media.volumeStep(if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, showUi = !screenDark())
                 prefs.recordTap(heldMs)
             }
             lastTapUpAt[code] = SystemClock.uptimeMillis()
@@ -553,7 +590,7 @@ class KnobService : AccessibilityService() {
         if (!prefs.enabled) return false
         // With the screen off and nothing playing, Android ignores the volume keys altogether, so a
         // pause made there can only be undone with the screen on: allow that during the resume window.
-        return mode == DoubleMode.ALWAYS || !power.isInteractive || (resumeWindowOpen() && !audio.isMusicActive)
+        return mode == DoubleMode.ALWAYS || screenDark() || (resumeWindowOpen() && !audio.isMusicActive)
     }
 
     private fun resumeWindowOpen(): Boolean {
@@ -591,6 +628,12 @@ class KnobService : AccessibilityService() {
             resetSequence()
             return
         }
+        if (blindHold != 0) {
+            // Still held: keep the volume where it was before the hold.
+            blindHoldStepAt = now
+            quietRestore(blindHoldBase)
+            return
+        }
         if (source != VolumeWatcher.Source.KEY) {
             val via = getString(if (source == VolumeWatcher.Source.BROADCAST) R.string.log_via_broadcast else R.string.log_via_poll)
             log(getString(R.string.log_volume, if (direction > 0) "↑" else "↓", previous, value, via))
@@ -600,8 +643,26 @@ class KnobService : AccessibilityService() {
             return
         }
         if (sequence.isNotEmpty() && now - sequenceLastAt > sequenceGap) resetSequence()
+        // With the screen off, only volume changes tell what the keys do. Both keys pressed together
+        // give a step and its opposite at (nearly) the same moment; a key held down gives steps faster
+        // than anyone presses, repeated by the system.
+        val blind = !power.isInteractive && source == VolumeWatcher.Source.POLL
+        if (blind && sequence.size == 1 && direction == -sequence[0] && now - sequenceLastAt < BOTH_GAP_MS) {
+            val base = sequenceBase
+            resetSequence()
+            rampUntil = now + RAMP_QUIET_MS
+            log(getString(R.string.log_blind_both))
+            fireGesture(Gesture.BOTH, restoreVolumeTo = base)
+            return
+        }
         val tooFast = sequence.isNotEmpty() && now - sequenceLastAt < HUMAN_MIN_GAP_MS &&
             source != VolumeWatcher.Source.BROADCAST
+        if (blind && tooFast && sequence.all { it == direction }) {
+            val base = sequenceBase
+            resetSequence()
+            startBlindHold(direction, base, now)
+            return
+        }
         if (tooFast || sequence.size >= 3) {
             resetSequence()
             rampUntil = now + RAMP_QUIET_MS
@@ -620,7 +681,152 @@ class KnobService : AccessibilityService() {
         sequenceLastAt = now
         handler.removeCallbacks(sequenceFire)
         // Two presses with no three-press gesture that could still follow: no reason to wait for a third.
-        if (sequence.size >= 2) handler.postDelayed(sequenceFire, if (longerSequencePossible()) CONFIRM_MS else 0L)
+        // With the screen off, a moment more: a held key's repeats would follow right away.
+        val wait = when {
+            longerSequencePossible() -> CONFIRM_MS
+            !power.isInteractive -> HOLD_CHECK_MS
+            else -> 0L
+        }
+        if (sequence.size >= 2) handler.postDelayed(sequenceFire, wait)
+    }
+
+    /** A key held with the screen off: its hold gesture, without the volume running away meanwhile. */
+    private fun startBlindHold(direction: Int, base: Int, now: Long) {
+        val gesture = if (direction > 0) Gesture.HOLD_UP else Gesture.HOLD_DOWN
+        val target = media.resolve(prefs)
+        val action = prefs.action(gesture, target?.controller?.packageName)
+        val volume = action == Action.VOLUME_UP && direction > 0 || action == Action.VOLUME_DOWN && direction < 0
+        if (volume && !GestureTest.active) {
+            // The hold changes the volume anyway: the system already does just that.
+            rampUntil = now + RAMP_QUIET_MS
+            return
+        }
+        blindHold = direction
+        blindHoldBase = base
+        blindHoldStepAt = now
+        quietRestore(base)
+        log(getString(R.string.log_blind_hold))
+        val seek = action == Action.SEEK_FORWARD || action == Action.SEEK_BACK
+        if (fireGesture(gesture, target?.controller) && seek) {
+            blindSeek = action
+            handler.postDelayed(blindSeekRepeat, SEEK_REPEAT_MS)
+        }
+        handler.removeCallbacks(blindHoldEnd)
+        handler.postDelayed(blindHoldEnd, BLIND_RELEASE_MS)
+    }
+
+    private fun finishBlindHold() {
+        if (blindHold == 0) return
+        blindHold = 0
+        handler.removeCallbacks(blindSeekRepeat)
+        handler.removeCallbacks(blindHoldEnd)
+        quietRestore(blindHoldBase)
+        rampUntil = SystemClock.elapsedRealtime() + RAMP_QUIET_MS
+    }
+
+    /**
+     * Puts the volume back without hiding the next steps (unlike [restoreVolume]): a held key keeps
+     * stepping, and those steps are how its release is noticed.
+     */
+    private fun quietRestore(value: Int) {
+        if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) != value) audio.setStreamVolume(AudioManager.STREAM_MUSIC, value, 0)
+        lastVolume = value
+    }
+
+    // ---- Pocket mode ----
+
+    /** The screen is off, or as good as off: pocket mode's black screen. */
+    private fun screenDark(): Boolean = !power.isInteractive || ::pocket.isInitialized && pocket.active
+
+    private fun onScreenOff() {
+        forgetPresses()
+        finishBlindHold()
+        val now = SystemClock.elapsedRealtime()
+        if (pocket.active) {
+            // The power button in pocket mode: the screen goes off for real.
+            pocket.hide(PocketScreen.Reason.POWER)
+            return
+        }
+        val requested = pocketPending
+        pocketPending = false
+        // Just left (a second power press, or ended by silence): stay off.
+        if (now - pocketLeftAt < POCKET_SETTLE_MS) return
+        val auto = prefs.pocketAuto && prefs.enabled && audio.isMusicActive && !media.isInCall()
+        if (requested || auto) {
+            handler.postDelayed({ if (!power.isInteractive && !pocket.active) enterPocket() }, POCKET_WAKE_DELAY_MS)
+        }
+    }
+
+    private fun enterPocket(): Boolean {
+        if (!pocket.show()) {
+            log(getString(R.string.log_pocket_failed))
+            return false
+        }
+        pocketShownAt = SystemClock.elapsedRealtime()
+        pocketQuietSince = 0L
+        log(getString(R.string.log_pocket_on))
+        handler.removeCallbacks(pocketCheck)
+        handler.postDelayed(pocketCheck, POCKET_CHECK_MS)
+        return true
+    }
+
+    /** Ends pocket mode on a call, after long silence, or when the screen could not be turned on. */
+    private fun checkPocket() {
+        if (!pocket.active) return
+        val now = SystemClock.elapsedRealtime()
+        when {
+            // The system didn't let the screen turn on: don't leave a black window for the next time.
+            !power.isInteractive && now - pocketShownAt < POCKET_SETTLE_MS -> return pocket.hide(PocketScreen.Reason.FAILED)
+            media.isInCall() -> return pocket.hide(PocketScreen.Reason.CALL)
+            audio.isMusicActive || fading -> pocketQuietSince = 0L
+            pocketQuietSince == 0L -> pocketQuietSince = now
+            now - pocketQuietSince > POCKET_IDLE_MS -> return pocket.hide(PocketScreen.Reason.IDLE)
+        }
+        handler.postDelayed(pocketCheck, POCKET_CHECK_MS)
+    }
+
+    private fun onPocketLeft(reason: PocketScreen.Reason) {
+        pocketLeftAt = SystemClock.elapsedRealtime()
+        handler.removeCallbacks(pocketCheck)
+        if (reason == PocketScreen.Reason.STOPPED) return
+        log(
+            getString(
+                when (reason) {
+                    PocketScreen.Reason.TAP -> R.string.log_pocket_tap
+                    PocketScreen.Reason.POWER -> R.string.log_pocket_power
+                    PocketScreen.Reason.CALL -> R.string.log_pocket_call
+                    PocketScreen.Reason.IDLE -> R.string.log_pocket_idle
+                    PocketScreen.Reason.ACTION -> R.string.log_pocket_off
+                    PocketScreen.Reason.FAILED, PocketScreen.Reason.STOPPED -> R.string.log_pocket_no_wake
+                },
+            ),
+        )
+        // Nothing to listen to any more, or turned off by a gesture: the screen goes off as usual.
+        if (reason == PocketScreen.Reason.IDLE || reason == PocketScreen.Reason.ACTION) lockScreen()
+    }
+
+    private fun lockScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && power.isInteractive) {
+            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+        }
+    }
+
+    /** The pocket-mode action: on, or off again (the screen then goes off). */
+    private fun togglePocket(): Outcome {
+        if (pocket.active) {
+            pocket.hide(PocketScreen.Reason.ACTION)
+            return Outcome.undone(getString(R.string.log_pocket_off))
+        }
+        if (!power.isInteractive || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return if (enterPocket()) Outcome.DONE else Outcome.failed(getString(R.string.log_pocket_failed))
+        }
+        // The screen is on, perhaps unlocked: lock it first, so leaving the black screen needs the
+        // unlock again, then come back black once it is off.
+        pocketPending = true
+        handler.postDelayed({ pocketPending = false }, POCKET_SETTLE_MS)
+        pocketLeftAt = 0L
+        performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+        return Outcome.DONE
     }
 
     private fun longerSequencePossible(): Boolean {
@@ -687,7 +893,7 @@ class KnobService : AccessibilityService() {
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
-        if (tap) backTap.start(fastRate = !(prefs.backTapEco && !power.isInteractive)) else backTap.stop()
+        if (tap) backTap.start(fastRate = !(prefs.backTapEco && screenDark())) else backTap.stop()
         if (turn) twist.start() else twist.stop()
         if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
         // Taps and twists have no key press to arm the pocket check, so keep it on while they run
@@ -710,8 +916,12 @@ class KnobService : AccessibilityService() {
         }
     }
 
+    /**
+     * Watches all players: keeps the remembered player (its profile decides which sensors run) in
+     * step with the one that plays now, and speaks new tracks when that is turned on.
+     */
     private fun updateTrackWatcher() {
-        val want = prefs.enabled && prefs.announceAllTracks && media.hasAccess()
+        val want = (prefs.enabled || GestureTest.active) && media.hasAccess()
         if (want && trackWatcher == null) {
             announcedTrack = null
             trackWatcher = NowPlayingTracker(this, prefs, ::onTrack).also { it.start() }
@@ -723,13 +933,23 @@ class KnobService : AccessibilityService() {
 
     /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
     private fun onTrack(now: NowPlaying?) {
+        val pkg = now?.controller?.packageName
+        if (pkg != null && pkg != trackPlayer) {
+            trackPlayer = pkg
+            // Another app took over: its own gestures may want other sensors.
+            handler.post { updateSensors() }
+        }
+        if (!prefs.announceAllTracks) {
+            announcedTrack = null
+            return
+        }
         val title = now?.title ?: return
         val key = now.controller.packageName + "/" + title
         if (key == announcedTrack) return
         val first = announcedTrack == null
         announcedTrack = key
         // The track already playing when the option was turned on is not news.
-        if (first || power.isInteractive || !now.playing || GestureTest.active) return
+        if (first || !screenDark() || !now.playing || GestureTest.active) return
         extras.perform(Action.ANNOUNCE, now.controller)
     }
 
@@ -817,7 +1037,7 @@ class KnobService : AccessibilityService() {
         playCue(action, outcome, pausing, player?.packageName)
         // With "every new track" on, the track watcher speaks anyway.
         val skipped = action == Action.NEXT || action == Action.PREVIOUS
-        if (skipped && prefs.announceSkips && !prefs.announceAllTracks && !power.isInteractive) {
+        if (skipped && prefs.announceSkips && !prefs.announceAllTracks && screenDark()) {
             announceNewTrack(player)
         }
         return true
@@ -938,14 +1158,16 @@ class KnobService : AccessibilityService() {
         if (prefs.pocketGuard && !wave.running) proximity.arm()
     }
 
+    // In pocket mode the phone is in the pocket on purpose.
     private fun pocketCovered(): Boolean =
-        prefs.pocketGuard && if (wave.running) wave.covered else proximity.isCovered()
+        prefs.pocketGuard && !pocket.active && if (wave.running) wave.covered else proximity.isCovered()
 
     private fun execute(action: Action, controller: MediaController?): Outcome {
         val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
             Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT ->
                 extras.perform(action, controller)
+            Action.POCKET -> togglePocket()
             else -> {
                 media.perform(action, controller, prefs.seekStepMs(controller?.packageName))
                 Outcome.DONE
@@ -958,7 +1180,7 @@ class KnobService : AccessibilityService() {
     /** The sound for what just happened, if cues are on for it. */
     private fun playCue(action: Action, outcome: Outcome, pausing: Boolean, pkg: String?) {
         val style = prefs.cueStyle
-        if (style == CueStyle.OFF || prefs.cueScreenOffOnly && power.isInteractive || prefs.cuesOff(pkg)) return
+        if (style == CueStyle.OFF || prefs.cueScreenOffOnly && !screenDark() || prefs.cuesOff(pkg)) return
         val group = CueGroup.of(action) ?: return
         val failed = outcome.result == Outcome.Result.FAILED
         // A failure has its own switch: someone may want to hear only that something didn't work.
@@ -984,7 +1206,13 @@ class KnobService : AccessibilityService() {
 
     private fun log(message: String) {
         val time = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())
-        val screen = getString(if (power.isInteractive) R.string.log_screen_on else R.string.log_screen_off)
+        val screen = getString(
+            when {
+                !power.isInteractive -> R.string.log_screen_off
+                ::pocket.isInitialized && pocket.active -> R.string.log_screen_pocket
+                else -> R.string.log_screen_on
+            },
+        )
         val entry = "$time $screen · $message"
         val older = prefs.lastEvent?.lines().orEmpty().take(LOG_LINES - 1)
         prefs.lastEvent = (listOf(entry) + older).joinToString("\n")
@@ -1016,6 +1244,19 @@ class KnobService : AccessibilityService() {
         const val SCRUB_END_MARGIN_MS = 1_500L
         const val SCRUB_DUCK_PERCENT = 40
         const val HUMAN_MIN_GAP_MS = 70L
+
+        /** Opposite steps this close together with the screen off: both keys pressed at once. */
+        const val BOTH_GAP_MS = 100L
+
+        /** With the screen off, how long a double press waits to rule out a held key's repeats. */
+        const val HOLD_CHECK_MS = 150L
+
+        /** No step for this long: the held key was let go. */
+        const val BLIND_RELEASE_MS = 350L
+        const val POCKET_WAKE_DELAY_MS = 400L
+        const val POCKET_CHECK_MS = 1_000L
+        const val POCKET_SETTLE_MS = 2_000L
+        const val POCKET_IDLE_MS = 2 * 60 * 1000L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L
         const val IGNORE_OWN_CHANGE_MS = 400L
