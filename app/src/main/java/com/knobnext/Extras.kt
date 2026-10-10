@@ -7,8 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.Rating
@@ -18,10 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
-import java.util.Locale
 
 /** What an action did: [message] goes to the event log, [result] picks the sound cue. */
 class Outcome(val message: String?, val result: Result) {
@@ -49,7 +44,7 @@ class Outcome(val message: String?, val result: Result) {
 class Extras(private val context: Context, private val media: Media, private val prefs: Prefs) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
-    private val speaker = Speaker(context)
+    private val speaker = Speaker(context, prefs)
 
     // Players don't report shuffle/repeat state through the framework API, so we remember what we set.
     private val shuffleOn = HashMap<String, Boolean>()
@@ -128,7 +123,7 @@ class Extras(private val context: Context, private val media: Media, private val
             speaker.say(context.getString(R.string.speak_unknown))
             return context.getString(R.string.log_no_metadata)
         }
-        speaker.say(listOfNotNull(title, artist).joinToString(". "))
+        speaker.say(Speech.announcement(title, artist, prefs.cleanTitles))
         return null
     }
 
@@ -378,60 +373,5 @@ private class Torch(private val context: Context, handler: Handler) {
             cameras?.unregisterTorchCallback(callback)
         } catch (_: Exception) {
         }
-    }
-}
-
-/** Text-to-speech that briefly ducks the music while it talks. */
-private class Speaker(private val context: Context) : TextToSpeech.OnInitListener {
-    private val audio = context.getSystemService(AudioManager::class.java)
-    private val attributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-        .build()
-    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-        .setAudioAttributes(attributes)
-        .build()
-    private var tts: TextToSpeech? = null
-    private var ready = false
-    private var pending: String? = null
-
-    fun say(text: String) {
-        if (tts == null) {
-            pending = text
-            tts = TextToSpeech(context, this)
-            return
-        }
-        if (ready) speak(text) else pending = text
-    }
-
-    override fun onInit(status: Int) {
-        val engine = tts ?: return
-        ready = status == TextToSpeech.SUCCESS
-        if (!ready) return
-        engine.language = Locale.getDefault()
-        engine.setAudioAttributes(attributes)
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) = Unit
-            override fun onDone(utteranceId: String?) {
-                audio.abandonAudioFocusRequest(focus)
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                audio.abandonAudioFocusRequest(focus)
-            }
-        })
-        pending?.let(::speak)
-        pending = null
-    }
-
-    private fun speak(text: String) {
-        audio.requestAudioFocus(focus)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "knob")
-    }
-
-    fun release() {
-        tts?.shutdown()
-        tts = null
     }
 }

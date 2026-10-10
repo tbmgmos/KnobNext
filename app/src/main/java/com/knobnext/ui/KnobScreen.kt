@@ -777,6 +777,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }
     item {
         Group(1) {

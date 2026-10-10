@@ -263,6 +263,24 @@
     <string name="cue_volume_high">Громко</string>
     <string name="cue_screen_off_only">Только при выключенном экране</string>
     <string name="cue_screen_off_only_hint">С включённым экраном переключение и так видно</string>
+    <string name="speech_title">Озвучка названий</string>
+    <string name="speech_foreign">Иностранные слова</string>
+    <string name="speech_foreign_hint">«Авто»: английские и другие названия читает голос их языка, русские — русский</string>
+    <string name="speech_foreign_auto">Авто</string>
+    <string name="speech_foreign_one">Одним голосом</string>
+    <string name="speech_clean">Чистить названия</string>
+    <string name="speech_clean_hint">Не читать «(Remastered)», «[Official Video]», «feat.», эмодзи и хэштеги</string>
+    <string name="speech_engine">Синтезатор речи</string>
+    <string name="speech_engine_default">Как в системе</string>
+    <string name="speech_engine_hint">RHVoice — бесплатный синтезатор без интернета, хорошо читает русский и английский вперемешку.</string>
+    <string name="speech_rate">Скорость речи</string>
+    <string name="speech_rate_slow">Медленно</string>
+    <string name="speech_rate_normal">Обычно</string>
+    <string name="speech_rate_faster">Быстрее</string>
+    <string name="speech_rate_fast">Быстро</string>
+    <string name="speech_voices">Скачать голоса</string>
+    <string name="speech_voices_hint">Английский и другие языки — в настройках синтезатора. Без голоса языка слова читаются системным голосом.</string>
+    <string name="speech_try">Прослушать пример</string>
     <string name="pref_announce_skips">Называть трек после переключения</string>
     <string name="pref_announce_skips_hint">При выключенном экране — чтобы знать, что заиграло</string>
 

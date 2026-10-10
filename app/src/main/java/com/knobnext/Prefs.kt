@@ -83,6 +83,10 @@ data class Settings(
     val cueVolume: CueVolume,
     val cueScreenOffOnly: Boolean,
     val cueGroups: Set<CueGroup>,
+    val ttsMultilang: Boolean,
+    val cleanTitles: Boolean,
+    val ttsEngine: String?,
+    val ttsRate: Float,
     val actions: Map<Gesture, Action>,
     /** Apps with their own gesture set → that set. */
     val profiles: Map<String, Map<Gesture, Action>>,
@@ -246,6 +250,25 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("cue_screen_off_only", true)
         set(v) = sp.edit().putBoolean("cue_screen_off_only", v).apply()
 
+    /** Read pieces in another alphabet with a voice of their language. */
+    var ttsMultilang: Boolean
+        get() = sp.getBoolean("tts_multilang", true)
+        set(v) = sp.edit().putBoolean("tts_multilang", v).apply()
+
+    /** Drop "(Remastered 2011)", "[Official Video]", emoji and the like before reading a title. */
+    var cleanTitles: Boolean
+        get() = sp.getBoolean("clean_titles", true)
+        set(v) = sp.edit().putBoolean("clean_titles", v).apply()
+
+    /** Package of the text-to-speech engine, or null for the system default. */
+    var ttsEngine: String?
+        get() = sp.getString("tts_engine", null)
+        set(v) = sp.edit().putString("tts_engine", v).apply()
+
+    var ttsRate: Float
+        get() = sp.getFloat("tts_rate", 1.0f)
+        set(v) = sp.edit().putFloat("tts_rate", v).apply()
+
     /** Wall-clock time (ms) when the sleep timer pauses playback, or 0. */
     var sleepUntil: Long
         get() = sp.getLong("sleep_until", 0L)
@@ -340,6 +363,10 @@ class Prefs(context: Context) {
         cueVolume = cueVolume,
         cueScreenOffOnly = cueScreenOffOnly,
         cueGroups = cueGroups,
+        ttsMultilang = ttsMultilang,
+        cleanTitles = cleanTitles,
+        ttsEngine = ttsEngine,
+        ttsRate = ttsRate,
         actions = Gesture.entries.associateWith { action(it) },
         profiles = profileApps.associateWith { pkg -> Gesture.entries.associateWith { action(it, pkg) } },
     )
