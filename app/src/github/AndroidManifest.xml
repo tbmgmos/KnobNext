@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only for checking GitHub for a newer release and downloading it; can be turned off in settings. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Updating from inside the app: the downloaded release is handed to the system installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <receiver
+            android:name="com.knobnext.UpdateReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
