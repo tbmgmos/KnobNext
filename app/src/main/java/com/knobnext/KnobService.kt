@@ -195,10 +195,13 @@ class KnobService : AccessibilityService() {
                     if (prefs.vibrate) haptics.tick()
                     ramp.run()
                 }
-                seek && (tapHold || long == Action.NONE) && !GestureTest.active -> {
+                // A seeking hold drives the seek for as long as it is held; a long hold on the same key
+                // could never be reached (it would fire in the middle of seeking), so it is not waited for.
+                seek && !GestureTest.active -> {
                     holdFired = !tapHold
                     // Smooth needs the player's position; without it, jumps it is.
                     val smooth = prefs.seekSmooth && media.progress(controller) != null
+                    if (prefs.seekSmooth && !smooth) log(getString(R.string.log_seek_no_position))
                     // The start goes through the normal path (checks, log, sound); then the hold drives it.
                     if (fireGesture(gesture, controller, startOnly = smooth)) {
                         seekAction = action
@@ -320,6 +323,7 @@ class KnobService : AccessibilityService() {
         audio = getSystemService(AudioManager::class.java)
         power = getSystemService(PowerManager::class.java)
         prefs = Prefs(this)
+        prefs.migrate()
         log(getString(R.string.log_service_started))
         media = Media(this)
         extras = Extras(this, media, prefs)

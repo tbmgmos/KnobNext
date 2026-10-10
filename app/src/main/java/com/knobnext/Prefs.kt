@@ -432,6 +432,28 @@ class Prefs(context: Context) {
         edit.putStringSet("profile_apps", profileApps + pkg).apply()
     }
 
+    /** One-time fixes of settings saved by older versions. */
+    fun migrate() {
+        if (sp.getInt("migrated", 0) >= 1) return
+        // Profiles made from the first "seek" preset had next/previous on the long hold, which a seeking
+        // hold makes unreachable (and which used to stop the hold from seeking smoothly).
+        val edit = sp.edit()
+        profileApps.forEach { pkg ->
+            listOf(
+                Gesture.HOLD_UP to Gesture.LONG_HOLD_UP,
+                Gesture.HOLD_DOWN to Gesture.LONG_HOLD_DOWN,
+            ).forEach { (hold, long) ->
+                val holdAction = action(hold, pkg)
+                val longAction = action(long, pkg)
+                val seeks = holdAction == Action.SEEK_FORWARD || holdAction == Action.SEEK_BACK
+                if (seeks && (longAction == Action.NEXT || longAction == Action.PREVIOUS)) {
+                    edit.putString(profileKey(long, pkg), Action.NONE.name)
+                }
+            }
+        }
+        edit.putInt("migrated", 1).apply()
+    }
+
     fun deleteProfile(pkg: String) {
         val edit = sp.edit()
         Gesture.entries.forEach { edit.remove(profileKey(it, pkg)) }
@@ -500,8 +522,9 @@ class Prefs(context: Context) {
         private val SEEK_PRESET = mapOf(
             Gesture.HOLD_UP to Action.SEEK_FORWARD,
             Gesture.HOLD_DOWN to Action.SEEK_BACK,
-            Gesture.LONG_HOLD_UP to Action.NEXT,
-            Gesture.LONG_HOLD_DOWN to Action.PREVIOUS,
+            // Holding seeks for as long as it is held, so a long hold would never be reached.
+            Gesture.LONG_HOLD_UP to Action.NONE,
+            Gesture.LONG_HOLD_DOWN to Action.NONE,
             Gesture.DOUBLE_UP to Action.SEEK_FORWARD,
             Gesture.DOUBLE_DOWN to Action.SEEK_BACK,
             Gesture.TRIPLE_UP to Action.NEXT,
