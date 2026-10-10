@@ -172,7 +172,28 @@ class KnobService : AccessibilityService() {
 
         private val longHold = Runnable {
             holdArmed = null
-            fireGesture(if (up) Gesture.LONG_HOLD_UP else Gesture.LONG_HOLD_DOWN, controller)
+            val gesture = if (up) Gesture.LONG_HOLD_UP else Gesture.LONG_HOLD_DOWN
+            val action = prefs.action(gesture, controller?.packageName)
+            // The key is still down: a long hold assigned to seeking seeks until it is let go.
+            if ((action == Action.SEEK_FORWARD || action == Action.SEEK_BACK) && !GestureTest.active) {
+                startSeeking(gesture, action)
+            } else {
+                fireGesture(gesture, controller)
+            }
+        }
+
+        /** Seeking for as long as the key is held: smooth when the player reports its position, else jumps. */
+        private fun startSeeking(gesture: Gesture, action: Action) {
+            val smooth = prefs.seekSmooth && media.progress(controller) != null
+            if (prefs.seekSmooth && !smooth) log(getString(R.string.log_seek_no_position))
+            // The start goes through the normal path (checks, log, sound); then the hold drives it.
+            if (fireGesture(gesture, controller, startOnly = smooth)) {
+                seekAction = action
+                if (!smooth || !startScrub(action)) {
+                    seekRepeats = 0
+                    handler.postDelayed(seekRamp, SEEK_REPEAT_MS)
+                }
+            }
         }
 
         override fun run() {
@@ -199,17 +220,7 @@ class KnobService : AccessibilityService() {
                 // could never be reached (it would fire in the middle of seeking), so it is not waited for.
                 seek && !GestureTest.active -> {
                     holdFired = !tapHold
-                    // Smooth needs the player's position; without it, jumps it is.
-                    val smooth = prefs.seekSmooth && media.progress(controller) != null
-                    if (prefs.seekSmooth && !smooth) log(getString(R.string.log_seek_no_position))
-                    // The start goes through the normal path (checks, log, sound); then the hold drives it.
-                    if (fireGesture(gesture, controller, startOnly = smooth)) {
-                        seekAction = action
-                        if (!smooth || !startScrub(action)) {
-                            seekRepeats = 0
-                            handler.postDelayed(seekRamp, SEEK_REPEAT_MS)
-                        }
-                    }
+                    startSeeking(gesture, action)
                 }
                 !tapHold && long != Action.NONE -> {
                     holdArmed = action
