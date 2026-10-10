@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a release with this version (e.g. 3.0.1); creates the v-tag. Empty = just build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -28,17 +33,30 @@ jobs:
       - name: Decode signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          RELEASE: ${{ inputs.release }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "KNOB_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/v* || -n "$RELEASE" ]]; then
+            # A release signed with a throwaway key could never be updated in place.
+            echo "::error::KEYSTORE_BASE64 secret is not set; refusing to publish a release"
+            exit 1
           else
             echo "::warning::KEYSTORE_BASE64 secret is not set, APK is signed with a throwaway debug key"
           fi
 
       - name: Compute version
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ -n "$RELEASE" ]]; then
+            NAME="${RELEASE#v}"
+            if [[ ! "$NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release version must look like 3.0.1, got '$RELEASE'"
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             NAME="${GITHUB_REF_NAME#v}"
           else
             BASE="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v3.0.0)"
@@ -70,8 +88,11 @@ jobs:
           path: rustore/*.apk
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         uses: softprops/action-gh-release@v2
         with:
+          # For a manual release this creates the tag on the commit that was built.
+          tag_name: v${{ env.VERSION_NAME }}
+          target_commitish: ${{ github.sha }}
           files: dist/*.apk
           generate_release_notes: true
