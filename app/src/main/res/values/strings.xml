@@ -122,8 +122,10 @@
     <string name="info_length_short">Коротко</string>
     <string name="info_length_normal">Обычно</string>
     <string name="info_length_long">Подробно</string>
-    <string name="info_pause">Ставить музыку на паузу</string>
-    <string name="info_pause_hint">Иначе музыка только становится тише, пока звучит рассказ</string>
+    <string name="info_music">Музыка во время рассказа</string>
+    <string name="info_music_hint">После рассказа музыка вернётся сама</string>
+    <string name="info_music_duck">Приглушать</string>
+    <string name="info_music_pause">Пауза</string>
     <string name="info_hint">Назначьте действие «Рассказать о треке» на жест или скажите голосом «расскажи о песне». Сведения берутся из Википедии и MusicBrainz, а пересказывает их модель на телефоне (Gemini Nano или скачанная), если она есть. Туда отправляются только название, исполнитель и альбом. Рассказ сохраняется: о том же треке второй раз — сразу и без интернета. Тот же жест ещё раз — остановить.</string>
     <string name="log_no_track">плеер не сообщает, что играет</string>
     <string name="log_no_gemini">не найдены ни Gemini, ни браузер</string>

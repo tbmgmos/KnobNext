@@ -1386,10 +1386,13 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoLength = it },
                         )
                     }
-                    SwitchRow(
-                        shape(1), stringResource(R.string.info_pause), s.infoPause, { prefs.infoPause = it },
-                        subtitle = stringResource(R.string.info_pause_hint),
-                    )
+                    ControlRow(shape(1), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
+                        ConnectedChoice(
+                            options = listOf(false to R.string.info_music_duck, true to R.string.info_music_pause),
+                            selected = s.infoPause,
+                            onSelect = { prefs.infoPause = it },
+                        )
+                    }
                 }
             }
             Hint(stringResource(R.string.info_hint))
