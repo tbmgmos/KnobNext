@@ -182,6 +182,11 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         .setAudioAttributes(attributes)
         .build()
     private var tts: TextToSpeech? = null
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    // Players that pause for an announcement resume only when the focus is given back. If the speech
+    // engine never reports the end (it failed, was stopped or died), give it back anyway.
+    private val giveBackFocus = Runnable { audio.abandonAudioFocusRequest(focus) }
     private var engineName: String? = null
     private var ready = false
     private var pending: String? = null
@@ -232,12 +237,20 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         if (parts.isEmpty()) return
         engine.setSpeechRate(prefs.ttsRate)
         audio.requestAudioFocus(focus)
+        handler.removeCallbacks(giveBackFocus)
+        handler.postDelayed(giveBackFocus, (FOCUS_BASE_MS + text.length * FOCUS_PER_CHAR_MS / prefs.ttsRate).toLong().coerceAtMost(FOCUS_MAX_MS))
         val id = ++serial
         parts.forEachIndexed { i, part ->
             // The voice is taken when the piece is queued, so each piece keeps its own.
             useLanguage(engine, part.locale ?: Locale.getDefault())
             val utterance = "knob-$id-$i" + if (i == parts.lastIndex) LAST else ""
-            engine.speak(part.text, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, utterance)
+            val queued = engine.speak(part.text, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, utterance)
+            if (queued != TextToSpeech.SUCCESS) {
+                // Nothing will be said, and no callback will come to give the focus back.
+                handler.removeCallbacks(giveBackFocus)
+                audio.abandonAudioFocusRequest(focus)
+                return
+            }
         }
     }
 
@@ -269,6 +282,8 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         }
 
     fun release() {
+        handler.removeCallbacks(giveBackFocus)
+        audio.abandonAudioFocusRequest(focus)
         tts?.shutdown()
         tts = null
         ready = false
@@ -276,5 +291,8 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     private companion object {
         const val LAST = "-last"
+        const val FOCUS_BASE_MS = 3_000f
+        const val FOCUS_PER_CHAR_MS = 120f
+        const val FOCUS_MAX_MS = 30_000L
     }
 }

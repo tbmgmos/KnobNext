@@ -103,6 +103,8 @@ data class Settings(
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
     val smartVoice: Boolean,
+    val blindGestures: Boolean,
+    val keysOnPause: Boolean,
     val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
@@ -356,6 +358,24 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("power_hold_fallback", true)
         set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
 
+    /** The player a gesture paused last: play goes back to it (not a stored setting, just memory). */
+    var pausedPlayer: String?
+        get() = sp.getString("paused_player", null)
+        set(v) = sp.edit().putString("paused_player", v).apply()
+
+    /**
+     * With the screen off: a held key (system-repeated steps) and both keys together. Off by default:
+     * Bluetooth headphones can echo a volume step back, which looks just like both keys pressed.
+     */
+    var blindGestures: Boolean
+        get() = sp.getBoolean("blind_gestures", false)
+        set(v) = sp.edit().putBoolean("blind_gestures", v).apply()
+
+    /** After a gesture pause, play silence for the resume window so the volume keys keep working. */
+    var keysOnPause: Boolean
+        get() = sp.getBoolean("keys_on_pause", true)
+        set(v) = sp.edit().putBoolean("keys_on_pause", v).apply()
+
     /** Phrases the rules don't know go to the on-phone model, when there is one. */
     var smartVoice: Boolean
         get() = sp.getBoolean("smart_voice", true)
@@ -531,6 +551,8 @@ class Prefs(context: Context) {
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
         smartVoice = smartVoice,
+        blindGestures = blindGestures,
+        keysOnPause = keysOnPause,
         smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },

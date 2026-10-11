@@ -432,7 +432,17 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
     item { HoldAdvice(ctx) }
     item { PowerCard(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
-    item { Hint(stringResource(R.string.blind_keys_hint)) }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Group(1) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pref_blind), s.blindGestures, { ctx.prefs.blindGestures = it },
+                    subtitle = stringResource(R.string.pref_blind_hint), enabled = s.enabled,
+                )
+            }
+            Hint(stringResource(R.string.blind_keys_hint))
+        }
+    }
 }
 
 /** The power button pressed twice: its gesture, and whether the system's own double press is in the way. */
@@ -1215,7 +1225,8 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }
     item {
-        Group(1) {
+        Group(2) {
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ControlRow(shape(0), stringResource(R.string.pref_resume), caption = stringResource(R.string.pref_resume_hint), enabled = s.enabled) {
                 ConnectedChoice(
                     options = listOf(
@@ -1229,6 +1240,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     enabled = s.enabled,
                 )
             }
+            SwitchRow(
+                shape(1), stringResource(R.string.pref_keys_on_pause), s.keysOnPause, { prefs.keysOnPause = it },
+                subtitle = stringResource(R.string.pref_keys_on_pause_hint), enabled = s.enabled && s.resumeMinutes > 0,
+            )
+          }
         }
     }
     // Only relevant once a gesture is assigned to the sleep timer (or one is running).

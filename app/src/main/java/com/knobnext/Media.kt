@@ -44,12 +44,20 @@ class Media(private val context: Context) {
         }
 
     /**
-     * Prefer a session that is actually playing; among several, the one that started last. Otherwise
-     * the one played most recently. Ties keep the system's priority order (maxBy keeps the first).
+     * The session that plays, in the system's priority order (the one that started playing last comes
+     * first). When none plays: [paused], the player a gesture paused, so play goes back to it and not
+     * to some app that merely showed a video preview; otherwise the system's first.
      */
-    fun pick(list: List<MediaController>): MediaController? =
-        list.filter { it.isPlaying() }.maxByOrNull { PlayOrder.of(it.packageName) }
-            ?: list.maxByOrNull { PlayOrder.of(it.packageName) }
+    fun pick(list: List<MediaController>, paused: String? = null): MediaController? =
+        list.firstOrNull { it.isPlaying() }
+            ?: paused?.let { p -> list.firstOrNull { it.packageName == p } }
+            ?: list.firstOrNull()
+
+    /** Set by the service: true while it plays silence to keep the keys working on pause. */
+    var silencePlaying: () -> Boolean = { false }
+
+    /** Music is audible, not counting that silence. */
+    fun musicActive(): Boolean = audio.isMusicActive && !silencePlaying()
 
     fun isInCall(): Boolean = when (audio.mode) {
         AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> true
@@ -67,14 +75,14 @@ class Media(private val context: Context) {
         val all = controllers()
         all.forEach { prefs.rememberPlayer(it.packageName) }
         val filtering = prefs.appFilter && hasAccess()
-        val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all)
+        val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all, prefs.pausedPlayer)
         if (filtering && controller == null) return null
         controller?.packageName?.let { if (it != prefs.lastPlayer) prefs.lastPlayer = it }
 
         // Sound must be audible, and it must be the player's: a game or a video without a media session
         // also makes sound, and then a hold would skip (and start) a paused player. Without player
         // access there is no player to ask, so the sound alone decides.
-        val playing = audio.isMusicActive && (controller?.isPlaying() ?: !filtering)
+        val playing = musicActive() && (controller?.isPlaying() ?: !filtering)
         val mode = if (playing || !prefs.onlyWhenPlaying) Mode.FULL else Mode.COMBO_ONLY
         return Target(controller, mode)
     }

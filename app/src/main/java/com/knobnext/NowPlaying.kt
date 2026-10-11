@@ -12,7 +12,6 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 
 data class NowPlaying(
     val controller: MediaController,
@@ -75,15 +74,11 @@ class NowPlayingTracker(
         }
         list.forEach { c ->
             if (c.sessionToken in watched) return@forEach
-            if (c.isPlaying()) PlayOrder.started(c.packageName, early = true)
             val cb = object : MediaController.Callback() {
-                private var wasPlaying = c.isPlaying()
-
                 override fun onPlaybackStateChanged(state: PlaybackState?) {
-                    val playing = c.isPlaying()
-                    if (playing && !wasPlaying) PlayOrder.started(c.packageName)
-                    wasPlaying = playing
-                    if (c.sessionToken == current?.sessionToken) publish() else later()
+                    if (c.sessionToken == current?.sessionToken) publish()
+                    // Playing or paused anywhere may change which player comes first.
+                    later()
                 }
 
                 override fun onMetadataChanged(metadata: MediaMetadata?) {
@@ -107,7 +102,7 @@ class NowPlayingTracker(
         if (!started) return
         handler.removeCallbacks(refreshSoon)
         watch(list)
-        val best = media.pick(list)
+        val best = media.pick(list, prefs.pausedPlayer)
         if (best?.sessionToken != current?.sessionToken) current = best
         publish()
     }
@@ -146,22 +141,6 @@ class NowPlayingTracker(
     private companion object {
         const val REPICK_DELAY_MS = 150L
     }
-}
-
-/**
- * When each player last started playing, as seen by any tracker in this process. When two report
- * playing at once (one is still letting go of the sound), the one that started last is the one
- * the person just turned on.
- */
-object PlayOrder {
-    private val startedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    /** [early]: found already playing, so its start time is unknown; don't let it beat a seen start. */
-    fun started(packageName: String, early: Boolean = false) {
-        if (early) startedAt.putIfAbsent(packageName, 1L) else startedAt[packageName] = SystemClock.elapsedRealtime()
-    }
-
-    fun of(packageName: String): Long = startedAt[packageName] ?: 0L
 }
 
 fun appLabel(context: Context, packageName: String): String =
