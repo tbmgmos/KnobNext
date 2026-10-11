@@ -63,6 +63,13 @@ jobs:
           for v in "$store_pw" "$key_pw"; do [ -n "$v" ] && echo "::add-mask::$v"; done
           keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$store_pw" > /dev/null 2>&1 ||
             fail "The keystore can't be opened: KEYSTORE_PASSWORD is wrong, or KEYSTORE_BASE64 is cut short (${#b64} characters, expected 5692)"
+          # In a PKCS12 keystore the key has the keystore's password, so KEY_PASSWORD isn't needed
+          # (and a stray character pasted into it can't break the build).
+          if keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$store_pw" 2>/dev/null | grep -qi 'type: PKCS12'; then
+            key_pw=$store_pw
+          fi
+          LC_ALL=C; [[ "$key_pw" != *[![:print:]]* ]] ||
+            fail "KEY_PASSWORD contains characters that are not plain ASCII: paste it again"
           fingerprint=$(keytool -list -v -keystore "$RUNNER_TEMP/release.jks" -storepass "$store_pw" -alias "$alias" 2>/dev/null \
             | sed -n 's/^[[:space:]]*SHA256: //p' | head -1)
           [ -n "$fingerprint" ] || fail "No key named '$alias' in the keystore: check KEY_ALIAS (it should be knobnext)"
