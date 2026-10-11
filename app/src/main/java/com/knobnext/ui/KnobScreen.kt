@@ -639,6 +639,11 @@ private fun BrainCard(ctx: PageContext) {
                 val context = LocalContext.current
                 val aicore = remember(state) { NanoBrain.aicoreVersion(context) }
                 val unavailable = state == NanoBrain.State.UNAVAILABLE
+                val openStore: () -> Unit = { NanoBrain.openAicoreInStore(context) }
+                val recheck: () -> Unit = {
+                    state = null
+                    scope.launch { state = NanoBrain.state() }
+                }
                 ListRow(
                     shape(0), stringResource(R.string.brain_nano),
                     subtitle = when {
@@ -656,11 +661,8 @@ private fun BrainCard(ctx: PageContext) {
                     highlighted = state == NanoBrain.State.DOWNLOADABLE || failed || unavailable,
                     onClick = when {
                         state == NanoBrain.State.DOWNLOADABLE || failed -> download
-                        unavailable && aicore == null -> ({ NanoBrain.openAicoreInStore(context) })
-                        unavailable -> ({
-                            state = null
-                            scope.launch { state = NanoBrain.state() }
-                        })
+                        unavailable && aicore == null -> openStore
+                        unavailable -> recheck
                         else -> null
                     },
                     trailing = { Icon(KnobIcons.Sparkle, contentDescription = null) },
