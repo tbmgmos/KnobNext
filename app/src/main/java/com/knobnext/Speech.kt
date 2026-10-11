@@ -118,7 +118,7 @@ object Speech {
 
     /** The alphabet most of the letters are in. */
     private fun mainScript(text: String): Script? =
-        text.codePoints().toArray().mapNotNull(::scriptOf).groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        text.codePoints().toArray().toList().mapNotNull(::scriptOf).groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
 
     /**
      * The voice for reading all of [text] with one voice: the language most of it is in, so a Russian
