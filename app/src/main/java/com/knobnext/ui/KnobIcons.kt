@@ -112,6 +112,11 @@ object KnobIcons {
         "M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z",
     )
     val SwapHoriz = icon("SwapHoriz", "M6.99,11L3,15l3.99,4v-3H14v-2H6.99v-3zM21,9l-3.99,-4v3H10v2h7.01v3L21,9z")
+    val Info = icon(
+        "Info",
+        "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM13,17h-2v-6h2v6zM13,9h-2V7h2v2z",
+    )
+
     /** Four-pointed star: asking Gemini. */
     val Sparkle = icon(
         "Sparkle",

@@ -104,6 +104,14 @@ private enum class Page(val title: Int) {
     PLAYERS(R.string.players_title),
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
+    SETTINGS_GENERAL(R.string.settings_general),
+    SETTINGS_ACTIONS(R.string.settings_actions),
+    SETTINGS_SOUNDS(R.string.settings_sounds),
+    SETTINGS_SPEECH(R.string.settings_speech),
+    SETTINGS_VOICE(R.string.settings_voice),
+    SETTINGS_PAUSE(R.string.settings_pause),
+    SETTINGS_POCKET(R.string.settings_pocket),
+    SETTINGS_ABOUT(R.string.settings_about),
     TEST(R.string.test_title),
     DIAGNOSTICS(R.string.diag_title),
 }
@@ -112,7 +120,9 @@ private enum class Page(val title: Int) {
 private val Page.parent: Page
     get() = when (this) {
         Page.PROFILE -> Page.PLAYERS
-        Page.DIAGNOSTICS -> Page.SETTINGS
+        Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH,
+        Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
+        Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
         else -> Page.HOME
     }
 
@@ -249,6 +259,17 @@ fun KnobScreen(
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
+                    Page.SETTINGS_GENERAL -> generalSettings(ctx)
+                    Page.SETTINGS_ACTIONS -> actionSettings(ctx)
+                    Page.SETTINGS_SOUNDS -> item { CueCard(ctx) }
+                    Page.SETTINGS_SPEECH -> speechSettings(ctx)
+                    Page.SETTINGS_VOICE -> {
+                        item { VoiceCard(ctx) }
+                        item { BrainCard(ctx) }
+                    }
+                    Page.SETTINGS_PAUSE -> pauseSettings(ctx)
+                    Page.SETTINGS_POCKET -> pocketSettings(ctx)
+                    Page.SETTINGS_ABOUT -> aboutSettings(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
                     Page.DIAGNOSTICS -> {
                         item { DiagnosticsCard(s, prefs, setup, actions, nowPlaying, versionName) }
@@ -737,7 +758,6 @@ private fun PocketCard(ctx: PageContext) {
     val s = ctx.s
     val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionTitle(stringResource(R.string.pocket_title))
         Group(2) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
@@ -1146,10 +1166,129 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
 // ---------------------------------------------------------------- Settings
 
 private fun LazyListScope.settingsPage(ctx: PageContext) {
+    item { SettingsHub(ctx) }
+}
+
+/** One line of the settings list: opens [page]; [summary] tells what is set there now. */
+private class Category(val page: Page, val icon: androidx.compose.ui.graphics.vector.ImageVector, val summary: String)
+
+/** The settings, Android style: a short list of sections, each telling what is set inside. */
+@Composable
+private fun SettingsHub(ctx: PageContext) {
+    val s = ctx.s
+    val context = LocalContext.current
+    fun sentence(parts: List<String>) = parts.joinToString(" · ").replaceFirstChar { it.uppercase() }
+    val mic = context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    val groups = listOf(
+        listOf(
+            Category(
+                Page.SETTINGS_GENERAL, KnobIcons.Tune,
+                sentence(
+                    buildList {
+                        if (s.onlyWhenPlaying) add(stringResource(R.string.sum_when_playing))
+                        if (s.headphonesOnly) add(stringResource(R.string.sum_headphones))
+                        if (s.vibrate) add(stringResource(R.string.sum_vibrate))
+                    }.ifEmpty { listOf(stringResource(R.string.sum_no_limits)) },
+                ),
+            ),
+            Category(
+                Page.SETTINGS_ACTIONS, KnobIcons.FastForward,
+                sentence(
+                    listOf(
+                        stringResource(if (s.seekSmooth) R.string.sum_seek_smooth else R.string.sum_seek_steps),
+                        stringResource(R.string.sum_seek_step, s.seekStepSec),
+                    ),
+                ),
+            ),
+            Category(
+                Page.SETTINGS_SOUNDS, KnobIcons.VolumeUp,
+                stringResource(if (s.cueStyle == CueStyle.OFF) R.string.sum_off else R.string.sum_cues_on),
+            ),
+            Category(
+                Page.SETTINGS_SPEECH, KnobIcons.RecordVoice,
+                stringResource(
+                    when {
+                        s.announceAllTracks -> R.string.sum_speech_all
+                        s.announceSkips -> R.string.sum_speech_skips
+                        else -> R.string.sum_speech_gesture
+                    },
+                ),
+            ),
+        ),
+        listOf(
+            Category(
+                Page.SETTINGS_VOICE, KnobIcons.Mic,
+                stringResource(if (mic) R.string.sum_voice_ready else R.string.sum_voice_mic),
+            ),
+            Category(
+                Page.SETTINGS_PAUSE, KnobIcons.Bedtime,
+                sentence(
+                    buildList {
+                        add(
+                            if (s.resumeMinutes > 0) {
+                                stringResource(R.string.sum_resume, s.resumeMinutes)
+                            } else {
+                                stringResource(R.string.sum_resume_off)
+                            },
+                        )
+                        if (s.sleepUntil > System.currentTimeMillis()) {
+                            add(
+                                stringResource(
+                                    R.string.sum_sleep_until,
+                                    java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(s.sleepUntil)),
+                                ),
+                            )
+                        }
+                    },
+                ),
+            ),
+            Category(
+                Page.SETTINGS_POCKET, KnobIcons.PhoneDark,
+                sentence(
+                    buildList {
+                        add(stringResource(if (s.pocketAuto) R.string.sum_pocket_power else R.string.sum_pocket_manual))
+                        if (s.pocketGuard) add(stringResource(R.string.sum_pocket_guard))
+                    },
+                ),
+            ),
+        ),
+        listOf(
+            Category(Page.SETTINGS_ABOUT, KnobIcons.Info, stringResource(R.string.sum_about, ctx.versionName)),
+        ),
+    )
+    val scheme = MaterialTheme.colorScheme
+    // Each section its own colour, as in the system settings.
+    val tints = listOf(
+        scheme.primaryContainer to scheme.onPrimaryContainer,
+        scheme.secondaryContainer to scheme.onSecondaryContainer,
+        scheme.tertiaryContainer to scheme.onTertiaryContainer,
+    )
+    var n = 0
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        groups.forEach { group ->
+            Group(group.size) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    group.forEachIndexed { i, c ->
+                        val (bg, fg) = tints[n++ % tints.size]
+                        ListRow(
+                            shape(i), stringResource(c.page.title),
+                            subtitle = c.summary,
+                            onClick = { ctx.open(c.page) },
+                            leading = { ShapeBadge(MaterialShapes.Circle, c.icon, bg, fg, size = 40) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.generalSettings(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(5) {
+        Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.pref_only_when_playing), s.onlyWhenPlaying, { prefs.onlyWhenPlaying = it },
@@ -1160,26 +1299,22 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     subtitle = stringResource(R.string.pref_headphones_hint), enabled = s.enabled,
                 )
                 SwitchRow(
-                    shape(2), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
-                    subtitle = stringResource(R.string.pref_pocket_hint), enabled = s.enabled,
-                )
-                SwitchRow(
-                    shape(3), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
+                    shape(2), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
                     subtitle = stringResource(R.string.pref_vibrate_hint), enabled = s.enabled,
-                )
-                SwitchRow(
-                    shape(4), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
-                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
                 )
             }
         }
     }
+}
+
+private fun LazyListScope.actionSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Column {
-            SectionTitle(stringResource(R.string.actions_title))
             // The two smooth-seeking options only show when smooth seeking is chosen.
             val extra = if (s.seekSmooth) 2 else 0
-            Group(4 + extra) {
+            Group(3 + extra) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.pref_seek_hold), caption = stringResource(R.string.pref_seek_hold_hint), enabled = s.enabled) {
                         ConnectedChoice(
@@ -1211,19 +1346,35 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                         shape(2 + extra), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
                         subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
                     )
-                    SwitchRow(
-                        shape(3 + extra), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
-                        subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
-                    )
                 }
             }
         }
     }
-    item { VoiceCard(ctx) }
-    item { BrainCard(ctx) }
-    item { PocketCard(ctx) }
+}
+
+private fun LazyListScope.speechSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item {
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
+                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
+                )
+                SwitchRow(
+                    shape(1), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                    subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
+                )
+            }
+        }
+    }
     item { SpeechCard(s, prefs) }
-    item { CueCard(ctx) }
+}
+
+private fun LazyListScope.pauseSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Group(2) {
           Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1247,9 +1398,8 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
           }
         }
     }
-    // Only relevant once a gesture is assigned to the sleep timer (or one is running).
     val sleepActive = s.sleepUntil > System.currentTimeMillis()
-    if (sleepActive || Action.SLEEP_TIMER in s.actions.values) item {
+    item {
         val context = LocalContext.current
         Group(2) {
           Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1288,6 +1438,25 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
           }
         }
     }
+}
+
+private fun LazyListScope.pocketSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item { PocketCard(ctx) }
+    item {
+        Group(1) {
+            SwitchRow(
+                shape(0), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
+                subtitle = stringResource(R.string.pref_pocket_hint), enabled = s.enabled,
+            )
+        }
+    }
+}
+
+private fun LazyListScope.aboutSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
