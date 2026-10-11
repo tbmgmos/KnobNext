@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.knobnext.ui.actionLabel
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.knobnext.ui.gestureLabel
 
 class KnobService : AccessibilityService() {
@@ -355,6 +357,7 @@ class KnobService : AccessibilityService() {
 
     // ---- Voice commands ----
     private lateinit var voice: VoiceListener
+    private val scope = kotlinx.coroutines.MainScope()
 
     // ---- Pocket mode ----
     private lateinit var pocket: PocketScreen
@@ -429,6 +432,7 @@ class KnobService : AccessibilityService() {
         if (::prefs.isInitialized) {
             pocket.hide(PocketScreen.Reason.STOPPED)
             voice.cancel()
+            scope.cancel()
             volumeWatcher.stop()
             trackWatcher?.stop()
             backTap.release()
@@ -900,20 +904,35 @@ class KnobService : AccessibilityService() {
             is VoiceListener.Result.Heard -> {
                 val players = prefs.seenPlayers.associateBy { appLabel(this, it).lowercase() }
                 val match = result.phrases.firstNotNullOfOrNull { p -> CommandRules.parse(p, players)?.let { p to it } }
-                if (match == null) {
-                    val heard = result.phrases.first()
-                    log(getString(R.string.log_voice_unknown, heard))
-                    playCue(Action.VOICE, Outcome.failed(heard), pausing = false, pkg = prefs.lastPlayer)
-                    extras.say(getString(R.string.speak_voice_unknown, heard))
-                    return
+                if (match != null) return runCommand(match.first, match.second)
+                val heard = result.phrases.first()
+                if (!prefs.smartVoice) return notUnderstood(heard)
+                // Not one of the known phrases: the on-phone model may still make sense of it.
+                scope.launch {
+                    val brain = Brains.best(this@KnobService)
+                    val answer = brain?.complete(CommandBrain.prompt(heard, players.keys), BRAIN_COMMAND_TOKENS)
+                    val command = answer?.let { CommandBrain.parse(it, players) }
+                    when {
+                        command != null -> runCommand(heard, command, via = brain?.name)
+                        brain != null && answer == null -> {
+                            log(getString(R.string.log_brain_failed, brain.name, NanoBrain.lastError ?: "-"))
+                            notUnderstood(heard)
+                        }
+                        else -> notUnderstood(heard)
+                    }
                 }
-                runCommand(match.first, match.second)
             }
         }
     }
 
+    private fun notUnderstood(heard: String) {
+        log(getString(R.string.log_voice_unknown, heard))
+        playCue(Action.VOICE, Outcome.failed(heard), pausing = false, pkg = prefs.lastPlayer)
+        extras.say(getString(R.string.speak_voice_unknown, heard))
+    }
+
     /** Carries out a spoken command, with the same log, vibration and sound as a gesture. */
-    private fun runCommand(phrase: String, command: Command) {
+    private fun runCommand(phrase: String, command: Command, via: String? = null) {
         val controller = media.resolve(prefs)?.controller ?: media.pick(media.controllers())
         val pkg = controller?.packageName
         val playing = controller?.isPlaying() ?: audio.isMusicActive
@@ -991,11 +1010,31 @@ class KnobService : AccessibilityService() {
             }
         }
         val failed = outcome.result == Outcome.Result.FAILED
-        log(getString(R.string.log_voice_heard, phrase) + (outcome.message?.let { ": $it" } ?: ""))
+        log(
+            getString(R.string.log_voice_heard, phrase) + (via?.let { " ($it)" } ?: "") + " → " + describe(command) +
+                (outcome.message?.let { ": $it" } ?: ""),
+        )
         if (cueAction != Action.NONE && command !is Command.Run) {
             if (prefs.vibrate) haptics.play(cueAction)
         }
         if (cueAction != Action.NONE || failed) playCue(if (failed) Action.VOICE else cueAction, outcome, pausing, pkg)
+    }
+
+    private fun describe(command: Command): String = when (command) {
+        is Command.Run -> getString(actionLabel(command.action))
+        Command.Play -> getString(R.string.voice_cmd_play)
+        Command.Pause -> getString(R.string.voice_cmd_pause)
+        is Command.SeekBy -> getString(
+            if (command.ms > 0) R.string.voice_cmd_seek_forward else R.string.voice_cmd_seek_back,
+            kotlin.math.abs(command.ms) / 1000,
+        )
+        is Command.SeekTo -> getString(R.string.voice_cmd_seek_to, positionPhrase(command.ms))
+        is Command.VolumeBy -> getString(R.string.voice_cmd_volume_by, command.steps)
+        is Command.VolumeTo -> getString(R.string.voice_cmd_volume_to, command.percent)
+        is Command.Sleep -> getString(R.string.voice_cmd_sleep, command.minutes)
+        Command.SleepToTrackEnd -> getString(R.string.voice_cmd_sleep_end)
+        Command.SleepCancel -> getString(R.string.voice_cmd_sleep_off)
+        is Command.Open -> getString(R.string.voice_cmd_open, appLabel(this, command.packageName))
     }
 
     /** The pocket-mode action: on, or off again (the screen then goes off). */
@@ -1353,7 +1392,8 @@ class KnobService : AccessibilityService() {
     private fun execute(action: Action, controller: MediaController?): Outcome {
         val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT ->
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT,
+            Action.ASK_GEMINI ->
                 extras.perform(action, controller)
             Action.POCKET -> togglePocket()
             Action.VOICE -> startVoice()
@@ -1456,6 +1496,7 @@ class KnobService : AccessibilityService() {
         /** The screen came on this shortly before the assistant was called: the hold turned it on. */
         const val POWER_HOLD_WAKE_MS = 2_500L
         const val MAX_VOICE_VOLUME_STEPS = 15
+        const val BRAIN_COMMAND_TOKENS = 16
         const val RELOCK_DELAY_MS = 400L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L

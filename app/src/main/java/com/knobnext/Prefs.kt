@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE, ASK_GEMINI,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
@@ -102,6 +102,8 @@ data class Settings(
     val backTapEco: Boolean,
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
+    val smartVoice: Boolean,
+    val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
     val profileSeekSteps: Map<String, Int>,
@@ -354,6 +356,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("power_hold_fallback", true)
         set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
 
+    /** Phrases the rules don't know go to the on-phone model, when there is one. */
+    var smartVoice: Boolean
+        get() = sp.getBoolean("smart_voice", true)
+        set(v) = sp.edit().putBoolean("smart_voice", v).apply()
+
+    /** Track names are tidied for reading aloud by the on-phone model, when there is one. */
+    var smartTitles: Boolean
+        get() = sp.getBoolean("smart_titles", true)
+        set(v) = sp.edit().putBoolean("smart_titles", v).apply()
+
     /** Apps for which the "make a profile" suggestion was dismissed. */
     var dismissedSuggestions: Set<String>
         get() = sp.getStringSet("dismissed_suggestions", null)?.toSet() ?: emptySet()
@@ -518,6 +530,8 @@ class Prefs(context: Context) {
         backTapEco = backTapEco,
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
+        smartVoice = smartVoice,
+        smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },
         cuesOffApps = profileApps.filter { cuesOff(it) }.toSet(),

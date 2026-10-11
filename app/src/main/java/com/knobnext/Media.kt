@@ -96,7 +96,8 @@ class Media(private val context: Context) {
             Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
             // Handled by Extras: they need the service (speech, alarms, launching apps).
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET, Action.VOICE -> Unit
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET, Action.VOICE,
+            Action.ASK_GEMINI -> Unit
         }
     }
 

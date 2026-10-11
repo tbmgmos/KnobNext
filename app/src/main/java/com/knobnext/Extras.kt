@@ -17,6 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /** What an action did: [message] goes to the event log, [result] picks the sound cue. */
 class Outcome(val message: String?, val result: Result) {
@@ -48,6 +50,12 @@ class Extras(private val context: Context, private val media: Media, private val
     private val audio = context.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val speaker = Speaker(context, prefs)
+    private val scope = kotlinx.coroutines.MainScope()
+
+    // Model-cleaned names, so a track is sent to the model once.
+    private val smartTitles = object : LinkedHashMap<String, Pair<String, String?>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, String?>>?) = size > SMART_TITLE_CACHE
+    }
 
     // Players don't report shuffle/repeat state through the framework API, so we remember what we set.
     private val shuffleOn = HashMap<String, Boolean>()
@@ -70,6 +78,7 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.SWITCH_PLAYER -> switchPlayer(controller)
         Action.FLASHLIGHT -> Outcome.of(torch.toggle())
         Action.RINGER -> toggleRinger()
+        Action.ASK_GEMINI -> Outcome.of(askAbout(controller))
         else -> Outcome.DONE
     }
 
@@ -77,6 +86,7 @@ class Extras(private val context: Context, private val media: Media, private val
     fun say(text: String) = speaker.say(text)
 
     fun release() {
+        scope.cancel()
         speaker.release()
         torch.release()
     }
@@ -133,7 +143,25 @@ class Extras(private val context: Context, private val media: Media, private val
             speaker.say(context.getString(R.string.speak_unknown))
             return context.getString(R.string.log_no_metadata)
         }
-        speaker.say(Speech.announcement(title, artist, prefs.cleanTitles))
+        if (!prefs.smartTitles || !prefs.cleanTitles) {
+            speaker.say(Speech.announcement(title, artist, prefs.cleanTitles))
+            return null
+        }
+        // A model, when the phone has one, catches what the rules miss; waiting is capped so the
+        // announcement never lags much behind the gesture.
+        val key = "$title\u0000$artist"
+        smartTitles[key]?.let { (t, a) ->
+            speaker.say(Speech.announcement(t, a, clean = true))
+            return null
+        }
+        scope.launch {
+            val cleaned = kotlinx.coroutines.withTimeoutOrNull(SMART_TITLE_WAIT_MS) {
+                Brains.best(context)?.complete(TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.let(TitleBrain::parse)
+            }
+            if (cleaned != null) smartTitles[key] = cleaned
+            val (t, a) = cleaned ?: (title to artist)
+            speaker.say(Speech.announcement(t, a, clean = true))
+        }
         return null
     }
 
@@ -312,6 +340,34 @@ class Extras(private val context: Context, private val media: Media, private val
     private fun openPlayer(controller: MediaController?): String? =
         openApp(controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player))
 
+    /**
+     * Opens Gemini with a question about the playing track (who, the story of the song, similar
+     * music); without Gemini, a Google search for it.
+     */
+    private fun askAbout(controller: MediaController?): String? {
+        val meta = controller?.metadata ?: return context.getString(R.string.log_no_track)
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            ?: return context.getString(R.string.log_no_track)
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        val track = if (artist.isNullOrBlank()) "«${Speech.cleanTitle(title)}»" else "«${Speech.cleanTitle(title)}» — ${Speech.cleanArtist(artist)}"
+        val question = context.getString(R.string.gemini_question, track)
+        val tries = listOf(
+            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, question).setPackage(GEMINI),
+            Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, question).setPackage(GOOGLE),
+            Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.google.com/search?q=" + android.net.Uri.encode(question))),
+        )
+        for (intent in tries) {
+            try {
+                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return null
+            } catch (_: Exception) {
+            }
+        }
+        return context.getString(R.string.log_no_gemini)
+    }
+
     /** Opens a player and starts it playing; a message when that failed. */
     fun openApp(pkg: String): String? {
         val launch = context.packageManager.getLaunchIntentForPackage(pkg)
@@ -327,6 +383,11 @@ class Extras(private val context: Context, private val media: Media, private val
     }
 
     companion object {
+        private const val SMART_TITLE_CACHE = 50
+        private const val SMART_TITLE_WAIT_MS = 2_500L
+        private const val SMART_TITLE_TOKENS = 64
+        private const val GEMINI = "com.google.android.apps.bard"
+        private const val GOOGLE = "com.google.android.googlequicksearchbox"
         private val LIKE = listOf(
             Regex("like"), Regex("thumbs?_?up"), Regex("thumb up"), Regex("favou?rite"), Regex("heart"), Regex("love"),
             Regex("collection"), Regex("library"), Regex("save"), Regex("нрав"), Regex("любим"), Regex("избранн"),

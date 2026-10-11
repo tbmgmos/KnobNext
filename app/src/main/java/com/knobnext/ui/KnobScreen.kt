@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -62,6 +63,7 @@ import com.knobnext.PocketScreen
 import com.knobnext.PowerButton
 import com.knobnext.PowerHold
 import com.knobnext.VoiceListener
+import com.knobnext.NanoBrain
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -566,6 +568,60 @@ private fun VoiceCard(ctx: PageContext) {
     }
 }
 
+/** The on-phone model: whether Gemini Nano is there (and fetching it), and what it is used for. */
+@Composable
+private fun BrainCard(ctx: PageContext) {
+    val s = ctx.s
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<NanoBrain.State?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { state = NanoBrain.state() }
+    val download: () -> Unit = {
+        failed = false
+        state = NanoBrain.State.DOWNLOADING
+        scope.launch {
+            try {
+                NanoBrain.download()?.collect { if (it == "failed") failed = true }
+            } catch (_: Exception) {
+                failed = true
+            }
+            state = NanoBrain.state()
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.brain_title))
+        Group(3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ListRow(
+                    shape(0), stringResource(R.string.brain_nano),
+                    subtitle = stringResource(
+                        when {
+                            failed -> R.string.brain_nano_failed
+                            state == null -> R.string.brain_nano_checking
+                            state == NanoBrain.State.READY -> R.string.brain_nano_ready
+                            state == NanoBrain.State.DOWNLOADABLE -> R.string.brain_nano_downloadable
+                            state == NanoBrain.State.DOWNLOADING -> R.string.brain_nano_downloading
+                            else -> R.string.brain_nano_unavailable
+                        },
+                    ),
+                    highlighted = state == NanoBrain.State.DOWNLOADABLE || failed,
+                    onClick = if (state == NanoBrain.State.DOWNLOADABLE || failed) download else null,
+                    trailing = { Icon(KnobIcons.Sparkle, contentDescription = null) },
+                )
+                SwitchRow(
+                    shape(1), stringResource(R.string.brain_voice), s.smartVoice, { ctx.prefs.smartVoice = it },
+                    subtitle = stringResource(R.string.brain_voice_hint),
+                )
+                SwitchRow(
+                    shape(2), stringResource(R.string.brain_titles), s.smartTitles, { ctx.prefs.smartTitles = it },
+                    subtitle = stringResource(R.string.brain_titles_hint),
+                )
+            }
+        }
+        Hint(stringResource(R.string.brain_hint))
+    }
+}
+
 /** Pocket mode: turned on by the power button while music plays, or right now to try it. */
 @Composable
 private fun PocketCard(ctx: PageContext) {
@@ -1055,6 +1111,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
         }
     }
     item { VoiceCard(ctx) }
+    item { BrainCard(ctx) }
     item { PocketCard(ctx) }
     item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }

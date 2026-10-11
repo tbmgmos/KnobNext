@@ -56,6 +56,7 @@ object CommandRules {
         if (duration != null && has("перейди на", "go to")) return Command.SeekTo(duration)
 
         if (has("сколько осталось", "сколько еще", "time left")) return Command.Run(Action.TIME_LEFT)
+        if (has("gemini", "джемини", "гемини", "расскажи о", "расскажи про", "спроси", "ask")) return Command.Run(Action.ASK_GEMINI)
         if (has("что играет", "что за песн", "что за трек", "что это", "какой трек", "какая песня", "кто поет", "what's playing", "what is playing")) {
             return Command.Run(Action.ANNOUNCE)
         }

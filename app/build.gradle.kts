@@ -64,4 +64,6 @@ dependencies {
     implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Gemini Nano on phones that have it (AICore); nothing is bundled.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
 }
