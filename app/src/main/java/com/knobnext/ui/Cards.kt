@@ -448,6 +448,7 @@ fun gestureLabel(g: Gesture) = when (g) {
     Gesture.LONG_HOLD_DOWN -> R.string.gesture_long_hold_down
     Gesture.BOTH_HOLD -> R.string.gesture_both_hold
     Gesture.POWER_DOUBLE -> R.string.gesture_power_double
+    Gesture.POWER_HOLD -> R.string.gesture_power_hold
     Gesture.TRIPLE_UP -> R.string.gesture_triple_up
     Gesture.TRIPLE_DOWN -> R.string.gesture_triple_down
     Gesture.UP_DOWN -> R.string.gesture_up_down

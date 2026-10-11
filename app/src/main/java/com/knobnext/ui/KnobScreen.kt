@@ -60,6 +60,7 @@ import com.knobnext.CueVolume
 import com.knobnext.Cues
 import com.knobnext.PocketScreen
 import com.knobnext.PowerButton
+import com.knobnext.PowerHold
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -435,10 +436,14 @@ private fun PowerCard(ctx: PageContext) {
     val context = LocalContext.current
     // Read again whenever the page comes back (after changing it in system settings).
     var systemOn by remember { mutableStateOf(PowerButton.systemDoublePressOn(context)) }
+    var assistant by remember { mutableStateOf(PowerHold.isAssistant(context)) }
     DisposableEffect(context) {
         val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) systemOn = PowerButton.systemDoublePressOn(context)
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                systemOn = PowerButton.systemDoublePressOn(context)
+                assistant = PowerHold.isAssistant(context)
+            }
         }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
@@ -473,6 +478,37 @@ private fun PowerCard(ctx: PageContext) {
             }
         }
         Hint(stringResource(R.string.power_hint))
+        Group(3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                GestureRow(0, Gesture.POWER_HOLD, ctx.s, gestureShape(Gesture.POWER_HOLD), false, ctx.s.enabled, onEdit = ctx.edit)
+                ListRow(
+                    shape(1),
+                    stringResource(R.string.power_assistant),
+                    subtitle = stringResource(
+                        when (assistant) {
+                            true -> R.string.power_assistant_on
+                            false -> R.string.power_assistant_off
+                            null -> R.string.power_assistant_unknown
+                        },
+                    ),
+                    highlighted = assistant == false,
+                    onClick = { PowerHold.openAssistantSettings(context) },
+                    leading = {
+                        if (assistant == true) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                    trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                )
+                SwitchRow(
+                    shape(2), stringResource(R.string.power_fallback), ctx.s.powerHoldFallback, { ctx.prefs.powerHoldFallback = it },
+                    subtitle = stringResource(R.string.power_fallback_hint),
+                )
+            }
+        }
+        Hint(stringResource(R.string.power_hold_hint))
     }
 }
 

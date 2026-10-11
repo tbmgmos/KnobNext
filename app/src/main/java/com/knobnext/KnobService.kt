@@ -365,6 +365,7 @@ class KnobService : AccessibilityService() {
 
     // ---- Power button: seen only as the screen turning off and on ----
     private var screenTurnedAt = 0L
+    private var screenOnAt = 0L
     private var ownScreenChangeAt = 0L
     private var pocketPowerOffAt = 0L
 
@@ -406,6 +407,7 @@ class KnobService : AccessibilityService() {
         GestureTest.onChange = { handler.post { updateSensors() } }
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
         PocketScreen.toggle = { handler.post { togglePocket() } }
+        PowerHold.handler = ::onPowerHold
         ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
@@ -416,6 +418,7 @@ class KnobService : AccessibilityService() {
         GestureTest.onChange = null
         SleepTimer.fader = null
         PocketScreen.toggle = null
+        PowerHold.handler = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             pocket.hide(PocketScreen.Reason.STOPPED)
@@ -746,6 +749,7 @@ class KnobService : AccessibilityService() {
     private fun onScreen(on: Boolean) {
         if (!on) onScreenOff()
         val now = SystemClock.elapsedRealtime()
+        if (on) screenOnAt = now
         // Turned on or off by us (pocket mode, locking): not the power button.
         if (now - ownScreenChangeAt < OWN_SCREEN_CHANGE_MS) {
             screenTurnedAt = 0L
@@ -766,6 +770,22 @@ class KnobService : AccessibilityService() {
         val fromPocket = now - pocketPowerOffAt < POWER_DOUBLE_MS * 2
         log(getString(R.string.log_power_double))
         if (fireGesture(Gesture.POWER_DOUBLE) && fromPocket) enterPocket()
+    }
+
+    /**
+     * The power button held, passed on by [AssistActivity]. Returns false when there was nothing to
+     * do here, so the usual assistant opens instead.
+     */
+    private fun onPowerHold(): Boolean {
+        val testing = GestureTest.active
+        if (!testing && (!prefs.enabled || prefs.action(Gesture.POWER_HOLD, prefs.lastPlayer) == Action.NONE)) return false
+        // The hold itself woke the phone: once the action is done, the screen can go off again.
+        val wokeIt = SystemClock.elapsedRealtime() - screenOnAt < POWER_HOLD_WAKE_MS &&
+            getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+        log(getString(R.string.log_power_hold))
+        val fired = fireGesture(Gesture.POWER_HOLD)
+        if (fired && wokeIt && !pocket.active) handler.postDelayed({ lockScreen() }, RELOCK_DELAY_MS)
+        return fired || testing
     }
 
     private fun powerDoubleAssigned() = prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) != Action.NONE
@@ -1301,6 +1321,10 @@ class KnobService : AccessibilityService() {
 
         /** Screen changes this soon after we turned it on or off ourselves are ours. */
         const val OWN_SCREEN_CHANGE_MS = 1_500L
+
+        /** The screen came on this shortly before the assistant was called: the hold turned it on. */
+        const val POWER_HOLD_WAKE_MS = 2_500L
+        const val RELOCK_DELAY_MS = 400L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L
         const val IGNORE_OWN_CHANGE_MS = 400L

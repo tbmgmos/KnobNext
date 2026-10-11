@@ -40,6 +40,8 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     BOTH_HOLD("action_both_hold", GestureGroup.KEYS, Action.LIKE),
     // Off by default: the system's own double press (camera) has to be turned off first.
     POWER_DOUBLE("action_power_double", GestureGroup.KEYS, Action.NONE),
+    // Works only once KnobNext is chosen as the digital assistant app.
+    POWER_HOLD("action_power_hold", GestureGroup.KEYS, Action.LIKE),
     DOUBLE_UP("action_double_up_off", GestureGroup.SEQUENCE, Action.NEXT),
     DOUBLE_DOWN("action_double_down_off", GestureGroup.SEQUENCE, Action.PREVIOUS),
     // Off by default: "+ then −" or three presses is also how people simply correct the volume.
@@ -98,6 +100,7 @@ data class Settings(
     val announceAllTracks: Boolean,
     val backTapEco: Boolean,
     val pocketAuto: Boolean,
+    val powerHoldFallback: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
     val profileSeekSteps: Map<String, Int>,
@@ -345,6 +348,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("pocket_auto", false)
         set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
 
+    /** Holding power with nothing to do opens Gemini (or the Google assistant), as it would without us. */
+    var powerHoldFallback: Boolean
+        get() = sp.getBoolean("power_hold_fallback", true)
+        set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
+
     /** Apps for which the "make a profile" suggestion was dismissed. */
     var dismissedSuggestions: Set<String>
         get() = sp.getStringSet("dismissed_suggestions", null)?.toSet() ?: emptySet()
@@ -508,6 +516,7 @@ class Prefs(context: Context) {
         announceAllTracks = announceAllTracks,
         backTapEco = backTapEco,
         pocketAuto = pocketAuto,
+        powerHoldFallback = powerHoldFallback,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },
         cuesOffApps = profileApps.filter { cuesOff(it) }.toSet(),
