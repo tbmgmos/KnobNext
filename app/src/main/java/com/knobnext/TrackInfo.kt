@@ -16,7 +16,7 @@ import java.security.MessageDigest
 import java.util.Locale
 
 /** How much to say about a track. */
-enum class InfoLength(val sentences: Int) { SHORT(2), NORMAL(4), LONG(7) }
+enum class InfoLength(val sentences: Int) { SHORT(2), NORMAL(3), LONG(5) }
 
 /** Where the story comes from. */
 enum class InfoSource {
@@ -139,7 +139,7 @@ object TrackInfo {
         val answer = withTimeoutOrNull(MODEL_TIMEOUT_MS) {
             nano.complete(prompt, length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS, creative = true)
         } ?: return null
-        return clean(answer, lang)
+        return clean(answer, length, lang)
     }
 
     // ---- Facts, retold ----
@@ -182,21 +182,31 @@ object TrackInfo {
         val answer = withTimeoutOrNull(MODEL_TIMEOUT_MS) {
             if (brain != null) brain.complete(prompt, tokens, creative = true) else Brains.ask(context, prompt, tokens, creative = true)?.second
         } ?: return null
-        return clean(answer, lang)
+        return clean(answer, length, lang)
     }
 
     /** Without a model: the next facts in turn, in the story's language only. */
     private fun plainStory(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String): String? {
         val rotation = Rotation(context)
-        val song = merged(facts.song, lang)
-        val album = merged(facts.albumText, lang)
-        val artist = merged(facts.artist, lang)
+        val song = brief(merged(facts.song, lang))
+        val album = brief(merged(facts.albumText, lang))
+        val artist = brief(merged(facts.artist, lang))
         val n = shares(length, song.size, album.size, artist.size)
         fun take(key: String, list: List<String>, count: Int) = if (count > 0) rotation.next(key, list, count) else emptyList()
         val parts = take("song:${track.title}", song, n.song) +
             take("album:${facts.album}", album, n.album) +
             take("artist:${track.artist}", artist, n.artist)
         return parts.joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Facts that are quick to hear: without asides in brackets (dates, original spellings), and only the
+     * short ones when there are any.
+     */
+    private fun brief(facts: List<String>): List<String> {
+        val compact = facts.map { it.replace(BRACKETS, "").replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("\\s{2,}"), " ").trim() }
+            .filter { it.length >= MIN_FACT_CHARS }
+        return compact.filter { it.length <= SHORT_FACT_CHARS }.ifEmpty { compact }
     }
 
     /** How many facts go to the song, the album and the artist. */
@@ -210,8 +220,8 @@ object TrackInfo {
     private fun shares(length: InfoLength, song: Int, album: Int, artist: Int): Shares {
         val want = when (length) {
             InfoLength.SHORT -> intArrayOf(0, 1, 1)
-            InfoLength.NORMAL -> intArrayOf(1, 1, 2)
-            InfoLength.LONG -> intArrayOf(2, 2, 3)
+            InfoLength.NORMAL -> intArrayOf(1, 1, 1)
+            InfoLength.LONG -> intArrayOf(1, 2, 2)
         }
         val have = intArrayOf(song, album, artist)
         fun move(from: Int, to: Int) {
@@ -252,8 +262,8 @@ object TrackInfo {
                 known.artist.takeIf { it > 0 }?.let { if (ru) "об исполнителе или группе" else "about the artist or band" },
             )
             if (parts.isNotEmpty()) {
-                return if (ru) "Расскажи по порядку: ${parts.joinToString(", затем ")}. Всего около ${length.sentences} предложений."
-                else "Tell, in this order: ${parts.joinToString(", then ")}. About ${length.sentences} sentences in total."
+                return if (ru) "Расскажи по порядку: ${parts.joinToString(", затем ")}. ${brevity(length, ru)}"
+                else "Tell, in this order: ${parts.joinToString(", then ")}. ${brevity(length, ru)}"
             }
         }
         return if (ru) {
@@ -261,18 +271,23 @@ object TrackInfo {
                 "ОДИН короткий интересный факт об альбоме$albumName, из которого эта песня, " +
                 "затем ОДИН короткий интересный факт об исполнителе или группе. " +
                 "Если о песне сказать нечего — вместо этого расскажи ещё один факт об альбоме; " +
-                "если и об альбоме нечего — расскажи больше об исполнителе. Всего около ${length.sentences} предложений."
+                "если и об альбоме нечего — расскажи больше об исполнителе. ${brevity(length, ru)}"
         } else {
             "Structure: ${if (length == InfoLength.SHORT) "" else "first briefly about the song itself, then "}" +
                 "ONE short interesting fact about the album$albumName the song is from, " +
                 "then ONE short interesting fact about the artist or band. " +
                 "If there is nothing to say about the song, tell one more fact about the album instead; " +
-                "if nothing about the album either, tell more about the artist. About ${length.sentences} sentences in total."
+                "if nothing about the album either, tell more about the artist. ${brevity(length, ru)}"
         }
     }
 
-    private fun clean(answer: String, lang: String): String? {
-        val text = answer.replace(Regex("[*#_`]"), "").trim()
+    private fun brevity(length: InfoLength, ru: Boolean): String =
+        if (ru) "Не больше ${length.sentences} предложений, каждое короткое — до $MAX_WORDS слов, без дат в скобках и длинных перечислений."
+        else "No more than ${length.sentences} sentences, each short — up to $MAX_WORDS words, no dates in brackets, no long lists."
+
+    private fun clean(answer: String, length: InfoLength, lang: String): String? {
+        val text = sentences(answer.replace(Regex("[*#_`]"), "").replace(BRACKETS, "").trim())
+            .take(length.sentences + 1).joinToString(" ")
         // A model that ignored the language is no better than none.
         return text.takeIf { it.length >= MIN_ANSWER_CHARS && inLanguage(it, lang) }
     }
@@ -540,6 +555,9 @@ object TrackInfo {
     private const val MIN_LINE_CHARS = 40
     private const val MIN_FACT_CHARS = 30
     private const val MAX_FACT_CHARS = 300
+    private const val SHORT_FACT_CHARS = 150
+    private const val MAX_WORDS = 15
+    private val BRACKETS = Regex("\\s*[(\\[][^()\\[\\]]*[)\\]]")
     private const val FACTS_FOR_MODEL = 5
     private const val MAX_TOLD = 5
     private const val MAX_TOLD_CHARS = 300
