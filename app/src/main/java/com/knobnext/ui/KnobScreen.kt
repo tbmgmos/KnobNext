@@ -1388,9 +1388,20 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
     item {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle(stringResource(R.string.info_title))
-            Group(2) {
+            Group(3) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    ControlRow(shape(0), stringResource(R.string.info_length)) {
+                    ControlRow(shape(0), stringResource(R.string.info_language)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLanguage.RU to R.string.info_language_ru,
+                                com.knobnext.InfoLanguage.EN to R.string.info_language_en,
+                                com.knobnext.InfoLanguage.SYSTEM to R.string.info_language_system,
+                            ),
+                            selected = s.infoLanguage,
+                            onSelect = { prefs.infoLanguage = it },
+                        )
+                    }
+                    ControlRow(shape(1), stringResource(R.string.info_length)) {
                         ConnectedChoice(
                             options = listOf(
                                 com.knobnext.InfoLength.SHORT to R.string.info_length_short,
@@ -1401,7 +1412,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoLength = it },
                         )
                     }
-                    ControlRow(shape(1), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
+                    ControlRow(shape(2), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
                         ConnectedChoice(
                             options = listOf(false to R.string.info_music_duck, true to R.string.info_music_pause),
                             selected = s.infoPause,

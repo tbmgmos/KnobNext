@@ -217,9 +217,14 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
     @Volatile var speaking = false
         private set
 
-    fun say(text: String, onDone: (() -> Unit)? = null) {
-        finished()
+    /**
+     * Says [text]. [queue]: after what is being said now (one story told in parts), instead of cutting
+     * it off; the audio focus stays taken in between.
+     */
+    fun say(text: String, onDone: (() -> Unit)? = null, queue: Boolean = false) {
+        if (!(queue && speaking)) finished()
         whenDone = onDone
+        queued = queue && speaking
         val wanted = prefs.ttsEngine
         if (tts != null && wanted != engineName) release()
         if (tts == null) {
@@ -229,6 +234,27 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
             return
         }
         if (ready) speak(text) else pending = text
+    }
+
+    private var queued = false
+
+    /** Runs [onDone] once what is being said now ends, or at once when nothing is. */
+    fun then(onDone: () -> Unit) {
+        if (speaking) whenDone = onDone else onDone()
+    }
+
+    /** The phrase an utterance belongs to: "knob-<phrase>-<piece>[-last]". */
+    private fun phraseOf(utteranceId: String?) = utteranceId?.split('-')?.getOrNull(1)?.toIntOrNull()
+
+    /** The end of a phrase counts only for the latest one: an earlier part of a story doesn't end it. */
+    private fun ended(utteranceId: String?) {
+        val phrase = phraseOf(utteranceId)
+        handler.post {
+            if (phrase != null && phrase != serial) return@post
+            handler.removeCallbacks(giveBackFocus)
+            audio.abandonAudioFocusRequest(focus)
+            finished()
+        }
     }
 
     override fun onInit(status: Int) {
@@ -247,24 +273,15 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
             // Focus is held for the whole phrase, which may be several pieces.
             override fun onDone(utteranceId: String?) {
-                if (utteranceId?.endsWith(LAST) == true) {
-                    audio.abandonAudioFocusRequest(focus)
-                    handler.post(::finished)
-                }
+                if (utteranceId?.endsWith(LAST) == true) ended(utteranceId)
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                if (utteranceId?.endsWith(LAST) == true) {
-                    audio.abandonAudioFocusRequest(focus)
-                    handler.post(::finished)
-                }
+                if (utteranceId?.endsWith(LAST) == true) ended(utteranceId)
             }
 
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                audio.abandonAudioFocusRequest(focus)
-                handler.post(::finished)
-            }
+            override fun onError(utteranceId: String?) = ended(utteranceId)
         })
         pending?.let(::speak)
         pending = null
@@ -284,8 +301,9 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
             // The voice is taken when the piece is queued, so each piece keeps its own.
             useLanguage(engine, part.locale ?: Locale.getDefault())
             val utterance = "knob-$id-$i" + if (i == parts.lastIndex) LAST else ""
-            val queued = engine.speak(part.text, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, utterance)
-            if (queued != TextToSpeech.SUCCESS) {
+            val mode = if (i == 0 && !queued) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            val result = engine.speak(part.text, mode, null, utterance)
+            if (result != TextToSpeech.SUCCESS) {
                 // Nothing will be said, and no callback will come to give the focus back.
                 handler.removeCallbacks(giveBackFocus)
                 audio.abandonAudioFocusRequest(focus)

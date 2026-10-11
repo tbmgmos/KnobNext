@@ -363,15 +363,40 @@ class Extras(private val context: Context, private val media: Media, private val
             album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
             year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
         )
+        val lang = prefs.infoLanguage.resolve()
+        val length = prefs.infoLength
+        val pause = prefs.infoPause && c.isPlaying()
+        val resume = { if (pause) c.transportControls.play() }
+        TrackInfo.cached(context, track, length, lang)?.let { story ->
+            if (pause) c.transportControls.pause()
+            speaker.say(story, resume)
+            return Outcome.done(context.getString(R.string.log_info_cached))
+        }
         infoJob = scope.launch {
-            val text = TrackInfo.describe(context, track, prefs.infoLength)
-            if (text == null) {
+            val facts = TrackInfo.facts(track, lang)
+            if (facts == null || facts.empty) {
                 speaker.say(context.getString(R.string.speak_info_none))
                 return@launch
             }
-            val pause = prefs.infoPause && c.isPlaying()
             if (pause) c.transportControls.pause()
-            speaker.say(text) { if (pause) c.transportControls.play() }
+            // The short part is said at once; the story follows when the model has it.
+            val header = TrackInfo.header(context, track, facts, lang)
+            val hasModel = Brains.all(context).isNotEmpty()
+            if (!hasModel) {
+                val story = listOfNotNull(header, TrackInfo.plainStory(facts, length, lang)).joinToString(" ")
+                TrackInfo.remember(context, track, length, lang, story)
+                speaker.say(story, resume)
+                return@launch
+            }
+            speaker.say(header)
+            val told = TrackInfo.retell(context, track, facts, length, lang) ?: TrackInfo.plainStory(facts, length, lang)
+            if (told == null) {
+                // Nothing more in this language: the opening line was all there is.
+                speaker.then(resume)
+                return@launch
+            }
+            TrackInfo.remember(context, track, length, lang, "$header $told")
+            speaker.say(told, resume, queue = true)
         }
         return Outcome.done(context.getString(R.string.log_info_started))
     }

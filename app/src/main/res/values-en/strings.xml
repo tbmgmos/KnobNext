@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only what the English story about a track says aloud; the rest of the app is in Russian. -->
+<resources>
+    <string name="info_album">album “%1$s”</string>
+    <string name="info_year">%1$s</string>
+</resources>
