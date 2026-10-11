@@ -6,14 +6,15 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
 
     /** Actions that make sense when nothing is playing (they start playback or aren't about music). */
     val worksWhenIdle: Boolean
-        get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER
+        get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER ||
+            this == VOICE
 
     val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
 }

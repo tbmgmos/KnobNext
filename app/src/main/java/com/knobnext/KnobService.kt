@@ -353,6 +353,9 @@ class KnobService : AccessibilityService() {
         }
     }
 
+    // ---- Voice commands ----
+    private lateinit var voice: VoiceListener
+
     // ---- Pocket mode ----
     private lateinit var pocket: PocketScreen
     private var pocketShownAt = 0L
@@ -386,6 +389,7 @@ class KnobService : AccessibilityService() {
         }
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         pocket = PocketScreen(this, ::onPocketLeft)
+        voice = VoiceListener(this, handler)
         volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onScreen, ::onVolumeObserved)
         volumeWatcher.start()
         backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
@@ -408,6 +412,7 @@ class KnobService : AccessibilityService() {
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
         PocketScreen.toggle = { handler.post { togglePocket() } }
         PowerHold.handler = ::onPowerHold
+        VoiceListener.trigger = { handler.post { startVoice() } }
         ScreenOffService.sync(this)
         Setup.returnToAppIfRequested(this)
     }
@@ -419,9 +424,11 @@ class KnobService : AccessibilityService() {
         SleepTimer.fader = null
         PocketScreen.toggle = null
         PowerHold.handler = null
+        VoiceListener.trigger = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             pocket.hide(PocketScreen.Reason.STOPPED)
+            voice.cancel()
             volumeWatcher.stop()
             trackWatcher?.stop()
             backTap.release()
@@ -868,6 +875,129 @@ class KnobService : AccessibilityService() {
         }
     }
 
+    // ---- Voice commands ----
+
+    /** Listens for one spoken command; the same gesture again while listening cancels it. */
+    private fun startVoice(): Outcome {
+        if (voice.listening) {
+            voice.cancel()
+            return Outcome.unchanged(getString(R.string.log_voice_cancelled))
+        }
+        if (!voice.hasMicPermission()) {
+            extras.say(getString(R.string.speak_voice_permission))
+            return Outcome.failed(getString(R.string.voice_err_permission))
+        }
+        voice.listen(::onVoice)
+        return Outcome.done(getString(R.string.log_voice_listening))
+    }
+
+    private fun onVoice(result: VoiceListener.Result) {
+        when (result) {
+            is VoiceListener.Result.Failed -> {
+                log(getString(R.string.log_voice_failed, result.reason))
+                playCue(Action.VOICE, Outcome.failed(result.reason), pausing = false, pkg = prefs.lastPlayer)
+            }
+            is VoiceListener.Result.Heard -> {
+                val players = prefs.seenPlayers.associateBy { appLabel(this, it).lowercase() }
+                val match = result.phrases.firstNotNullOfOrNull { p -> CommandRules.parse(p, players)?.let { p to it } }
+                if (match == null) {
+                    val heard = result.phrases.first()
+                    log(getString(R.string.log_voice_unknown, heard))
+                    playCue(Action.VOICE, Outcome.failed(heard), pausing = false, pkg = prefs.lastPlayer)
+                    extras.say(getString(R.string.speak_voice_unknown, heard))
+                    return
+                }
+                runCommand(match.first, match.second)
+            }
+        }
+    }
+
+    /** Carries out a spoken command, with the same log, vibration and sound as a gesture. */
+    private fun runCommand(phrase: String, command: Command) {
+        val controller = media.resolve(prefs)?.controller ?: media.pick(media.controllers())
+        val pkg = controller?.packageName
+        val playing = controller?.isPlaying() ?: audio.isMusicActive
+        var cueAction = Action.NONE
+        var pausing = false
+        val outcome: Outcome = when (command) {
+            is Command.Run -> {
+                cueAction = command.action
+                pausing = command.action == Action.PLAY_PAUSE && playing
+                if (command.action == Action.VOICE) Outcome.DONE else execute(command.action, controller)
+            }
+            Command.Play -> {
+                cueAction = Action.PLAY_PAUSE
+                controller?.transportControls?.play() ?: media.sendKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+                pausedAt = 0L
+                Outcome.DONE
+            }
+            Command.Pause -> {
+                cueAction = Action.PLAY_PAUSE
+                pausing = true
+                controller?.transportControls?.pause() ?: media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                pausedAt = SystemClock.elapsedRealtime()
+                stayAwake()
+                Outcome.DONE
+            }
+            is Command.SeekBy -> {
+                cueAction = if (command.ms > 0) Action.SEEK_FORWARD else Action.SEEK_BACK
+                media.perform(cueAction, controller, kotlin.math.abs(command.ms))
+                Outcome.DONE
+            }
+            is Command.SeekTo -> {
+                cueAction = Action.SEEK_FORWARD
+                if (controller == null) Outcome.failed(getString(R.string.log_needs_access)) else {
+                    controller.transportControls.seekTo(command.ms)
+                    Outcome.DONE
+                }
+            }
+            is Command.VolumeBy -> {
+                val direction = if (command.steps > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                repeat(kotlin.math.abs(command.steps).coerceAtMost(MAX_VOICE_VOLUME_STEPS)) {
+                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
+                }
+                Outcome.DONE
+            }
+            is Command.VolumeTo -> {
+                val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, (max * command.percent + 50) / 100, 0)
+                lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                Outcome.DONE
+            }
+            is Command.Sleep -> {
+                cueAction = Action.SLEEP_TIMER
+                SleepTimer.start(this, prefs, command.minutes)
+                extras.say(getString(R.string.speak_sleep_in, resources.getQuantityString(R.plurals.minutes, command.minutes, command.minutes)))
+                Outcome.DONE
+            }
+            Command.SleepToTrackEnd -> {
+                cueAction = Action.SLEEP_TIMER
+                val progress = media.progress(controller)
+                if (progress == null) Outcome.failed(getString(R.string.log_voice_no_length)) else {
+                    SleepTimer.startIn(this, prefs, progress.second - progress.first)
+                    extras.say(getString(R.string.speak_sleep_track_end))
+                    Outcome.DONE
+                }
+            }
+            Command.SleepCancel -> {
+                cueAction = Action.SLEEP_TIMER
+                SleepTimer.cancel(this, prefs)
+                extras.say(getString(R.string.speak_sleep_cancelled))
+                Outcome.undone(getString(R.string.log_sleep_cancelled))
+            }
+            is Command.Open -> {
+                cueAction = Action.OPEN_PLAYER
+                Outcome.of(extras.openApp(command.packageName))
+            }
+        }
+        val failed = outcome.result == Outcome.Result.FAILED
+        log(getString(R.string.log_voice_heard, phrase) + (outcome.message?.let { ": $it" } ?: ""))
+        if (cueAction != Action.NONE && command !is Command.Run) {
+            if (prefs.vibrate) haptics.play(cueAction)
+        }
+        if (cueAction != Action.NONE || failed) playCue(if (failed) Action.VOICE else cueAction, outcome, pausing, pkg)
+    }
+
     /** The pocket-mode action: on, or off again (the screen then goes off). */
     private fun togglePocket(): Outcome {
         if (pocket.active) {
@@ -1226,6 +1356,7 @@ class KnobService : AccessibilityService() {
             Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT ->
                 extras.perform(action, controller)
             Action.POCKET -> togglePocket()
+            Action.VOICE -> startVoice()
             else -> {
                 media.perform(action, controller, prefs.seekStepMs(controller?.packageName))
                 Outcome.DONE
@@ -1324,6 +1455,7 @@ class KnobService : AccessibilityService() {
 
         /** The screen came on this shortly before the assistant was called: the hold turned it on. */
         const val POWER_HOLD_WAKE_MS = 2_500L
+        const val MAX_VOICE_VOLUME_STEPS = 15
         const val RELOCK_DELAY_MS = 400L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L

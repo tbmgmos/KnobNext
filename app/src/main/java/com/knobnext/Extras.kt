@@ -309,8 +309,11 @@ class Extras(private val context: Context, private val media: Media, private val
     private fun clock(wallMs: Long): String =
         java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(wallMs))
 
-    private fun openPlayer(controller: MediaController?): String? {
-        val pkg = controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player)
+    private fun openPlayer(controller: MediaController?): String? =
+        openApp(controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player))
+
+    /** Opens a player and starts it playing; a message when that failed. */
+    fun openApp(pkg: String): String? {
         val launch = context.packageManager.getLaunchIntentForPackage(pkg)
             ?: return context.getString(R.string.log_no_player)
         return try {

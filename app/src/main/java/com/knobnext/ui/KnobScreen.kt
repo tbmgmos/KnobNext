@@ -61,6 +61,7 @@ import com.knobnext.Cues
 import com.knobnext.PocketScreen
 import com.knobnext.PowerButton
 import com.knobnext.PowerHold
+import com.knobnext.VoiceListener
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -509,6 +510,59 @@ private fun PowerCard(ctx: PageContext) {
             }
         }
         Hint(stringResource(R.string.power_hold_hint))
+    }
+}
+
+/** Voice commands: microphone permission, which recognizer is there, a try-it button and examples. */
+@Composable
+private fun VoiceCard(ctx: PageContext) {
+    val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
+    val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
+    fun granted() = context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    var mic by remember { mutableStateOf(granted()) }
+    val askMic = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { mic = it || granted() }
+    val engine = remember { VoiceListener.availability(context) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.voice_title))
+        Group(3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ListRow(
+                    shape(0), stringResource(R.string.voice_mic),
+                    subtitle = stringResource(if (mic) R.string.voice_mic_on else R.string.voice_mic_off),
+                    highlighted = !mic,
+                    onClick = if (mic) null else ({ askMic.launch(android.Manifest.permission.RECORD_AUDIO) }),
+                    leading = {
+                        if (mic) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.voice_engine),
+                    subtitle = stringResource(
+                        when (engine) {
+                            VoiceListener.Availability.ON_DEVICE -> R.string.voice_engine_on_device
+                            VoiceListener.Availability.ONLINE -> R.string.voice_engine_online
+                            VoiceListener.Availability.NONE -> R.string.voice_engine_none
+                        },
+                    ),
+                )
+                ListRow(
+                    shape(2), stringResource(R.string.voice_try),
+                    subtitle = stringResource(if (running) R.string.voice_try_hint else R.string.voice_need_service),
+                    enabled = running && mic && engine != VoiceListener.Availability.NONE,
+                    onClick = { VoiceListener.trigger?.invoke() },
+                    trailing = { Icon(KnobIcons.Mic, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.voice_hint))
     }
 }
 
@@ -1000,6 +1054,7 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
             }
         }
     }
+    item { VoiceCard(ctx) }
     item { PocketCard(ctx) }
     item { SpeechCard(s, prefs) }
     item { CueCard(ctx) }
