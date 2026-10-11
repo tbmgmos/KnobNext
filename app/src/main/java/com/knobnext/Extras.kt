@@ -349,6 +349,9 @@ class Extras(private val context: Context, private val media: Media, private val
      */
     var keepKeysAlive: ((Boolean) -> Unit)? = null
 
+    /** Set by the service: a line for the event log. */
+    var log: ((String) -> Unit)? = null
+
     /** Ends the story under way (gives the music back); null when none is. */
     private var storyEnd: (() -> Unit)? = null
 
@@ -397,52 +400,15 @@ class Extras(private val context: Context, private val media: Media, private val
         }
         storyEnd = resume
         if (pause) keepKeysAlive?.invoke(true)
-        TrackInfo.cached(context, track, length, lang, source)?.let { story ->
-            pauseMusic()
-            speaker.say(story, resume)
-            return Outcome.done(context.getString(R.string.log_info_cached))
-        }
-        if (source == InfoSource.GEMINI) {
-            // Gemini Nano knows the track itself: the opening line at once, its story right after.
-            pauseMusic()
-            val header = TrackInfo.header(context, track, lang)
-            speaker.say(header)
-            infoJob = scope.launch {
-                val told = TrackInfo.fromGemini(track, length, lang)
-                if (told == null) {
-                    speaker.then(resume)
-                    return@launch
-                }
-                TrackInfo.remember(context, track, length, lang, source, "$header $told")
-                speaker.say(told, resume, queue = true)
-            }
-            return Outcome.done(context.getString(R.string.log_info_started))
-        }
+        // The opening line at once, from the player's own data; the story follows when it is ready.
+        pauseMusic()
+        speaker.say(TrackInfo.header(context, track, lang))
         infoJob = scope.launch {
-            val facts = TrackInfo.facts(track, lang)
-            if (facts == null || facts.empty) {
-                resume()
-                speaker.say(context.getString(R.string.speak_info_none))
-                return@launch
-            }
-            pauseMusic()
-            // The short part is said at once; the story follows when the model has it.
-            val header = TrackInfo.header(context, track, facts, lang)
-            val useModel = source == InfoSource.COMBINED && Brains.all(context).isNotEmpty()
-            if (!useModel) {
-                val story = listOfNotNull(header, TrackInfo.plainStory(facts, length, lang)).joinToString(" ")
-                TrackInfo.remember(context, track, length, lang, source, story)
-                speaker.say(story, resume)
-                return@launch
-            }
-            speaker.say(header)
-            val told = TrackInfo.retell(context, track, facts, length, lang) ?: TrackInfo.plainStory(facts, length, lang)
+            val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
             if (told == null) {
-                // Nothing more in this language: the opening line was all there is.
-                speaker.then(resume)
+                speaker.say(context.getString(R.string.speak_info_none), resume, queue = true)
                 return@launch
             }
-            TrackInfo.remember(context, track, length, lang, source, "$header $told")
             speaker.say(told, resume, queue = true)
         }
         return Outcome.done(context.getString(R.string.log_info_started))

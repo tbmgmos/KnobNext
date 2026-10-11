@@ -106,7 +106,7 @@ object Offline {
         return object : Brain {
             override val name = context.getString(R.string.offline_llm_name)
 
-            override suspend fun complete(prompt: String, maxTokens: Int): String? = withContext(Dispatchers.Default) {
+            override suspend fun complete(prompt: String, maxTokens: Int, creative: Boolean): String? = withContext(Dispatchers.Default) {
                 main.removeCallbacks(closeIdle)
                 try {
                     val llm = synchronized(this@Offline) {
@@ -120,7 +120,10 @@ object Offline {
                     }
                     val session = LlmInferenceSession.createFromOptions(
                         llm,
-                        LlmInferenceSession.LlmInferenceSessionOptions.builder().setTopK(1).setTemperature(0f).build(),
+                        LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                            .setTopK(if (creative) NanoBrain.CREATIVE_TOP_K else 1)
+                            .setTemperature(if (creative) NanoBrain.CREATIVE_TEMPERATURE else 0f)
+                            .build(),
                     )
                     try {
                         session.addQueryChunk(prompt)

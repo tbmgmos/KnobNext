@@ -15,19 +15,22 @@ import kotlinx.coroutines.withTimeoutOrNull
 interface Brain {
     val name: String
 
-    /** The model's answer to [prompt], or null when it failed or took too long. */
-    suspend fun complete(prompt: String, maxTokens: Int): String?
+    /**
+     * The model's answer to [prompt], or null when it failed or took too long. [creative]: some
+     * randomness, for stories that should differ each time; otherwise the single likeliest answer.
+     */
+    suspend fun complete(prompt: String, maxTokens: Int, creative: Boolean = false): String?
 }
 
 /** Gemini Nano through ML Kit: built into the system on phones that have it, nothing to download here. */
 class NanoBrain private constructor(private val model: GenerativeModel) : Brain {
     override val name = "Gemini Nano"
 
-    override suspend fun complete(prompt: String, maxTokens: Int): String? = try {
+    override suspend fun complete(prompt: String, maxTokens: Int, creative: Boolean): String? = try {
         withTimeoutOrNull(ANSWER_TIMEOUT_MS) {
             val request = generateContentRequest(TextPart(prompt)) {
-                temperature = 0f
-                topK = 1
+                temperature = if (creative) CREATIVE_TEMPERATURE else 0f
+                topK = if (creative) CREATIVE_TOP_K else 1
                 maxOutputTokens = maxTokens
             }
             model.generateContent(request).candidates.firstOrNull()?.text
@@ -41,6 +44,8 @@ class NanoBrain private constructor(private val model: GenerativeModel) : Brain 
 
     companion object {
         private const val ANSWER_TIMEOUT_MS = 8_000L
+        const val CREATIVE_TEMPERATURE = 0.8f
+        const val CREATIVE_TOP_K = 40
 
         /** The last failure, for the event log (e.g. the system refusing use in the background). */
         @Volatile var lastError: String? = null
@@ -135,12 +140,15 @@ object Brains {
      * Asks the models in turn until one answers: Gemini Nano may refuse (the system can block its use
      * from the background), and then the downloaded model still can.
      */
-    suspend fun ask(context: Context, prompt: String, maxTokens: Int): Pair<Brain, String>? {
+    suspend fun ask(context: Context, prompt: String, maxTokens: Int, creative: Boolean = false): Pair<Brain, String>? {
         for (brain in all(context)) {
-            brain.complete(prompt, maxTokens)?.let { return brain to it }
+            brain.complete(prompt, maxTokens, creative)?.let { return brain to it }
         }
         return null
     }
+
+    /** The models that work with the app in the background: the system keeps Gemini Nano to the app on screen. */
+    fun background(context: Context): Brain? = Offline.brain(context)
 }
 
 /**

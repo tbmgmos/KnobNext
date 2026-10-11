@@ -411,6 +411,7 @@ class KnobService : AccessibilityService() {
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:sensors").apply {
             setReferenceCounted(false)
         }
+        extras.log = { handler.post { log(it) } }
         extras.keepKeysAlive = { on ->
             storyHold = on
             if (on) silence.start() else if (pausedAt == 0L) silence.stop()
