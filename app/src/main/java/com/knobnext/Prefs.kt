@@ -282,7 +282,7 @@ class Prefs(context: Context) {
 
     /** Read pieces in another alphabet with a voice of their language. */
     var ttsMultilang: Boolean
-        get() = sp.getBoolean("tts_multilang", true)
+        get() = sp.getBoolean("tts_multilang", false)
         set(v) = sp.edit().putBoolean("tts_multilang", v).apply()
 
     /** Drop "(Remastered 2011)", "[Official Video]", emoji and the like before reading a title. */
@@ -508,10 +508,17 @@ class Prefs(context: Context) {
 
     /** One-time fixes of settings saved by older versions. */
     fun migrate() {
-        if (sp.getInt("migrated", 0) >= 1) return
+        val level = sp.getInt("migrated", 0)
+        if (level >= 2) return
+        val edit = sp.edit()
+        // One voice for a whole phrase sounds more natural than switching voices mid-sentence.
+        if (level < 2) edit.putBoolean("tts_multilang", false)
+        if (level >= 1) {
+            edit.putInt("migrated", 2).apply()
+            return
+        }
         // Profiles made from the first "seek" preset had next/previous on the long hold, which a seeking
         // hold makes unreachable (and which used to stop the hold from seeking smoothly).
-        val edit = sp.edit()
         profileApps.forEach { pkg ->
             listOf(
                 Gesture.HOLD_UP to Gesture.LONG_HOLD_UP,
@@ -525,7 +532,7 @@ class Prefs(context: Context) {
                 }
             }
         }
-        edit.putInt("migrated", 1).apply()
+        edit.putInt("migrated", 2).apply()
     }
 
     fun deleteProfile(pkg: String) {

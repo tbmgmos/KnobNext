@@ -476,10 +476,10 @@
     <string name="cue_screen_off_only">Только при выключенном экране</string>
     <string name="cue_screen_off_only_hint">С включённым экраном переключение и так видно</string>
     <string name="speech_title">Озвучка названий</string>
-    <string name="speech_foreign">Иностранные слова</string>
-    <string name="speech_foreign_hint">«Авто»: английские и другие названия читает голос их языка, русские — русский</string>
-    <string name="speech_foreign_auto">Авто</string>
-    <string name="speech_foreign_one">Одним голосом</string>
+    <string name="speech_foreign">Голос</string>
+    <string name="speech_foreign_hint">«Один»: всю фразу читает один голос языка текста — звучит цельно, английские названия он произносит по-своему. «По языкам»: названия на другом языке читает голос этого языка</string>
+    <string name="speech_foreign_auto">По языкам</string>
+    <string name="speech_foreign_one">Один</string>
     <string name="speech_clean">Чистить названия</string>
     <string name="speech_clean_hint">Не читать «(Remastered)», «[Official Video]», «feat.», эмодзи и хэштеги</string>
     <string name="speech_engine">Синтезатор речи</string>

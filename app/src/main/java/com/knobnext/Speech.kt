@@ -95,13 +95,15 @@ object Speech {
         val parts = ArrayList<Part>()
         val piece = StringBuilder()
         var script: Script? = null
+        // Numbers (dates, counts) are said in the language of the sentence, not of the word next to them.
+        val main = mainScript(text)
         fun flush() {
             val t = piece.toString().trim()
             if (t.isNotEmpty()) parts += Part(t, localeFor(script, t))
             piece.clear()
         }
         text.codePoints().forEach { cp ->
-            val s = scriptOf(cp)
+            val s = scriptOf(cp) ?: main.takeIf { Character.isDigit(cp) }
             if (s != null && script != null && s != script) {
                 flush()
                 script = s
@@ -112,6 +114,20 @@ object Speech {
         }
         flush()
         return parts
+    }
+
+    /** The alphabet most of the letters are in. */
+    private fun mainScript(text: String): Script? =
+        text.codePoints().toArray().mapNotNull(::scriptOf).groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+
+    /**
+     * The voice for reading all of [text] with one voice: the language most of it is in, so a Russian
+     * story with English names is read by the Russian voice (not the phone's language, which may differ).
+     */
+    fun mainLocale(text: String): Locale? {
+        val script = mainScript(text) ?: return null
+        val letters = text.filter { scriptOf(it.code) == script }
+        return localeFor(script, letters)
     }
 
     private val CYRILLIC_LANGUAGES = setOf("ru", "uk", "be", "bg", "sr", "mk", "kk", "ky", "tg", "mn")
@@ -289,7 +305,7 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     private fun speak(text: String) {
         val engine = tts ?: return
-        val parts = if (prefs.ttsMultilang) Speech.split(text) else listOf(Speech.Part(text, null))
+        val parts = if (prefs.ttsMultilang) Speech.split(text) else listOf(Speech.Part(text, Speech.mainLocale(text)))
         if (parts.isEmpty()) return finished()
         engine.setSpeechRate(prefs.ttsRate)
         audio.requestAudioFocus(focus)
