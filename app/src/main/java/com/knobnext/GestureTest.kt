@@ -9,7 +9,7 @@ import android.os.SystemClock
  * running their actions, intercepts keys even when nothing plays, and runs the motion sensors.
  * The page and the service live in the same process, so a plain object is enough.
  *
- * It stays active for a couple of minutes after the app goes to the background, so screen-off
+ * It stays active for a couple of minutes after the screen is turned off on this page, so screen-off
  * gestures can be tried too: turn the screen off, do the gesture, come back and see it ticked.
  */
 object GestureTest {
@@ -23,13 +23,13 @@ object GestureTest {
     private val main = Handler(Looper.getMainLooper())
     private var listener: ((Event) -> Unit)? = null
     private var visible = true
-    private var hiddenAt = 0L
+    private var graceUntil = 0L
 
     /** Set by the service: called when [active] may have changed, so sensors can follow at once. */
     var onChange: (() -> Unit)? = null
 
     val active: Boolean
-        get() = listener != null && (visible || SystemClock.elapsedRealtime() - hiddenAt < BACKGROUND_GRACE_MS)
+        get() = listener != null && (visible || SystemClock.elapsedRealtime() < graceUntil)
 
     fun start(onEvent: (Event) -> Unit) {
         listener = onEvent
@@ -41,11 +41,15 @@ object GestureTest {
         onChange?.invoke()
     }
 
-    /** Called by the activity when it is shown or hidden. */
-    fun setVisible(shown: Boolean) {
+    /**
+     * Called by the activity when it is shown or hidden. Checking goes on for a while only when it was
+     * hidden by the screen turning off (to try screen-off gestures); leaving for another app ends it
+     * at once, or the keys there would do nothing.
+     */
+    fun setVisible(shown: Boolean, screenOff: Boolean = false) {
         visible = shown
-        if (!shown) {
-            hiddenAt = SystemClock.elapsedRealtime()
+        graceUntil = if (!shown && screenOff) SystemClock.elapsedRealtime() + BACKGROUND_GRACE_MS else 0L
+        if (graceUntil != 0L) {
             // Re-check once the grace period is over, so sensors don't keep running for nothing.
             main.postDelayed({ onChange?.invoke() }, BACKGROUND_GRACE_MS + 100)
         }

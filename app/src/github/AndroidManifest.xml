@@ -4,10 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Updating from inside the app: the downloaded release is handed to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The daily update check: tell the user about a new version, and keep the check after a restart. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application>
         <receiver
             android:name="com.knobnext.UpdateReceiver"
             android:exported="false" />
+
+        <service
+            android:name="com.knobnext.UpdateJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

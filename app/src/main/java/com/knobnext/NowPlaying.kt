@@ -7,10 +7,12 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 
 data class NowPlaying(
     val controller: MediaController,
@@ -21,7 +23,13 @@ data class NowPlaying(
     val playing: Boolean,
 )
 
-/** Follows the most relevant media session and reports changes on the main thread. */
+/**
+ * Follows the most relevant media session and reports changes on the main thread.
+ *
+ * Every active session is watched, not only the one shown: when another app starts playing, the
+ * system doesn't always report a change of the session list (the session may have been there,
+ * paused, all along), so only its own playback callback tells that it took over.
+ */
 class NowPlayingTracker(
     private val context: Context,
     private val prefs: Prefs,
@@ -31,16 +39,14 @@ class NowPlayingTracker(
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private var current: MediaController? = null
+    private val watched = mutableMapOf<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
+    private var started = false
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
-        follow(media.pick(list.orEmpty()))
+        refresh(list.orEmpty())
     }
 
-    private val callback = object : MediaController.Callback() {
-        override fun onPlaybackStateChanged(state: PlaybackState?) = publish()
-        override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
-        override fun onSessionDestroyed() = follow(media.pick(media.controllers()))
-    }
+    private val refreshSoon = Runnable { refresh(media.controllers()) }
 
     fun start() {
         try {
@@ -49,23 +55,60 @@ class NowPlayingTracker(
             onChange(null)
             return
         }
-        follow(media.pick(media.controllers()))
+        started = true
+        refresh(media.controllers())
     }
 
     fun stop() {
+        started = false
+        handler.removeCallbacks(refreshSoon)
         sessions.removeOnActiveSessionsChangedListener(sessionsListener)
-        current?.unregisterCallback(callback)
+        watched.values.forEach { (c, cb) -> c.unregisterCallback(cb) }
+        watched.clear()
         current = null
     }
 
-    private fun follow(controller: MediaController?) {
-        // A different player may have started; re-pick even if the same session object is reported.
-        val best = media.pick(media.controllers()) ?: controller
-        if (best?.sessionToken != current?.sessionToken) {
-            current?.unregisterCallback(callback)
-            current = best
-            best?.registerCallback(callback, handler)
+    private fun watch(list: List<MediaController>) {
+        val tokens = list.map { it.sessionToken }.toSet()
+        watched.keys.filter { it !in tokens }.forEach { token ->
+            watched.remove(token)?.let { (c, cb) -> c.unregisterCallback(cb) }
         }
+        list.forEach { c ->
+            if (c.sessionToken in watched) return@forEach
+            if (c.isPlaying()) PlayOrder.started(c.packageName, early = true)
+            val cb = object : MediaController.Callback() {
+                private var wasPlaying = c.isPlaying()
+
+                override fun onPlaybackStateChanged(state: PlaybackState?) {
+                    val playing = c.isPlaying()
+                    if (playing && !wasPlaying) PlayOrder.started(c.packageName)
+                    wasPlaying = playing
+                    if (c.sessionToken == current?.sessionToken) publish() else later()
+                }
+
+                override fun onMetadataChanged(metadata: MediaMetadata?) {
+                    if (c.sessionToken == current?.sessionToken) publish()
+                }
+
+                override fun onSessionDestroyed() = later()
+            }
+            c.registerCallback(cb, handler)
+            watched[c.sessionToken] = c to cb
+        }
+    }
+
+    /** Another session changed: re-pick after the burst of callbacks a switch brings settles. */
+    private fun later() {
+        handler.removeCallbacks(refreshSoon)
+        handler.postDelayed(refreshSoon, REPICK_DELAY_MS)
+    }
+
+    private fun refresh(list: List<MediaController>) {
+        if (!started) return
+        handler.removeCallbacks(refreshSoon)
+        watch(list)
+        val best = media.pick(list)
+        if (best?.sessionToken != current?.sessionToken) current = best
         publish()
     }
 
@@ -76,6 +119,13 @@ class NowPlayingTracker(
             return
         }
         prefs.rememberPlayer(c.packageName)
+        // Gestures follow the player that plays now; keep the remembered one (profiles, sensors,
+        // "open the player") in step without waiting for the next key press.
+        if (c.isPlaying() && c.packageName != prefs.lastPlayer &&
+            (!prefs.appFilter || c.packageName in prefs.allowedApps)
+        ) {
+            prefs.lastPlayer = c.packageName
+        }
         val meta = c.metadata
         onChange(
             NowPlaying(
@@ -92,6 +142,26 @@ class NowPlayingTracker(
             ),
         )
     }
+
+    private companion object {
+        const val REPICK_DELAY_MS = 150L
+    }
+}
+
+/**
+ * When each player last started playing, as seen by any tracker in this process. When two report
+ * playing at once (one is still letting go of the sound), the one that started last is the one
+ * the person just turned on.
+ */
+object PlayOrder {
+    private val startedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** [early]: found already playing, so its start time is unknown; don't let it beat a seen start. */
+    fun started(packageName: String, early: Boolean = false) {
+        if (early) startedAt.putIfAbsent(packageName, 1L) else startedAt[packageName] = SystemClock.elapsedRealtime()
+    }
+
+    fun of(packageName: String): Long = startedAt[packageName] ?: 0L
 }
 
 fun appLabel(context: Context, packageName: String): String =

@@ -22,6 +22,8 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,15 +37,40 @@ import com.knobnext.ScreenOffService
 import com.knobnext.Settings
 
 /** One line of the diagnostics: [ok] null means "just information". */
-private class Check(val title: String, val value: String, val ok: Boolean?)
+/** [fix] opens the place where a failing check is fixed. */
+private class Check(val title: String, val value: String, val ok: Boolean?, val fix: (() -> Unit)? = null)
 
 /** Everything that decides whether gestures work, in one list, plus a report to send. */
 @Composable
-fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: NowPlaying?, versionName: String) {
+fun DiagnosticsCard(
+    s: Settings,
+    prefs: Prefs,
+    setup: SetupState,
+    actions: ScreenActions,
+    nowPlaying: NowPlaying?,
+    versionName: String,
+) {
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
-    val checks = buildChecks(context, s, setup, nowPlaying, versionName)
+    val backgroundRunning by ScreenOffService.runningFlow.collectAsState()
+    val checks = buildChecks(context, s, prefs, setup, actions, nowPlaying, versionName, backgroundRunning)
+    val firstFix = checks.firstOrNull { it.ok == false && it.fix != null }?.fix
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (firstFix != null) {
+            Button(
+                onClick = firstFix,
+                shapes = ButtonDefaults.shapes(),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.diag_fix_all), style = MaterialTheme.typography.titleSmall)
+            }
+            Text(
+                stringResource(R.string.diag_fix_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
         Group(checks.size) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 checks.forEachIndexed { i, c ->
@@ -51,6 +78,7 @@ fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: No
                         shape = shape(i),
                         title = c.title,
                         subtitle = c.value,
+                        onClick = if (c.ok == false) c.fix else null,
                         leading = {
                             when (c.ok) {
                                 true -> ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
@@ -82,15 +110,19 @@ fun DiagnosticsCard(s: Settings, prefs: Prefs, setup: SetupState, nowPlaying: No
 private fun buildChecks(
     context: Context,
     s: Settings,
+    prefs: Prefs,
     setup: SetupState,
+    actions: ScreenActions,
     nowPlaying: NowPlaying?,
     versionName: String,
+    backgroundRunning: Boolean,
 ): List<Check> = buildList {
     add(
         Check(
             stringResource(R.string.diag_gestures),
             stringResource(if (s.enabled) R.string.diag_gestures_on else R.string.diag_gestures_off),
             s.enabled,
+            fix = { prefs.enabled = true },
         ),
     )
     add(
@@ -104,10 +136,11 @@ private fun buildChecks(
                 },
             ),
             setup.serviceEnabled && setup.serviceRunning,
+            fix = actions.openAccessibility,
         ),
     )
     if (setup.restricted == Restricted.BLOCKED && !setup.serviceEnabled) {
-        add(Check(stringResource(R.string.diag_restricted), stringResource(R.string.diag_restricted_blocked), false))
+        add(Check(stringResource(R.string.diag_restricted), stringResource(R.string.diag_restricted_blocked), false, actions.openAppInfo))
     }
     val needsBackground = s.doubleMode != DoubleMode.OFF || s.backTap || s.flip || s.twist || s.wave
     add(
@@ -116,8 +149,10 @@ private fun buildChecks(
         } else {
             Check(
                 stringResource(R.string.diag_background),
-                stringResource(if (ScreenOffService.running) R.string.diag_background_ok else R.string.diag_background_stopped),
-                ScreenOffService.running,
+                stringResource(if (backgroundRunning) R.string.diag_background_ok else R.string.diag_background_stopped),
+                backgroundRunning,
+                // Usually stopped because the system may not start it from the background.
+                fix = if (setup.batteryUnrestricted) null else actions.openBattery,
             )
         },
     )
@@ -126,6 +161,7 @@ private fun buildChecks(
             stringResource(R.string.diag_battery),
             stringResource(if (setup.batteryUnrestricted) R.string.diag_battery_ok else R.string.diag_battery_limited),
             if (needsBackground) setup.batteryUnrestricted else null,
+            fix = actions.openBattery,
         ),
     )
     add(
@@ -133,6 +169,7 @@ private fun buildChecks(
             stringResource(R.string.diag_player_access),
             stringResource(if (setup.playerAccess) R.string.diag_player_ok else R.string.diag_player_missing),
             setup.playerAccess,
+            fix = actions.openNotificationAccess,
         ),
     )
     add(
@@ -202,25 +239,45 @@ private fun share(context: Context, text: String) {
     }
 }
 
-/** A hold time that suits how long this person's short taps last, or null when the current one is fine. */
-fun suggestLongPress(taps: List<Int>, current: Int): Int? {
-    if (taps.size < MIN_TAP_SAMPLES) return null
-    val sorted = taps.sorted()
-    val longTap = sorted[((sorted.size - 1) * 0.9).toInt()]
-    val ideal = (Math.round(longTap * 2.2 / Prefs.LONG_PRESS_STEP) * Prefs.LONG_PRESS_STEP).toInt()
+/** A suggested hold time; [longTap] is set when it comes from tap lengths, null when from hasty holds. */
+class HoldAdvice(val ms: Int, val longTap: Int?)
+
+/**
+ * A hold time that suits this person, or null when the current one is fine. Two signals:
+ *  - holds let go almost as soon as they fired (before the vibration could be felt) were probably
+ *    taps that ran long: the hold time is too short. Such presses never show up among the taps;
+ *  - otherwise, the length of short taps: the hold time should leave room above the longest ones
+ *    without making holds wait longer than needed.
+ */
+fun suggestLongPress(taps: List<Int>, overshoots: List<Int>, current: Int): HoldAdvice? {
+    fun round(ms: Double) = (Math.round(ms / Prefs.LONG_PRESS_STEP) * Prefs.LONG_PRESS_STEP).toInt()
         .coerceIn(MIN_SUGGESTED_MS, MAX_SUGGESTED_MS)
-    return when {
+    if (overshoots.size >= MIN_HOLD_SAMPLES) {
+        val hasty = overshoots.count { it < HASTY_RELEASE_MS }
+        if (hasty * 10 >= overshoots.size * 4) {
+            return HoldAdvice(round(current + 150.0), null).takeIf { it.ms > current }
+        }
+    }
+    if (taps.size < MIN_TAP_SAMPLES) return null
+    val longTap = longTapMs(taps)
+    val ideal = round(longTap * 2.2)
+    val ms = when {
         // Taps come close to the hold time: holds fire when a tap was meant.
         current < longTap * 1.6 -> ideal
         // Much slower than needed: every hold waits for nothing.
         current > ideal + 200 -> ideal
-        else -> null
-    }?.takeIf { it != current }
+        else -> return null
+    }
+    return HoldAdvice(ms, longTap).takeIf { ms != current }
 }
 
 /** The longest of most taps (90th percentile), shown next to the suggestion. */
 fun longTapMs(taps: List<Int>): Int = taps.sorted().let { it[((it.size - 1) * 0.9).toInt()] }
 
 private const val MIN_TAP_SAMPLES = 10
+private const val MIN_HOLD_SAMPLES = 5
+
+/** Faster than anyone reacts to the vibration: the key was already on its way up. */
+private const val HASTY_RELEASE_MS = 100
 private const val MIN_SUGGESTED_MS = 300
 private const val MAX_SUGGESTED_MS = 1_000

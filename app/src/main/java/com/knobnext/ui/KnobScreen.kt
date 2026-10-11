@@ -53,6 +53,14 @@ import com.knobnext.GestureGroup
 import com.knobnext.Media
 import com.knobnext.NowPlaying
 import com.knobnext.NowPlayingTracker
+import com.knobnext.Cue
+import com.knobnext.CueGroup
+import com.knobnext.CueStyle
+import com.knobnext.CueVolume
+import com.knobnext.Cues
+import com.knobnext.PocketScreen
+import com.knobnext.PowerButton
+import com.knobnext.PowerHold
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -62,6 +70,7 @@ import com.knobnext.TapSensitivity
 import com.knobnext.Updates
 import com.knobnext.appIcon
 import com.knobnext.appLabel
+import kotlinx.coroutines.launch
 
 class ScreenActions(
     val openAccessibility: () -> Unit,
@@ -237,7 +246,7 @@ fun KnobScreen(
                     Page.SETTINGS -> settingsPage(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
                     Page.DIAGNOSTICS -> {
-                        item { DiagnosticsCard(s, prefs, setup, nowPlaying, versionName) }
+                        item { DiagnosticsCard(s, prefs, setup, actions, nowPlaying, versionName) }
                         item { Hint(stringResource(R.string.diag_hint)) }
                     }
                 }
@@ -294,6 +303,24 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
         }
     }
     nowPlaying?.let { now -> item { NowPlayingCard(now, media, ownGestures = now.controller.packageName in s.profiles) } }
+    // A video or podcast app seen for the first time: offer seeking instead of track switching.
+    val suggested = if (setup.serviceEnabled && setup.playerAccess) {
+        SEEK_APPS.firstOrNull { it in s.seenPlayers && it !in s.profiles && it !in s.dismissedSuggestions }
+    } else {
+        null
+    }
+    suggested?.let { pkg ->
+        item {
+            val context = LocalContext.current
+            InfoCard(
+                title = stringResource(R.string.suggest_title, remember(pkg) { appLabel(context, pkg) }),
+                body = stringResource(R.string.suggest_body),
+                button = stringResource(R.string.suggest_yes),
+                onClick = { ctx.prefs.createProfile(pkg, ProfilePreset.SEEK) },
+                secondary = stringResource(R.string.suggest_no) to { ctx.prefs.dismissedSuggestions = s.dismissedSuggestions + pkg },
+            ) { Badge(MaterialShapes.Pill, KnobIcons.FastForward) }
+        }
+    }
 
     item {
         Column {
@@ -348,6 +375,20 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
     }
 }
 
+/** Video and podcast apps, where seeking is usually more useful than switching tracks. */
+private val SEEK_APPS = listOf(
+    "com.google.android.youtube",
+    "app.revanced.android.youtube",
+    "org.schabi.newpipe",
+    "com.vk.vkvideo",
+    "ru.rutube.app",
+    "au.com.shiftyjelly.pocketcasts",
+    "de.danoeh.antennapod",
+    "com.bambuna.podcastaddict",
+    "fm.castbox.audiobook.radio.podcast",
+    "com.audible.application",
+)
+
 private fun assigned(s: com.knobnext.Settings, group: GestureGroup) =
     s.actions.count { (g, a) -> g.group == group && a != Action.NONE }
 
@@ -384,20 +425,130 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
     }
     item { Group(1) { LongPressRow(shape(0), s.longPressMs, { ctx.prefs.longPressMs = it }, s.enabled) } }
     item { HoldAdvice(ctx) }
+    item { PowerCard(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
+    item { Hint(stringResource(R.string.blind_keys_hint)) }
+}
+
+/** The power button pressed twice: its gesture, and whether the system's own double press is in the way. */
+@Composable
+private fun PowerCard(ctx: PageContext) {
+    val context = LocalContext.current
+    // Read again whenever the page comes back (after changing it in system settings).
+    var systemOn by remember { mutableStateOf(PowerButton.systemDoublePressOn(context)) }
+    var assistant by remember { mutableStateOf(PowerHold.isAssistant(context)) }
+    DisposableEffect(context) {
+        val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                systemOn = PowerButton.systemDoublePressOn(context)
+                assistant = PowerHold.isAssistant(context)
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+    val scheme = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.section_power))
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                GestureRow(0, Gesture.POWER_DOUBLE, ctx.s, gestureShape(Gesture.POWER_DOUBLE), false, ctx.s.enabled, onEdit = ctx.edit)
+                ListRow(
+                    shape(1),
+                    stringResource(R.string.power_system),
+                    subtitle = stringResource(
+                        when (systemOn) {
+                            true -> R.string.power_system_on
+                            false -> R.string.power_system_off
+                            null -> R.string.power_system_unknown
+                        },
+                    ),
+                    highlighted = systemOn == true,
+                    onClick = { PowerButton.openGestureSettings(context) },
+                    leading = {
+                        if (systemOn == false) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                    trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.power_hint))
+        Group(3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                GestureRow(0, Gesture.POWER_HOLD, ctx.s, gestureShape(Gesture.POWER_HOLD), false, ctx.s.enabled, onEdit = ctx.edit)
+                ListRow(
+                    shape(1),
+                    stringResource(R.string.power_assistant),
+                    subtitle = stringResource(
+                        when (assistant) {
+                            true -> R.string.power_assistant_on
+                            false -> R.string.power_assistant_off
+                            null -> R.string.power_assistant_unknown
+                        },
+                    ),
+                    highlighted = assistant == false,
+                    onClick = { PowerHold.openAssistantSettings(context) },
+                    leading = {
+                        if (assistant == true) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                    trailing = { Icon(KnobIcons.ChevronRight, contentDescription = null) },
+                )
+                SwitchRow(
+                    shape(2), stringResource(R.string.power_fallback), ctx.s.powerHoldFallback, { ctx.prefs.powerHoldFallback = it },
+                    subtitle = stringResource(R.string.power_fallback_hint),
+                )
+            }
+        }
+        Hint(stringResource(R.string.power_hold_hint))
+    }
+}
+
+/** Pocket mode: turned on by the power button while music plays, or right now to try it. */
+@Composable
+private fun PocketCard(ctx: PageContext) {
+    val s = ctx.s
+    val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.pocket_title))
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pocket_auto), s.pocketAuto, { ctx.prefs.pocketAuto = it },
+                    subtitle = stringResource(R.string.pocket_auto_hint), enabled = s.enabled,
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.pocket_try),
+                    subtitle = stringResource(if (running) R.string.pocket_try_hint else R.string.pocket_need_service),
+                    enabled = running,
+                    onClick = { PocketScreen.toggle?.invoke() },
+                    trailing = { Icon(KnobIcons.PhoneDark, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.pocket_intro))
+    }
 }
 
 /** Suggests a hold time from how long this person's short taps actually last. */
 @Composable
 private fun HoldAdvice(ctx: PageContext) {
     val current = ctx.s.longPressMs
-    val taps = remember(current) { ctx.prefs.tapDurations }
-    val suggested = suggestLongPress(taps, current) ?: return
+    val advice = remember(current) { suggestLongPress(ctx.prefs.tapDurations, ctx.prefs.holdOvershoots, current) } ?: return
     InfoCard(
         title = stringResource(R.string.hold_advice_title),
-        body = stringResource(R.string.hold_advice_body, longTapMs(taps), suggested),
-        button = stringResource(R.string.hold_advice_button, suggested),
-        onClick = { ctx.prefs.longPressMs = suggested },
+        body = advice.longTap?.let { stringResource(R.string.hold_advice_body, it, advice.ms) }
+            ?: stringResource(R.string.hold_advice_body_hasty, advice.ms),
+        button = stringResource(R.string.hold_advice_button, advice.ms),
+        onClick = { ctx.prefs.longPressMs = advice.ms },
     ) { Badge(MaterialShapes.Cookie4Sided, KnobIcons.TouchApp) }
 }
 
@@ -458,7 +609,7 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(if (s.backTap) 4 else 1) {
+        Group(if (s.backTap) 5 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -481,6 +632,10 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                         }
                         GestureRow(2, Gesture.BACK_TAP_2, s, MaterialShapes.Puffy, accent = true, onEdit = ctx.edit)
                         GestureRow(3, Gesture.BACK_TAP_3, s, MaterialShapes.Flower, accent = true, onEdit = ctx.edit)
+                        SwitchRow(
+                            shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
+                            subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
+                        )
                     }
                 }
             }
@@ -640,6 +795,7 @@ private fun LazyListScope.profilePage(ctx: PageContext, pkg: String) {
     if (own == null) {
         item { ProfilePresets(ctx, pkg) }
     } else {
+        item { ProfileOptions(ctx, pkg) }
         listOf(
             GestureGroup.KEYS to R.string.section_keys,
             GestureGroup.SEQUENCE to R.string.section_double,
@@ -679,6 +835,34 @@ private fun ProfileHeader(ctx: PageContext, pkg: String, own: Boolean) {
             enabled = ctx.s.enabled,
             leading = { AppIcon(icon, size = 48) },
         )
+    }
+}
+
+/** Per-app settings beside the gestures: seek step and sound cues. */
+@Composable
+private fun ProfileOptions(ctx: PageContext, pkg: String) {
+    val s = ctx.s
+    Group(2) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ControlRow(shape(0), stringResource(R.string.profile_seek_step), enabled = s.enabled) {
+                ConnectedChoice(
+                    options = listOf(
+                        0 to R.string.seek_common,
+                        5 to R.string.seek_5,
+                        10 to R.string.seek_10,
+                        15 to R.string.seek_15,
+                        30 to R.string.seek_30,
+                    ),
+                    selected = s.profileSeekSteps[pkg] ?: 0,
+                    onSelect = { ctx.prefs.setSeekStep(pkg, it) },
+                    enabled = s.enabled,
+                )
+            }
+            SwitchRow(
+                shape(1), stringResource(R.string.profile_cues_off), pkg in s.cuesOffApps, { ctx.prefs.setCuesOff(pkg, it) },
+                subtitle = stringResource(R.string.profile_cues_off_hint), enabled = s.enabled,
+            )
+        }
     }
 }
 
@@ -722,18 +906,21 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
         }
     }
     item { CheckHero(check) }
-    item { CheckList(stringResource(R.string.section_keys), Gesture.entries.filter { it.group == GestureGroup.KEYS }, s.actions, check) }
+    // The same set the service uses: the playing app's own gestures when it has them.
+    val actions = ctx.prefs.lastPlayer?.let { s.profiles[it] } ?: s.actions
+    item { CheckList(stringResource(R.string.section_keys), Gesture.entries.filter { it.group == GestureGroup.KEYS }, actions, check) }
     if (s.doubleMode != DoubleMode.OFF) {
         item {
-            CheckList(stringResource(R.string.section_double), Gesture.entries.filter { it.group == GestureGroup.SEQUENCE }, s.actions, check)
+            CheckList(stringResource(R.string.section_double), Gesture.entries.filter { it.group == GestureGroup.SEQUENCE }, actions, check)
         }
+        if (s.doubleMode == DoubleMode.SCREEN_OFF) item { Hint(stringResource(R.string.test_screen_off_mode)) }
     }
     val motion = buildList {
         if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
         if (s.twist) add(Gesture.TWIST)
         if (s.wave) add(Gesture.WAVE)
     }
-    if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, s.actions, check) }
+    if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, actions, check) }
     item { Hint(stringResource(R.string.test_hint)) }
 }
 
@@ -769,6 +956,54 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
         }
     }
     item {
+        Column {
+            SectionTitle(stringResource(R.string.actions_title))
+            // The two smooth-seeking options only show when smooth seeking is chosen.
+            val extra = if (s.seekSmooth) 2 else 0
+            Group(4 + extra) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(0), stringResource(R.string.pref_seek_hold), caption = stringResource(R.string.pref_seek_hold_hint), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(true to R.string.seek_hold_smooth, false to R.string.seek_hold_steps),
+                            selected = s.seekSmooth,
+                            onSelect = { prefs.seekSmooth = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    if (s.seekSmooth) {
+                        SwitchRow(
+                            shape(1), stringResource(R.string.pref_scrub_duck), s.scrubDuck, { prefs.scrubDuck = it },
+                            subtitle = stringResource(R.string.pref_scrub_duck_hint), enabled = s.enabled,
+                        )
+                        SwitchRow(
+                            shape(2), stringResource(R.string.pref_scrub_speak), s.scrubSpeak, { prefs.scrubSpeak = it },
+                            subtitle = stringResource(R.string.pref_scrub_speak_hint), enabled = s.enabled,
+                        )
+                    }
+                    ControlRow(shape(1 + extra), stringResource(R.string.pref_seek_step), caption = stringResource(R.string.pref_seek_step_hint), enabled = s.enabled) {
+                        ConnectedChoice(
+                            options = listOf(5 to R.string.seek_5, 10 to R.string.seek_10, 15 to R.string.seek_15, 30 to R.string.seek_30),
+                            selected = s.seekStepSec,
+                            onSelect = { prefs.seekStepSec = it },
+                            enabled = s.enabled,
+                        )
+                    }
+                    SwitchRow(
+                        shape(2 + extra), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
+                        subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
+                    )
+                    SwitchRow(
+                        shape(3 + extra), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                        subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
+                    )
+                }
+            }
+        }
+    }
+    item { PocketCard(ctx) }
+    item { SpeechCard(s, prefs) }
+    item { CueCard(ctx) }
+    item {
         Group(1) {
             ControlRow(shape(0), stringResource(R.string.pref_resume), caption = stringResource(R.string.pref_resume_hint), enabled = s.enabled) {
                 ConnectedChoice(
@@ -789,7 +1024,8 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     val sleepActive = s.sleepUntil > System.currentTimeMillis()
     if (sleepActive || Action.SLEEP_TIMER in s.actions.values) item {
         val context = LocalContext.current
-        Group(1) {
+        Group(2) {
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ControlRow(
                 shape(0),
                 stringResource(R.string.pref_sleep),
@@ -803,7 +1039,12 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                 },
             ) {
                 ConnectedChoice(
-                    options = listOf(15 to R.string.minutes_15, 30 to R.string.minutes_30, 60 to R.string.minutes_60),
+                    options = listOf(
+                        15 to R.string.minutes_15,
+                        30 to R.string.minutes_30,
+                        60 to R.string.minutes_60,
+                        Prefs.SLEEP_TO_TRACK_END to R.string.minutes_track,
+                    ),
                     selected = s.sleepMinutes,
                     onSelect = { prefs.sleepMinutes = it },
                 )
@@ -813,6 +1054,11 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     }
                 }
             }
+            SwitchRow(
+                shape(1), stringResource(R.string.pref_sleep_extend), s.sleepExtend, { prefs.sleepExtend = it },
+                subtitle = stringResource(R.string.pref_sleep_extend_hint),
+            )
+          }
         }
     }
     item {
@@ -843,6 +1089,134 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
     }
     item { EventLog(prefs) }
 }
+
+/** The optional sounds after actions: timbre, loudness, when, and a switch (with a preview) per kind of action. */
+@Composable
+private fun CueCard(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    val on = s.cueStyle != CueStyle.OFF
+    val cues = remember { Cues() }
+    DisposableEffect(cues) { onDispose { cues.release() } }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val preview: (List<Cue>, CueStyle, CueVolume) -> Unit = { sample, style, volume ->
+        scope.launch {
+            sample.forEach {
+                cues.play(it, style, volume)
+                kotlinx.coroutines.delay(CUE_PREVIEW_GAP_MS)
+            }
+        }
+    }
+    val tryAll = { style: CueStyle, volume: CueVolume ->
+        preview(listOf(Cue.FORWARD, Cue.LIKE, Cue.ERROR), style, volume)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Group(if (on) 3 else 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ControlRow(shape(0), stringResource(R.string.cue_title), caption = stringResource(R.string.cue_hint), enabled = s.enabled) {
+                    ConnectedChoice(
+                        options = listOf(
+                            CueStyle.OFF to R.string.cue_off,
+                            CueStyle.SOFT to R.string.cue_soft,
+                            CueStyle.TWO_TONE to R.string.cue_two_tone,
+                            CueStyle.CLICK to R.string.cue_click,
+                        ),
+                        selected = s.cueStyle,
+                        onSelect = {
+                            prefs.cueStyle = it
+                            tryAll(it, s.cueVolume)
+                        },
+                        enabled = s.enabled,
+                    )
+                }
+                AnimatedVisibility(on) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ControlRow(shape(1), stringResource(R.string.cue_volume), enabled = s.enabled) {
+                            ConnectedChoice(
+                                options = listOf(
+                                    CueVolume.LOW to R.string.cue_volume_low,
+                                    CueVolume.MEDIUM to R.string.cue_volume_medium,
+                                    CueVolume.HIGH to R.string.cue_volume_high,
+                                ),
+                                selected = s.cueVolume,
+                                onSelect = {
+                                    prefs.cueVolume = it
+                                    tryAll(s.cueStyle, it)
+                                },
+                                enabled = s.enabled,
+                            )
+                        }
+                        SwitchRow(
+                            shape(2), stringResource(R.string.cue_screen_off_only), s.cueScreenOffOnly, { prefs.cueScreenOffOnly = it },
+                            subtitle = stringResource(R.string.cue_screen_off_only_hint), enabled = s.enabled,
+                        )
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(on) {
+            Column {
+                SectionTitle(stringResource(R.string.cue_groups_title))
+                Group(CueGroup.entries.size) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        CueGroup.entries.forEachIndexed { i, group ->
+                            val checked = group in s.cueGroups
+                            val toggle = { enable: Boolean ->
+                                prefs.cueGroups = if (enable) s.cueGroups + group else s.cueGroups - group
+                            }
+                            // Tapping the row plays the sound; the switch turns it on or off.
+                            ListRow(
+                                shape = shape(i),
+                                title = stringResource(cueGroupLabel(group)),
+                                subtitle = stringResource(cueGroupSound(group)),
+                                enabled = s.enabled,
+                                onClick = { preview(group.sample.toList(), s.cueStyle, s.cueVolume) },
+                                leading = { Badge(MaterialShapes.Cookie6Sided, cueGroupIcon(group)) },
+                                trailing = { Switch(checked = checked, onCheckedChange = toggle, enabled = s.enabled) },
+                            )
+                        }
+                    }
+                }
+                Hint(stringResource(R.string.cue_groups_hint))
+            }
+        }
+    }
+}
+
+private fun cueGroupLabel(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> R.string.cue_group_tracks
+    CueGroup.PLAYBACK -> R.string.cue_group_playback
+    CueGroup.SEEK -> R.string.cue_group_seek
+    CueGroup.LIKE -> R.string.cue_group_like
+    CueGroup.MODES -> R.string.cue_group_modes
+    CueGroup.TIMER -> R.string.cue_group_timer
+    CueGroup.OTHER -> R.string.cue_group_other
+    CueGroup.ERRORS -> R.string.cue_group_errors
+}
+
+private fun cueGroupSound(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> R.string.cue_sound_tracks
+    CueGroup.PLAYBACK -> R.string.cue_sound_playback
+    CueGroup.SEEK -> R.string.cue_sound_seek
+    CueGroup.LIKE -> R.string.cue_sound_like
+    CueGroup.MODES -> R.string.cue_sound_modes
+    CueGroup.TIMER -> R.string.cue_sound_timer
+    CueGroup.OTHER -> R.string.cue_sound_other
+    CueGroup.ERRORS -> R.string.cue_sound_errors
+}
+
+private fun cueGroupIcon(g: CueGroup) = when (g) {
+    CueGroup.TRACKS -> KnobIcons.SkipNext
+    CueGroup.PLAYBACK -> KnobIcons.PlayPause
+    CueGroup.SEEK -> KnobIcons.FastForward
+    CueGroup.LIKE -> KnobIcons.Favorite
+    CueGroup.MODES -> KnobIcons.Shuffle
+    CueGroup.TIMER -> KnobIcons.Bedtime
+    CueGroup.OTHER -> KnobIcons.Flashlight
+    CueGroup.ERRORS -> KnobIcons.Close
+}
+
+private const val CUE_PREVIEW_GAP_MS = 550L
 
 // ---------------------------------------------------------------- Building blocks
 

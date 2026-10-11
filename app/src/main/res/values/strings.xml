@@ -100,6 +100,24 @@
     <string name="gesture_long_hold_up">Удерживать «+» долго</string>
     <string name="gesture_long_hold_down">Удерживать «−» долго</string>
     <string name="gesture_both_hold">Удерживать «+» и «−»</string>
+    <string name="gesture_power_double">Питание дважды</string>
+    <string name="section_power">Кнопка питания</string>
+    <string name="power_system">Системное двойное нажатие</string>
+    <string name="power_system_on">Включено: двойное нажатие откроет камеру или Кошелёк. Нажмите, чтобы выключить его в настройках жестов</string>
+    <string name="power_system_off">Выключено — двойное нажатие свободно для жеста</string>
+    <string name="power_system_unknown">Проверьте, что «Быстрый запуск камеры» выключен в настройках жестов, иначе откроется камера. Нажмите, чтобы открыть</string>
+    <string name="power_hint">Саму кнопку питания Android приложениям не передаёт — KnobNext видит, как экран дважды быстро погас и включился. Одиночное нажатие работает как обычно. Если экран был выключен, он коротко мигнёт. Жест работает, пока играет музыка.</string>
+    <string name="log_power_double">питание нажато дважды</string>
+    <string name="log_power_hold">питание удержано</string>
+    <string name="gesture_power_hold">Удерживать питание</string>
+    <string name="assist_label">KnobNext: удержание питания</string>
+    <string name="power_assistant">KnobNext — цифровой ассистент</string>
+    <string name="power_assistant_on">Да: удержание питания приходит в KnobNext</string>
+    <string name="power_assistant_off">Нет. Нажмите и выберите KnobNext в «Цифровой ассистент» (Приложение-помощник)</string>
+    <string name="power_assistant_unknown">Выберите KnobNext в настройках: Приложения по умолчанию → Цифровой ассистент. Нажмите, чтобы открыть</string>
+    <string name="power_fallback">Иначе открывать Gemini</string>
+    <string name="power_fallback_hint">Когда музыка не играет или действие не назначено, удержание открывает Gemini (или Google Ассистент), как обычно</string>
+    <string name="power_hold_hint">Android не даёт приложениям перехватывать удержание питания, но отдаёт его приложению-ассистенту. Выберите KnobNext ассистентом, а в системных настройках жестов задайте удержанию «Цифровой ассистент». Тогда, пока играет музыка, удержание выполнит действие. Минус: Gemini перестанет быть системным ассистентом, «Окей, Google» может не работать. На экране блокировки работа зависит от системы — проверьте.</string>
     <string name="gesture_triple_up">Трижды «+»</string>
     <string name="gesture_triple_down">Трижды «−»</string>
     <string name="gesture_up_down">«+», затем «−»</string>
@@ -190,6 +208,27 @@
     <string name="log_via_poll">опрос</string>
     <string name="log_screen_on">[экран вкл]</string>
     <string name="log_screen_off">[экран выкл]</string>
+    <string name="log_screen_pocket">[карман]</string>
+    <string name="log_blind_both">«+» и «−» вместе при выключенном экране</string>
+    <string name="log_blind_hold">кнопку держат при выключенном экране — удержание</string>
+    <string name="log_pocket_on">карманный режим включён</string>
+    <string name="log_pocket_failed">карманный режим: не удалось показать чёрный экран</string>
+    <string name="log_pocket_no_wake">карманный режим: система не дала включить экран</string>
+    <string name="log_pocket_tap">карманный режим выключен двойным касанием</string>
+    <string name="log_pocket_power">карманный режим выключен кнопкой питания</string>
+    <string name="log_pocket_call">карманный режим выключен: звонок</string>
+    <string name="log_pocket_idle">карманный режим выключен: музыка не играет 2 минуты</string>
+    <string name="log_pocket_off">карманный режим выключен</string>
+    <string name="action_pocket">Карманный режим</string>
+    <string name="pocket_hint">Карманный режим · двойное касание — выйти</string>
+    <string name="pocket_title">Карманный режим</string>
+    <string name="pocket_intro">Экран остаётся включённым, но полностью чёрным и не реагирует на касания. Для Android телефон «в руках», поэтому в кармане работают все жесты кнопок: удержание, плавная перемотка, «+ и −» вместе. Чёрный OLED-экран почти не тратит энергию, но телефон не засыпает — режим сам выключится, если музыка не играет 2 минуты.</string>
+    <string name="pocket_auto">Включать кнопкой питания</string>
+    <string name="pocket_auto_hint">Пока играет музыка, первое нажатие питания включает карманный режим, второе — гасит экран полностью</string>
+    <string name="pocket_try">Включить сейчас</string>
+    <string name="pocket_try_hint">Экран заблокируется и вернётся чёрным. Выйти — двойное касание или кнопка питания. Ещё можно назначить действие «Карманный режим» на жест.</string>
+    <string name="pocket_need_service">Нужна запущенная служба KnobNext</string>
+    <string name="blind_keys_hint">При выключенном экране тоже: удержание кнопки (если система повторяет шаги громкости при удержании) и «+» и «−» вместе. Проверьте на странице «Проверка жестов» — выключите экран на ней и попробуйте.</string>
     <string name="log_service_started">служба запущена</string>
     <string name="log_service_stopped">служба остановлена</string>
     <string name="not_running_title">Служба не запущена</string>
@@ -233,6 +272,54 @@
     <string name="log_no_other_player">другого плеера нет</string>
     <string name="log_switched_to">теперь %1$s</string>
     <string name="log_sleep_fade">таймер сна: плавно выключаю</string>
+    <string name="cue_title">Звуковые сигналы</string>
+    <string name="cue_hint">Короткий сигнал поверх музыки после жеста: вперёд — вверх, назад — вниз, «нравится» — аккорд, не получилось — низкий. Музыка не приглушается.</string>
+    <string name="cue_off">Выкл</string>
+    <string name="cue_soft">Мягкий</string>
+    <string name="cue_two_tone">Мелодичный</string>
+    <string name="cue_click">Щелчок</string>
+    <string name="cue_groups_title">Для каких действий</string>
+    <string name="cue_groups_hint">Нажмите на строку, чтобы послушать звук. «Не получилось» звучит для любого действия, даже если его собственный звук выключен.</string>
+    <string name="cue_group_tracks">Переключение треков</string>
+    <string name="cue_group_playback">Пауза и воспроизведение</string>
+    <string name="cue_group_seek">Перемотка</string>
+    <string name="cue_group_like">«Нравится»</string>
+    <string name="cue_group_modes">Перемешивание, повтор, другой плеер</string>
+    <string name="cue_group_timer">Таймер сна</string>
+    <string name="cue_group_other">Фонарик, звонок, открыть плеер</string>
+    <string name="cue_group_errors">Не получилось</string>
+    <string name="cue_sound_tracks">Две ноты вверх — следующий, вниз — предыдущий</string>
+    <string name="cue_sound_playback">Низкая нота — пауза, высокая — воспроизведение</string>
+    <string name="cue_sound_seek">Двойной высокий — вперёд, двойной низкий — назад</string>
+    <string name="cue_sound_like">Аккорд из трёх нот; одна нота — уже нравится</string>
+    <string name="cue_sound_modes">Три ноты «качелями»</string>
+    <string name="cue_sound_timer">Три ноты вниз; одна нота — таймер отменён</string>
+    <string name="cue_sound_other">Три ноты «качелями»</string>
+    <string name="cue_sound_errors">Низкий звук вниз: плеер не принял команду, нет доступа и т. п.</string>
+    <string name="cue_volume">Громкость сигнала</string>
+    <string name="cue_volume_low">Тихо</string>
+    <string name="cue_volume_medium">Средне</string>
+    <string name="cue_volume_high">Громко</string>
+    <string name="cue_screen_off_only">Только при выключенном экране</string>
+    <string name="cue_screen_off_only_hint">С включённым экраном переключение и так видно</string>
+    <string name="speech_title">Озвучка названий</string>
+    <string name="speech_foreign">Иностранные слова</string>
+    <string name="speech_foreign_hint">«Авто»: английские и другие названия читает голос их языка, русские — русский</string>
+    <string name="speech_foreign_auto">Авто</string>
+    <string name="speech_foreign_one">Одним голосом</string>
+    <string name="speech_clean">Чистить названия</string>
+    <string name="speech_clean_hint">Не читать «(Remastered)», «[Official Video]», «feat.», эмодзи и хэштеги</string>
+    <string name="speech_engine">Синтезатор речи</string>
+    <string name="speech_engine_default">Как в системе</string>
+    <string name="speech_engine_hint">RHVoice — бесплатный синтезатор без интернета, хорошо читает русский и английский вперемешку.</string>
+    <string name="speech_rate">Скорость речи</string>
+    <string name="speech_rate_slow">Медленно</string>
+    <string name="speech_rate_normal">Обычно</string>
+    <string name="speech_rate_faster">Быстрее</string>
+    <string name="speech_rate_fast">Быстро</string>
+    <string name="speech_voices">Скачать голоса</string>
+    <string name="speech_voices_hint">Английский и другие языки — в настройках синтезатора. Без голоса языка слова читаются системным голосом.</string>
+    <string name="speech_try">Прослушать пример</string>
     <string name="pref_announce_skips">Называть трек после переключения</string>
     <string name="pref_announce_skips_hint">При выключенном экране — чтобы знать, что заиграло</string>
 
@@ -250,6 +337,8 @@
     <string name="test_not_running">Служба не запущена, поэтому жесты не распознаются. Включите её заново.</string>
     <string name="test_hint">Нажатия подряд здесь проверяются и при включённом экране. Чтобы проверить их как в жизни: включите музыку, выключите экран, сделайте жест и вернитесь — в течение двух минут он отметится здесь.</string>
     <string name="log_test">проверка: %1$s</string>
+    <string name="test_screen_off_mode">Сейчас выбран режим «Без экрана»: в обычной работе нажатия подряд распознаются только при выключенном экране. Здесь они проверяются и с включённым — для удобства.</string>
+    <string name="hold_advice_body_hasty">Удержание часто срабатывает, когда кнопку отпускают почти сразу — похоже, это были обычные нажатия. Удержание %1$d мс подойдёт лучше.</string>
 
     <!-- Per-app gestures -->
     <string name="profiles_title">Свои жесты для приложений</string>
@@ -265,7 +354,7 @@
     <string name="profile_preset_common">Как общие</string>
     <string name="profile_preset_common_hint">Копия общих жестов — дальше поменяйте нужное</string>
     <string name="profile_preset_seek">Перемотка вместо треков</string>
-    <string name="profile_preset_seek_hint">Для видео и подкастов: удержание и двойное нажатие перематывают на 10 с, долгое удержание и тройное нажатие переключают</string>
+    <string name="profile_preset_seek_hint">Для видео и подкастов: удержание плавно перематывает, двойное нажатие прыгает на шаг перемотки, тройное переключает треки</string>
     <string name="profile_hint">Остальные настройки (время удержания, режим нажатий подряд, жесты движением) общие для всех приложений.</string>
     <string name="tile_players_profiles">Свои жесты: %1$d</string>
 
@@ -310,4 +399,76 @@
     <string name="hold_advice_title">Подстроить удержание</string>
     <string name="hold_advice_body">Ваши короткие нажатия длятся до %1$d мс. Удержание %2$d мс подойдёт лучше: без случайных срабатываний и без лишнего ожидания.</string>
     <string name="hold_advice_button">Поставить %1$d мс</string>
+
+    <!-- Improvements: actions -->
+    <string name="action_time_left">Сколько осталось</string>
+    <string name="log_unliked">убрано из любимого</string>
+    <string name="log_like_not_confirmed">плеер не подтвердил «нравится»</string>
+    <string name="log_no_duration">плеер не сообщает длительность</string>
+    <string name="log_time_left">осталось %1$d:%2$02d</string>
+    <string name="speak_time_left">Осталось</string>
+    <plurals name="minutes">
+        <item quantity="one">%d минута</item>
+        <item quantity="few">%d минуты</item>
+        <item quantity="many">%d минут</item>
+        <item quantity="other">%d минуты</item>
+    </plurals>
+    <plurals name="seconds">
+        <item quantity="one">%d секунда</item>
+        <item quantity="few">%d секунды</item>
+        <item quantity="many">%d секунд</item>
+        <item quantity="other">%d секунды</item>
+    </plurals>
+    <string name="speak_sleep_extended">Таймер сна: ещё %1$d минут</string>
+    <string name="log_sleep_extended">таймер +%1$d мин, пауза в %2$s</string>
+    <string name="speak_sleep_track_end">Пауза в конце трека</string>
+    <string name="log_sleep_track_end">пауза в конце трека, в %1$s</string>
+    <string name="log_sleep_no_length">длина трека неизвестна — таймер на %1$d мин</string>
+    <string name="log_shake_extended">встряхнули — таймер +%1$d мин</string>
+    <string name="minutes_track">Трек</string>
+    <string name="pref_sleep_extend">Повтор жеста продлевает</string>
+    <string name="pref_sleep_extend_hint">Повторный жест добавляет 15 минут, а не отменяет таймер. Пока музыка затихает, можно встряхнуть телефон — тоже +15 минут. Отменить — в приложении.</string>
+
+    <!-- Improvements: settings -->
+    <string name="actions_title">Действия</string>
+    <string name="pref_seek_step">Шаг перемотки</string>
+    <string name="pref_seek_step_hint">Для нажатий и жестов — на сколько прыгать; для плавной перемотки — шаг «зубчиков» вибрации</string>
+    <string name="pref_seek_hold">Перемотка удержанием</string>
+    <string name="pref_seek_hold_hint">«Плавно»: пока держите кнопку, трек едет — сначала медленно, потом всё быстрее, а вибрация щёлкает на каждом шаге и сильнее — на каждой минуте, как колёсико. Нажмите другую кнопку, не отпуская первую, — перемотка развернётся. Долгое удержание на этой кнопке не используется. Работает при включённом экране.</string>
+    <string name="log_seek_no_position">плеер не сообщает позицию — перемотка шагами</string>
+    <string name="pref_scrub_duck">Тише во время перемотки</string>
+    <string name="pref_scrub_duck_hint">Пока трек едет, звук приглушается, после — возвращается</string>
+    <string name="pref_scrub_speak">Называть место после перемотки</string>
+    <string name="pref_scrub_speak_hint">Например, «12 минут 34 секунды»</string>
+    <string name="seek_hold_smooth">Плавно</string>
+    <string name="seek_hold_steps">Шагами</string>
+    <string name="seek_5">5 с</string>
+    <string name="seek_10">10 с</string>
+    <string name="seek_15">15 с</string>
+    <string name="seek_30">30 с</string>
+    <string name="seek_common">Общий</string>
+    <string name="pref_like_toggle">Повторный «нравится» снимает лайк</string>
+    <string name="pref_like_toggle_hint">Если трек уже нравится, жест убирает его из любимого</string>
+    <string name="pref_announce_all">Называть каждый новый трек</string>
+    <string name="pref_announce_all_hint">При выключенном экране — и когда трек сменился сам</string>
+    <string name="back_tap_eco">Экономить батарею</string>
+    <string name="back_tap_eco_hint">При выключенном экране реже читать датчик. Постукивание может срабатывать хуже.</string>
+
+    <!-- Improvements: profiles -->
+    <string name="profile_seek_step">Шаг перемотки в этом приложении</string>
+    <string name="profile_cues_off">Без звуковых сигналов</string>
+    <string name="profile_cues_off_hint">В этом приложении сигналы после жестов не звучат</string>
+    <string name="suggest_title">%1$s: перемотка вместо треков?</string>
+    <string name="suggest_body">Для видео и подкастов удобнее, когда удержание и двойное нажатие перематывают, а долгое удержание переключает. Профиль включится сам, когда играет это приложение.</string>
+    <string name="suggest_yes">Сделать</string>
+    <string name="suggest_no">Не надо</string>
+
+    <!-- Improvements: updates, diagnostics, tile -->
+    <string name="update_channel">Обновления</string>
+    <string name="update_notification_title">Вышла версия %1$s</string>
+    <string name="update_notification_text">Нажмите, чтобы обновить KnobNext</string>
+    <string name="diag_fix_all">Исправить</string>
+    <string name="diag_fix_hint">Нажмите на строку с ошибкой — откроется место, где это исправить</string>
+    <string name="tile_on_screen_off">Вкл · без экрана</string>
+    <string name="tile_on_always">Вкл · подряд всегда</string>
 </resources>

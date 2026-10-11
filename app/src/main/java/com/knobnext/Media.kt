@@ -43,8 +43,13 @@ class Media(private val context: Context) {
             }
         }
 
-    /** Active sessions are ordered by priority; prefer one that is actually playing. */
-    fun pick(list: List<MediaController>): MediaController? = list.firstOrNull { it.isPlaying() } ?: list.firstOrNull()
+    /**
+     * Prefer a session that is actually playing; among several, the one that started last. Otherwise
+     * the one played most recently. Ties keep the system's priority order (maxBy keeps the first).
+     */
+    fun pick(list: List<MediaController>): MediaController? =
+        list.filter { it.isPlaying() }.maxByOrNull { PlayOrder.of(it.packageName) }
+            ?: list.maxByOrNull { PlayOrder.of(it.packageName) }
 
     fun isInCall(): Boolean = when (audio.mode) {
         AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> true
@@ -66,13 +71,15 @@ class Media(private val context: Context) {
         if (filtering && controller == null) return null
         controller?.packageName?.let { if (it != prefs.lastPlayer) prefs.lastPlayer = it }
 
-        // isMusicActive is the ground truth that sound is audible; some players report stale states.
-        val playing = audio.isMusicActive && (!filtering || controller?.isPlaying() == true)
+        // Sound must be audible, and it must be the player's: a game or a video without a media session
+        // also makes sound, and then a hold would skip (and start) a paused player. Without player
+        // access there is no player to ask, so the sound alone decides.
+        val playing = audio.isMusicActive && (controller?.isPlaying() ?: !filtering)
         val mode = if (playing || !prefs.onlyWhenPlaying) Mode.FULL else Mode.COMBO_ONLY
         return Target(controller, mode)
     }
 
-    fun perform(action: Action, controller: MediaController?) {
+    fun perform(action: Action, controller: MediaController?, seekMs: Long = SEEK_STEP_MS) {
         val controls = controller?.transportControls
         when (action) {
             Action.NONE -> Unit
@@ -83,14 +90,26 @@ class Media(private val context: Context) {
                 controller.isPlaying() -> controller.transportControls.pause()
                 else -> controller.transportControls.play()
             }
-            Action.SEEK_FORWARD -> seekBy(controller, SEEK_STEP_MS) ?: sendKey(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)
-            Action.SEEK_BACK -> seekBy(controller, -SEEK_STEP_MS) ?: sendKey(KeyEvent.KEYCODE_MEDIA_REWIND)
+            Action.SEEK_FORWARD -> seekBy(controller, seekMs) ?: sendKey(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)
+            Action.SEEK_BACK -> seekBy(controller, -seekMs) ?: sendKey(KeyEvent.KEYCODE_MEDIA_REWIND)
             Action.VOLUME_UP -> volumeStep(AudioManager.ADJUST_RAISE)
             Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
             // Handled by Extras: they need the service (speech, alarms, launching apps).
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER -> Unit
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET -> Unit
         }
+    }
+
+    /** Current position and duration in ms, or null when the player doesn't report them. */
+    fun progress(controller: MediaController?): Pair<Long, Long>? {
+        val state = controller?.playbackState ?: return null
+        val duration = controller.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        if (duration <= 0) return null
+        var position = state.position
+        if (state.state == PlaybackState.STATE_PLAYING) {
+            position += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
+        }
+        return position.coerceIn(0, duration) to duration
     }
 
     private fun seekBy(controller: MediaController?, deltaMs: Long): Unit? {
@@ -107,8 +126,9 @@ class Media(private val context: Context) {
         return Unit
     }
 
-    fun volumeStep(direction: Int) {
-        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
+    /** [showUi] false keeps the volume panel away (pocket mode: the screen stays black). */
+    fun volumeStep(direction: Int, showUi: Boolean = true) {
+        audio.adjustSuggestedStreamVolume(direction, AudioManager.USE_DEFAULT_STREAM_TYPE, if (showUi) AudioManager.FLAG_SHOW_UI else 0)
     }
 
     fun sendKey(code: Int) {

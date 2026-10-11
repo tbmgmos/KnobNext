@@ -23,6 +23,8 @@ import kotlin.math.sqrt
 class BackTapDetector(
     context: Context,
     private val threshold: () -> Float,
+    /** Whether a third tap could still mean something; if not, two taps fire without waiting. */
+    private val wantsTriple: () -> Boolean,
     private val onTaps: (count: Int) -> Unit,
 ) : SensorEventListener {
     private val sensors = context.getSystemService(SensorManager::class.java)
@@ -32,6 +34,7 @@ class BackTapDetector(
     private val main = Handler(Looper.getMainLooper())
 
     private var running = false
+    private var fast = true
     private var initialized = false
     private var gx = 0f
     private var gy = 0f
@@ -50,13 +53,20 @@ class BackTapDetector(
 
     val available: Boolean get() = accelerometer != null
 
-    fun start() {
+    /**
+     * [fastRate] false reads the sensor about 50 times a second instead of as often as it can: less
+     * battery, but short taps may be missed. Called again with another rate, it re-registers.
+     */
+    fun start(fastRate: Boolean = true) {
         val sensor = accelerometer ?: return
-        if (running) return
+        if (running && fast == fastRate) return
+        if (running) sensors?.unregisterListener(this)
         running = true
+        fast = fastRate
         initialized = false
         taps = 0
-        sensors.registerListener(this, sensor, SensorManager.SENSOR_DELAY_FASTEST, sensorHandler)
+        val rate = if (fastRate) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME
+        sensors.registerListener(this, sensor, rate, sensorHandler)
     }
 
     fun stop() {
@@ -100,7 +110,12 @@ class BackTapDetector(
             taps++
             lastTapAt = now
             sensorHandler.removeCallbacks(finish)
-            sensorHandler.postDelayed(finish, SETTLE_MS)
+            if (taps >= 3 || taps == 2 && !wantsTriple()) {
+                // Nothing longer can follow: answer now instead of waiting for another tap.
+                sensorHandler.post(finish)
+            } else {
+                sensorHandler.postDelayed(finish, SETTLE_MS)
+            }
         }
 
         // Background motion level; spikes are clipped so the taps themselves barely raise it.

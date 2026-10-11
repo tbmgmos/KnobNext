@@ -225,3 +225,38 @@ class WaveDetector(
         const val WINDOW_MS = 2_000L
     }
 }
+
+/** A firm shake (two hard jolts within a short time), used to extend the sleep timer while it fades. */
+class ShakeDetector(context: Context, private val onShake: () -> Unit) :
+    SensorGesture(context, Sensor.TYPE_ACCELEROMETER, SensorManager.SENSOR_DELAY_GAME) {
+    private var firstJoltAt = 0L
+    private var lastJoltAt = 0L
+    private var quietUntil = 0L
+
+    override fun onStart() {
+        firstJoltAt = 0L
+        lastJoltAt = 0L
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        val (x, y, z) = Triple(event.values[0], event.values[1], event.values[2])
+        val force = Math.sqrt((x * x + y * y + z * z).toDouble()) - SensorManager.GRAVITY_EARTH
+        val now = SystemClock.elapsedRealtime()
+        if (now < quietUntil || abs(force) < JOLT) return
+        if (now - lastJoltAt < MIN_GAP_MS) return
+        if (firstJoltAt == 0L || now - firstJoltAt > WINDOW_MS) firstJoltAt = now
+        else {
+            firstJoltAt = 0L
+            quietUntil = now + COOLDOWN_MS
+            onShake()
+        }
+        lastJoltAt = now
+    }
+
+    private companion object {
+        const val JOLT = 12.0
+        const val MIN_GAP_MS = 120L
+        const val WINDOW_MS = 800L
+        const val COOLDOWN_MS = 2_000L
+    }
+}

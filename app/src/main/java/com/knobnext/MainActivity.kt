@@ -42,8 +42,11 @@ class MainActivity : ComponentActivity() {
             openBattery = { openFirst(Setup.batteryIntents(this)) },
             openAutostart = Setup.autostartIntents().takeIf { it.isNotEmpty() }?.let { intents -> { openFirst(intents) } },
         )
+        UpdateJob.sync(this)
+        askForNotifications(prefs)
         var shouldRun = ScreenOffService.shouldRun(this)
         stopObserving = prefs.observe {
+            UpdateJob.sync(this)
             val now = ScreenOffService.shouldRun(this)
             if (now != shouldRun) {
                 shouldRun = now
@@ -69,13 +72,28 @@ class MainActivity : ComponentActivity() {
         ScreenOffService.sync(this, inForeground = true)
     }
 
+    private val notificationPermission =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+
+    /** Once, for the update notifications: only where updates are checked, only on Android 13+. */
+    private fun askForNotifications(prefs: Prefs) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        if (!resources.getBoolean(R.bool.update_check) || !prefs.checkUpdates || prefs.notificationsAsked) return
+        val permission = android.Manifest.permission.POST_NOTIFICATIONS
+        if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        prefs.notificationsAsked = true
+        notificationPermission.launch(permission)
+    }
+
     override fun onStart() {
         super.onStart()
         GestureTest.setVisible(true)
     }
 
     override fun onStop() {
-        GestureTest.setVisible(false)
+        // By the time the screen-off stop arrives, the device is already non-interactive.
+        val screenOff = !getSystemService(android.os.PowerManager::class.java).isInteractive
+        GestureTest.setVisible(false, screenOff)
         super.onStop()
     }
 

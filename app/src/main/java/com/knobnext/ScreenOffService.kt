@@ -89,10 +89,16 @@ class ScreenOffService : Service() {
         @Volatile
         private var starting = false
 
-        /** In the foreground right now (shown on the diagnostics page). */
-        @Volatile
-        var running = false
-            private set
+        private val runningState = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        /** In the foreground right now; observed by the diagnostics page. */
+        val runningFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = runningState
+
+        var running: Boolean
+            get() = runningState.value
+            private set(v) {
+                runningState.value = v
+            }
 
         /**
          * Starts or stops the service to match the settings. Safe to call from anywhere. From the

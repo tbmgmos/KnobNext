@@ -28,7 +28,8 @@ class VolumeWatcher(
     private val context: Context,
     private val handler: Handler,
     private val shouldPoll: () -> Boolean,
-    private val onScreenOff: () -> Unit,
+    /** The screen turned off (false) or on (true). */
+    private val onScreen: (on: Boolean) -> Unit,
     private val onVolume: (value: Int, source: Source) -> Unit,
 ) {
     /** SYNC = a new baseline; it must not count as a press. KEY = a tap seen directly (gesture check). */
@@ -41,22 +42,40 @@ class VolumeWatcher(
     private var musicSeenAt = 0L
     private var outputsChangedAt = 0L
 
+    // What the poll saw last, to tell a step it missed from one it already reported.
+    private var polled = -1
+    private var polledFrom = -1
+    private var polledChangeAt = 0L
+
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            // While polling, the poll is authoritative; a late broadcast carries a stale value.
-            if (polling || intent.getIntExtra(EXTRA_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
+            if (intent.getIntExtra(EXTRA_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
             val value = intent.getIntExtra(EXTRA_VALUE, -1)
-            if (value >= 0) report(value, Source.BROADCAST)
+            if (value < 0) return
+            // While polling, the poll is authoritative; a late broadcast carries a stale value.
+            if (!polling) return report(value, Source.BROADCAST)
+            // Except for one thing: both keys pressed at once raise and lower the volume between two
+            // polls, so the poll sees no change at all. The broadcast of the second step still tells
+            // where the volume was a moment ago: replay that step and its undoing.
+            val prev = intent.getIntExtra(EXTRA_PREV_VALUE, -1)
+            val seen = prev == polledFrom && SystemClock.elapsedRealtime() - polledChangeAt < SEEN_MS
+            if (pollActive && prev >= 0 && prev != value && value == polled && !seen) {
+                polledFrom = prev
+                polledChangeAt = SystemClock.elapsedRealtime()
+                report(prev, Source.POLL)
+                report(value, Source.POLL)
+            }
         }
     }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_SCREEN_OFF) {
-                onScreenOff()
+                onScreen(false)
                 startPolling()
             } else {
                 stopPolling()
+                onScreen(true)
             }
         }
     }
@@ -75,7 +94,13 @@ class VolumeWatcher(
             val active = now - musicSeenAt < MUSIC_GAP_MS && shouldPoll()
             if (active) {
                 // Coming back from idle, the last known value may be old: start from a fresh baseline.
-                report(audio.getStreamVolume(AudioManager.STREAM_MUSIC), if (pollActive) Source.POLL else Source.SYNC)
+                val value = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                if (value != polled) {
+                    polledFrom = polled
+                    polled = value
+                    polledChangeAt = now
+                }
+                report(value, if (pollActive) Source.POLL else Source.SYNC)
             }
             pollActive = active
             handler.postDelayed(this, if (active) POLL_MS else IDLE_POLL_MS)
@@ -120,7 +145,9 @@ class VolumeWatcher(
         pollActive = false
         // Broadcasts may have been merged or missed while the screen was on: re-baseline silently,
         // otherwise the first poll would see a multi-step "jump" and replay it as presses.
-        report(audio.getStreamVolume(AudioManager.STREAM_MUSIC), Source.SYNC)
+        polled = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        polledFrom = -1
+        report(polled, Source.SYNC)
         handler.postDelayed(poll, POLL_MS)
     }
 
@@ -130,8 +157,10 @@ class VolumeWatcher(
     }
 
     private fun register(receiver: BroadcastReceiver, filter: IntentFilter) {
+        // Both broadcasts come from the system, which reaches non-exported receivers too; other apps
+        // must not be able to fake volume changes (they would fire gestures).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             context.registerReceiver(receiver, filter)
         }
@@ -141,6 +170,10 @@ class VolumeWatcher(
         const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
         const val EXTRA_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
         const val EXTRA_VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE"
+        const val EXTRA_PREV_VALUE = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE"
+
+        /** A broadcast this much later than the poll's change describes that same change. */
+        const val SEEN_MS = 400L
 
         /** Fast enough to see each press of a double press separately. */
         const val POLL_MS = 80L
