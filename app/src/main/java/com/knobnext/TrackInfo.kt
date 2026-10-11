@@ -50,8 +50,15 @@ object TrackInfo {
     /** A fact and the language it is written in. */
     class Text(val text: String, val lang: String)
 
-    class Facts(val song: Text?, val artist: Text?, val album: String?, val year: String?) {
-        val empty get() = song == null && artist == null && album == null && year == null
+    class Facts(
+        val song: Text?,
+        val artist: Text?,
+        val album: String?,
+        val year: String?,
+        /** The album's own article, for a fact about the record the song is from. */
+        val albumText: Text? = null,
+    ) {
+        val empty get() = song == null && artist == null && album == null && year == null && albumText == null
     }
 
     fun cached(context: Context, track: Track, length: InfoLength, lang: String, source: InfoSource): String? =
@@ -89,8 +96,11 @@ object TrackInfo {
             track.artist?.let { appendLine("Artist: ${Speech.cleanArtist(it)}") }
             track.album?.let { appendLine("Album: $it") }
             track.year?.let { appendLine("Year: $it") }
+            appendLine(structure(length, track.album, lang))
         }
-        val answer = withTimeoutOrNull(RETELL_TIMEOUT_MS) { nano.complete(prompt, length.sentences * TOKENS_PER_SENTENCE) } ?: return null
+        val answer = withTimeoutOrNull(RETELL_TIMEOUT_MS) {
+            nano.complete(prompt, length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS)
+        } ?: return null
         val text = answer.replace(Regex("[*#_`]"), "").trim()
         if (text.length < MIN_ANSWER_CHARS || !inLanguage(text, lang)) return null
         return text
@@ -105,8 +115,13 @@ object TrackInfo {
                 val song = async { article(lang) { l -> findSong(l, title, artist) } }
                 val about = async { artist?.let { a -> article(lang) { l -> findArtist(l, a) } } }
                 val brainz = async { if (artist != null && (track.album == null || track.year == null)) musicBrainz(title, artist) else null }
+                // The album's article: right away when the player names the album, else once MusicBrainz has.
+                val albumText = async {
+                    val name = track.album ?: brainz.await()?.first
+                    name?.let { a -> article(lang) { l -> findAlbum(l, a, artist) } }
+                }
                 val b = brainz.await()
-                Facts(song.await(), about.await(), track.album ?: b?.first, track.year ?: b?.second)
+                Facts(song.await(), about.await(), track.album ?: b?.first, track.year ?: b?.second, albumText.await())
             }
         }
     }
@@ -125,14 +140,38 @@ object TrackInfo {
 
     /** Without a model: the facts that are already in [lang], cut at a sentence end. */
     fun plainStory(facts: Facts, length: InfoLength, lang: String): String? {
-        val body = listOfNotNull(facts.song, facts.artist).filter { it.lang == lang }.joinToString(" ") { it.text }
-        if (body.isBlank()) return null
-        return Regex("(?<=[.!?…])\\s+").split(body).filter { it.isNotBlank() }.take(length.sentences).joinToString(" ")
+        // Always one fact about the album and one about the artist; the song first when there is more room.
+        val (song, album, artist) = when (length) {
+            InfoLength.SHORT -> Triple(0, 1, 1)
+            InfoLength.NORMAL -> Triple(1, 1, 2)
+            InfoLength.LONG -> Triple(2, 2, 3)
+        }
+        fun first(text: Text?, n: Int) = text?.takeIf { it.lang == lang && n > 0 }?.text?.let(::sentences)?.take(n)
+        val parts = listOfNotNull(
+            first(facts.song, if (facts.albumText == null) song + album else song),
+            first(facts.albumText, album),
+            first(facts.artist, artist),
+        ).flatten()
+        return parts.joinToString(" ").takeIf { it.isNotBlank() }
     }
+
+    private fun sentences(text: String) = Regex("(?<=[.!?…])\\s+").split(text).filter { it.isNotBlank() }
+
+    /** What the model is asked to cover, the same for every source. */
+    private fun structure(length: InfoLength, album: String?, lang: String): String =
+        if (lang == "ru") {
+            "Построй рассказ так: ${if (length == InfoLength.SHORT) "" else "сначала коротко о самой песне (если есть что сказать), затем "}" +
+                "ОДИН короткий интересный факт об альбоме${album?.let { " «$it»" } ?: ""}, из которого эта песня, " +
+                "затем ОДИН короткий интересный факт об исполнителе или группе. Всего около ${length.sentences} предложений."
+        } else {
+            "Structure: ${if (length == InfoLength.SHORT) "" else "first briefly about the song itself (if there is something to say), then "}" +
+                "ONE short interesting fact about the album${album?.let { " \"$it\"" } ?: ""} the song is from, " +
+                "then ONE short interesting fact about the artist or band. About ${length.sentences} sentences in total."
+        }
 
     /** The story told by the on-phone model, strictly in [lang] and from these facts only. */
     suspend fun retell(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String): String? {
-        if (facts.song == null && facts.artist == null) return null
+        if (facts.song == null && facts.artist == null && facts.albumText == null) return null
         val prompt = buildString {
             appendLine(
                 if (lang == "ru") {
@@ -152,10 +191,12 @@ object TrackInfo {
             facts.album?.let { appendLine("Album: $it") }
             facts.year?.let { appendLine("Year: $it") }
             facts.song?.let { appendLine("About the song: ${it.text.take(MAX_FACT_CHARS)}") }
+            facts.albumText?.let { appendLine("About the album: ${it.text.take(MAX_FACT_CHARS)}") }
             facts.artist?.let { appendLine("About the artist: ${it.text.take(MAX_FACT_CHARS)}") }
+            appendLine(structure(length, facts.album, lang))
         }
         val answer = withTimeoutOrNull(RETELL_TIMEOUT_MS) {
-            Brains.ask(context, prompt, length.sentences * TOKENS_PER_SENTENCE)?.second
+            Brains.ask(context, prompt, length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS)?.second
         } ?: return null
         val text = answer.replace(Regex("[*#_`]"), "").trim()
         // A model that ignored the language is no better than none.
@@ -187,6 +228,22 @@ object TrackInfo {
             val summary = summary(lang, page) ?: continue
             val about = (summary.optString("description") + " " + summary.optString("extract")).lowercase()
             if (SONG_WORDS.none { about.contains(it) }) continue
+            if (artist != null && !about.contains(normalize(artist).substringBefore(' '))) continue
+            if (summary.optString("extract").isBlank()) continue
+            return page to summary
+        }
+        return null
+    }
+
+    /** The album's article: a page named after it that is about a record by this artist. */
+    private fun findAlbum(lang: String, album: String, artist: String?): Pair<String, JSONObject>? {
+        val name = Speech.cleanTitle(album)
+        val query = "\"$name\" ${artist.orEmpty()} " + if (lang == "ru") "альбом" else "album"
+        for (page in search(lang, query)) {
+            if (!normalize(page).contains(normalize(name))) continue
+            val summary = summary(lang, page) ?: continue
+            val about = (summary.optString("description") + " " + summary.optString("extract")).lowercase()
+            if (ALBUM_WORDS.none { about.contains(it) }) continue
             if (artist != null && !about.contains(normalize(artist).substringBefore(' '))) continue
             if (summary.optString("extract").isBlank()) continue
             return page to summary
@@ -279,7 +336,7 @@ object TrackInfo {
     private fun cacheFile(context: Context, track: Track, length: InfoLength, lang: String, source: InfoSource) =
         File(
             File(context.filesDir, "trackinfo").apply { mkdirs() },
-            sha1("${track.title}\u0000${track.artist}\u0000$length\u0000$lang\u0000$source"),
+            sha1("v2\u0000${track.title}\u0000${track.artist}\u0000$length\u0000$lang\u0000$source"),
         )
 
     private fun trimCache(context: Context) {
@@ -294,6 +351,7 @@ object TrackInfo {
     private fun normalize(text: String) = text.lowercase(Locale.ROOT).replace('ё', 'е')
         .replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
 
+    private val ALBUM_WORDS = listOf("album", " ep ", "compilation", "soundtrack", "альбом", "мини-альбом", "сборник", "саундтрек", "пластинк")
     private val SONG_WORDS = listOf("song", "single", "track", "песн", "сингл", "композиц", "трек", "баллад")
     private val ARTIST_WORDS = listOf(
         "band", "singer", "musician", "rapper", "group", "duo", "composer", "dj", "songwriter", "artist",
@@ -306,6 +364,7 @@ object TrackInfo {
     private const val RETELL_TIMEOUT_MS = 20_000L
     private const val MAX_FACT_CHARS = 1_000
     private const val TOKENS_PER_SENTENCE = 50
+    private const val EXTRA_TOKENS = 60
     private const val MIN_ANSWER_CHARS = 20
     private const val MIN_SCORE = 90
     private const val MAX_CACHED = 200
