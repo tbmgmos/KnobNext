@@ -196,10 +196,11 @@ class VoiceListener(private val context: Context, private val handler: Handler) 
     }
 
     private var recognizer: SpeechRecognizer? = null
+    private var offline: OfflineSpeech? = null
     private var onResult: ((Result) -> Unit)? = null
     private val timeout = Runnable { finish(Result.Failed(context.getString(R.string.voice_err_timeout))) }
 
-    val listening: Boolean get() = recognizer != null
+    val listening: Boolean get() = recognizer != null || offline != null
 
     fun hasMicPermission(): Boolean =
         context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -208,11 +209,27 @@ class VoiceListener(private val context: Context, private val handler: Handler) 
         cancel()
         if (!hasMicPermission()) return onResult(Result.Failed(context.getString(R.string.voice_err_permission)))
         this.onResult = onResult
-        start(onDevice = availability(context) == Availability.ON_DEVICE)
+        // The system's on-device recognizer first, then a downloaded Vosk model, then the system's
+        // regular (possibly online) one.
+        when {
+            availability(context) == Availability.ON_DEVICE -> start(onDevice = true)
+            useOffline() -> Unit
+            else -> start(onDevice = false)
+        }
+    }
+
+    /** Hands the phrase to Vosk, when its model is downloaded. */
+    private fun useOffline(): Boolean {
+        val speech = Offline.speech(context) ?: return false
+        offline = speech
+        speech.listen { finish(it) }
+        return true
     }
 
     fun cancel() {
         handler.removeCallbacks(timeout)
+        offline?.cancel()
+        offline = null
         recognizer?.let {
             try {
                 it.cancel()
@@ -245,11 +262,15 @@ class VoiceListener(private val context: Context, private val handler: Handler) 
                 // The on-device recognizer may lack this language: try the regular one once.
                 val languageMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                     (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
-                if (onDevice && languageMissing) {
+                val network = error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
+                    error == SpeechRecognizer.ERROR_SERVER
+                if (onDevice && languageMissing || !onDevice && network) {
                     val callback = onResult
                     cancel()
                     onResult = callback
-                    return start(onDevice = false)
+                    // No internet for the regular recognizer: Vosk, if it's there.
+                    if (!onDevice && useOffline()) return
+                    if (onDevice) return start(onDevice = false)
                 }
                 finish(Result.Failed(describe(error)))
             }

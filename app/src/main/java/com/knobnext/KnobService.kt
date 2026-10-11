@@ -909,13 +909,13 @@ class KnobService : AccessibilityService() {
                 if (!prefs.smartVoice) return notUnderstood(heard)
                 // Not one of the known phrases: the on-phone model may still make sense of it.
                 scope.launch {
-                    val brain = Brains.best(this@KnobService)
-                    val answer = brain?.complete(CommandBrain.prompt(heard, players.keys), BRAIN_COMMAND_TOKENS)
-                    val command = answer?.let { CommandBrain.parse(it, players) }
+                    val brains = Brains.all(this@KnobService)
+                    val answer = Brains.ask(this@KnobService, CommandBrain.prompt(heard, players.keys), BRAIN_COMMAND_TOKENS)
+                    val command = answer?.let { CommandBrain.parse(it.second, players) }
                     when {
-                        command != null -> runCommand(heard, command, via = brain?.name)
-                        brain != null && answer == null -> {
-                            log(getString(R.string.log_brain_failed, brain.name, NanoBrain.lastError ?: "-"))
+                        command != null -> runCommand(heard, command, via = answer?.first?.name)
+                        brains.isNotEmpty() && answer == null -> {
+                            log(getString(R.string.log_brain_failed, brains.joinToString { it.name }, NanoBrain.lastError ?: "-"))
                             notUnderstood(heard)
                         }
                         else -> notUnderstood(heard)

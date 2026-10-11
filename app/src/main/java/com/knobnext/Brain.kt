@@ -81,8 +81,21 @@ class NanoBrain private constructor(private val model: GenerativeModel) : Brain 
 }
 
 object Brains {
-    /** The best model this phone has right now, or null: then only the rules work. */
-    suspend fun best(context: Context): Brain? = NanoBrain.ready()
+    /** The models this phone has right now, best first; empty: only the rules work. */
+    suspend fun all(context: Context): List<Brain> = listOfNotNull(NanoBrain.ready(), Offline.brain(context))
+
+    suspend fun best(context: Context): Brain? = all(context).firstOrNull()
+
+    /**
+     * Asks the models in turn until one answers: Gemini Nano may refuse (the system can block its use
+     * from the background), and then the downloaded model still can.
+     */
+    suspend fun ask(context: Context, prompt: String, maxTokens: Int): Pair<Brain, String>? {
+        for (brain in all(context)) {
+            brain.complete(prompt, maxTokens)?.let { return brain to it }
+        }
+        return null
+    }
 }
 
 /**

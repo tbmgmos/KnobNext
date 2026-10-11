@@ -156,7 +156,7 @@ class Extras(private val context: Context, private val media: Media, private val
         }
         scope.launch {
             val cleaned = kotlinx.coroutines.withTimeoutOrNull(SMART_TITLE_WAIT_MS) {
-                Brains.best(context)?.complete(TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.let(TitleBrain::parse)
+                Brains.ask(context, TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.second?.let(TitleBrain::parse)
             }
             if (cleaned != null) smartTitles[key] = cleaned
             val (t, a) = cleaned ?: (title to artist)

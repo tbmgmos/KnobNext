@@ -64,6 +64,8 @@ import com.knobnext.PowerButton
 import com.knobnext.PowerHold
 import com.knobnext.VoiceListener
 import com.knobnext.NanoBrain
+import com.knobnext.Offline
+import com.knobnext.OfflineFile
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -530,7 +532,8 @@ private fun VoiceCard(ctx: PageContext) {
     val engine = remember { VoiceListener.availability(context) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionTitle(stringResource(R.string.voice_title))
-        Group(3) {
+        val vosk = Offline.supported && engine != VoiceListener.Availability.ON_DEVICE
+        Group(if (vosk) 4 else 3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ListRow(
                     shape(0), stringResource(R.string.voice_mic),
@@ -555,8 +558,17 @@ private fun VoiceCard(ctx: PageContext) {
                         },
                     ),
                 )
+                if (vosk) {
+                    OfflineRow(
+                        shape(2), stringResource(R.string.offline_vosk),
+                        hint = stringResource(R.string.offline_vosk_hint),
+                        state = { Offline.vosk(it) },
+                        download = { Offline.downloadVosk(it) },
+                        delete = { Offline.deleteVosk(it) },
+                    )
+                }
                 ListRow(
-                    shape(2), stringResource(R.string.voice_try),
+                    shape(if (vosk) 3 else 2), stringResource(R.string.voice_try),
                     subtitle = stringResource(if (running) R.string.voice_try_hint else R.string.voice_need_service),
                     enabled = running && mic && engine != VoiceListener.Availability.NONE,
                     onClick = { VoiceListener.trigger?.invoke() },
@@ -590,7 +602,8 @@ private fun BrainCard(ctx: PageContext) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionTitle(stringResource(R.string.brain_title))
-        Group(3) {
+        val local = Offline.supported
+        Group(if (local) 4 else 3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ListRow(
                     shape(0), stringResource(R.string.brain_nano),
@@ -608,17 +621,103 @@ private fun BrainCard(ctx: PageContext) {
                     onClick = if (state == NanoBrain.State.DOWNLOADABLE || failed) download else null,
                     trailing = { Icon(KnobIcons.Sparkle, contentDescription = null) },
                 )
+                if (local) {
+                    OfflineRow(
+                        shape(1), stringResource(R.string.offline_llm),
+                        hint = stringResource(R.string.offline_llm_hint),
+                        state = { Offline.llm(it) },
+                        download = { context -> scope.launch { Offline.downloadLlm(context) } },
+                        delete = { Offline.deleteLlm(it) },
+                    )
+                }
+                val n = if (local) 1 else 0
                 SwitchRow(
-                    shape(1), stringResource(R.string.brain_voice), s.smartVoice, { ctx.prefs.smartVoice = it },
+                    shape(1 + n), stringResource(R.string.brain_voice), s.smartVoice, { ctx.prefs.smartVoice = it },
                     subtitle = stringResource(R.string.brain_voice_hint),
                 )
                 SwitchRow(
-                    shape(2), stringResource(R.string.brain_titles), s.smartTitles, { ctx.prefs.smartTitles = it },
+                    shape(2 + n), stringResource(R.string.brain_titles), s.smartTitles, { ctx.prefs.smartTitles = it },
                     subtitle = stringResource(R.string.brain_titles_hint),
                 )
             }
         }
         Hint(stringResource(R.string.brain_hint))
+    }
+}
+
+/** A downloadable model: its state (with progress while downloading), download and delete. */
+@Composable
+private fun GroupScope.OfflineRow(
+    shape: androidx.compose.ui.graphics.Shape,
+    title: String,
+    hint: String,
+    state: (android.content.Context) -> OfflineFile,
+    download: (android.content.Context) -> Unit,
+    delete: (android.content.Context) -> Unit,
+) {
+    val context = LocalContext.current
+    var file by remember { mutableStateOf(state(context)) }
+    var tick by remember { mutableIntStateOf(0) }
+    // While something is going on, look again every second.
+    LaunchedEffect(tick, file.state) {
+        if (file.state == OfflineFile.State.DOWNLOADING || file.state == OfflineFile.State.UNPACKING || tick == 0) {
+            kotlinx.coroutines.delay(1_000)
+            file = state(context)
+            tick++
+        }
+    }
+    var confirmDelete by remember { mutableStateOf(false) }
+    ListRow(
+        shape, title,
+        subtitle = when (file.state) {
+            OfflineFile.State.MISSING -> hint
+            OfflineFile.State.DOWNLOADING -> if (file.totalMb > 0) {
+                stringResource(R.string.offline_downloading_of, file.downloadedMb, file.totalMb)
+            } else {
+                stringResource(R.string.offline_downloading)
+            }
+            OfflineFile.State.UNPACKING -> stringResource(R.string.offline_unpacking)
+            OfflineFile.State.READY -> if (file.totalMb > 0) {
+                stringResource(R.string.offline_ready_size, file.totalMb)
+            } else {
+                stringResource(R.string.offline_ready)
+            }
+            OfflineFile.State.FAILED -> file.error ?: stringResource(R.string.offline_err_download)
+        },
+        highlighted = file.state == OfflineFile.State.FAILED,
+        onClick = {
+            when (file.state) {
+                OfflineFile.State.MISSING, OfflineFile.State.FAILED -> {
+                    download(context)
+                    file = OfflineFile(OfflineFile.State.DOWNLOADING)
+                    tick++
+                }
+                else -> confirmDelete = true
+            }
+        },
+        trailing = {
+            Icon(
+                if (file.state == OfflineFile.State.MISSING || file.state == OfflineFile.State.FAILED) KnobIcons.Download else KnobIcons.Close,
+                contentDescription = null,
+            )
+        },
+    )
+    if (confirmDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(title) },
+            text = { Text(stringResource(R.string.offline_delete_confirm)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    delete(context)
+                    file = state(context)
+                    confirmDelete = false
+                }) { Text(stringResource(R.string.offline_delete)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 
