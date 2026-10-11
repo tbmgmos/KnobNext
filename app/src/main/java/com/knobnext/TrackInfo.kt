@@ -124,11 +124,11 @@ object TrackInfo {
             appendLine(
                 if (lang == "ru") {
                     "Ты радиоведущий. Расскажи слушателю о треке, его альбоме и исполнителе, только на русском языке. " +
-                        "Говори только то, в чём уверен; если о треке знаешь мало — больше расскажи об исполнителе. " +
+                        "Говори только то, в чём уверен; если о треке знаешь мало — расскажи больше об альбоме, а если и о нём мало — об исполнителе. " +
                         "Не цитируй текст песни. Не повторяй название и исполнителя в начале — их уже назвали. Без списков и разметки."
                 } else {
                     "You are a radio host. Tell the listener about the track, its album and its artist, only in English. " +
-                        "Say only what you are sure of; if you know little about the track, say more about the artist. " +
+                        "Say only what you are sure of; if you know little about the track, say more about the album, and if little about it too, about the artist. " +
                         "Do not quote the lyrics. Do not repeat the title and artist at the start — they were just said. No lists, no markup."
                 },
             )
@@ -169,13 +169,13 @@ object TrackInfo {
                 },
             )
             appendTrack(track, facts.album, facts.year)
-            rotation.next("song:${track.title}", merged(facts.song), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
-                ?.let { appendLine("About the song: " + it.joinToString(" ")) }
-            rotation.next("album:${facts.album}", merged(facts.albumText), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
-                ?.let { appendLine("About the album: " + it.joinToString(" ")) }
-            rotation.next("artist:${track.artist}", merged(facts.artist), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
-                ?.let { appendLine("About the artist: " + it.joinToString(" ")) }
-            appendLine(structure(length, facts.album, lang))
+            val song = rotation.next("song:${track.title}", merged(facts.song), FACTS_FOR_MODEL)
+            val album = rotation.next("album:${facts.album}", merged(facts.albumText), FACTS_FOR_MODEL)
+            val artist = rotation.next("artist:${track.artist}", merged(facts.artist), FACTS_FOR_MODEL)
+            if (song.isNotEmpty()) appendLine("About the song: " + song.joinToString(" "))
+            if (album.isNotEmpty()) appendLine("About the album: " + album.joinToString(" "))
+            if (artist.isNotEmpty()) appendLine("About the artist: " + artist.joinToString(" "))
+            appendLine(structure(length, facts.album, lang, shares(length, song.size, album.size, artist.size)))
             appendTold(told, lang)
         }
         val tokens = length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS
@@ -188,17 +188,43 @@ object TrackInfo {
     /** Without a model: the next facts in turn, in the story's language only. */
     private fun plainStory(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String): String? {
         val rotation = Rotation(context)
-        val (song, album, artist) = when (length) {
-            InfoLength.SHORT -> Triple(0, 1, 1)
-            InfoLength.NORMAL -> Triple(1, 1, 2)
-            InfoLength.LONG -> Triple(2, 2, 3)
-        }
-        fun take(key: String, texts: List<Text>, n: Int) = if (n > 0) rotation.next(key, merged(texts, lang), n) else emptyList()
-        val noAlbum = facts.albumText.none { it.lang == lang }
-        val parts = take("song:${track.title}", facts.song, if (noAlbum) song + album else song) +
-            take("album:${facts.album}", facts.albumText, album) +
-            take("artist:${track.artist}", facts.artist, artist)
+        val song = merged(facts.song, lang)
+        val album = merged(facts.albumText, lang)
+        val artist = merged(facts.artist, lang)
+        val n = shares(length, song.size, album.size, artist.size)
+        fun take(key: String, list: List<String>, count: Int) = if (count > 0) rotation.next(key, list, count) else emptyList()
+        val parts = take("song:${track.title}", song, n.song) +
+            take("album:${facts.album}", album, n.album) +
+            take("artist:${track.artist}", artist, n.artist)
         return parts.joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /** How many facts go to the song, the album and the artist. */
+    private data class Shares(val song: Int, val album: Int, val artist: Int)
+
+    /**
+     * Facts per part for this length, given how many each part has. Nothing about the song → its share goes
+     * to the album; nothing about the album either → to the artist. If the artist runs short, what's left
+     * goes back to the album, then to the song, so the story stays as long as the facts allow.
+     */
+    private fun shares(length: InfoLength, song: Int, album: Int, artist: Int): Shares {
+        val want = when (length) {
+            InfoLength.SHORT -> intArrayOf(0, 1, 1)
+            InfoLength.NORMAL -> intArrayOf(1, 1, 2)
+            InfoLength.LONG -> intArrayOf(2, 2, 3)
+        }
+        val have = intArrayOf(song, album, artist)
+        fun move(from: Int, to: Int) {
+            val extra = want[from] - minOf(want[from], have[from])
+            want[from] -= extra
+            want[to] += extra
+        }
+        move(0, 1)
+        move(1, 2)
+        move(2, 1)
+        move(1, 0)
+        want[0] = minOf(want[0], have[0])
+        return Shares(want[0], want[1], want[2])
     }
 
     private fun StringBuilder.appendTrack(track: Track, album: String?, year: String?) {
@@ -215,16 +241,35 @@ object TrackInfo {
     }
 
     /** What the model is asked to cover. */
-    private fun structure(length: InfoLength, album: String?, lang: String): String =
-        if (lang == "ru") {
-            "Построй рассказ так: ${if (length == InfoLength.SHORT) "" else "сначала коротко о самой песне (если есть что сказать), затем "}" +
-                "ОДИН короткий интересный факт об альбоме${album?.let { " «$it»" } ?: ""}, из которого эта песня, " +
-                "затем ОДИН короткий интересный факт об исполнителе или группе. Всего около ${length.sentences} предложений."
-        } else {
-            "Structure: ${if (length == InfoLength.SHORT) "" else "first briefly about the song itself (if there is something to say), then "}" +
-                "ONE short interesting fact about the album${album?.let { " \"$it\"" } ?: ""} the song is from, " +
-                "then ONE short interesting fact about the artist or band. About ${length.sentences} sentences in total."
+    private fun structure(length: InfoLength, album: String?, lang: String, known: Shares? = null): String {
+        val ru = lang == "ru"
+        val albumName = album?.let { if (ru) " «$it»" else " \"$it\"" } ?: ""
+        if (known != null) {
+            // The facts are in front of the model: say exactly what to cover, the gaps already filled in.
+            val parts = listOfNotNull(
+                known.song.takeIf { it > 0 }?.let { if (ru) "о самой песне" else "about the song itself" },
+                known.album.takeIf { it > 0 }?.let { if (ru) "об альбоме$albumName" else "about the album$albumName" },
+                known.artist.takeIf { it > 0 }?.let { if (ru) "об исполнителе или группе" else "about the artist or band" },
+            )
+            if (parts.isNotEmpty()) {
+                return if (ru) "Расскажи по порядку: ${parts.joinToString(", затем ")}. Всего около ${length.sentences} предложений."
+                else "Tell, in this order: ${parts.joinToString(", then ")}. About ${length.sentences} sentences in total."
+            }
         }
+        return if (ru) {
+            "Построй рассказ так: ${if (length == InfoLength.SHORT) "" else "сначала коротко о самой песне, затем "}" +
+                "ОДИН короткий интересный факт об альбоме$albumName, из которого эта песня, " +
+                "затем ОДИН короткий интересный факт об исполнителе или группе. " +
+                "Если о песне сказать нечего — вместо этого расскажи ещё один факт об альбоме; " +
+                "если и об альбоме нечего — расскажи больше об исполнителе. Всего около ${length.sentences} предложений."
+        } else {
+            "Structure: ${if (length == InfoLength.SHORT) "" else "first briefly about the song itself, then "}" +
+                "ONE short interesting fact about the album$albumName the song is from, " +
+                "then ONE short interesting fact about the artist or band. " +
+                "If there is nothing to say about the song, tell one more fact about the album instead; " +
+                "if nothing about the album either, tell more about the artist. About ${length.sentences} sentences in total."
+        }
+    }
 
     private fun clean(answer: String, lang: String): String? {
         val text = answer.replace(Regex("[*#_`]"), "").trim()
