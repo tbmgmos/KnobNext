@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # The release certificate; anything else could not update an installed copy.
+  RELEASE_CERT_SHA256: '08:D3:E8:FF:E3:DB:FD:86:20:B3:E6:10:F7:83:20:07:44:4D:D8:E9:D1:4F:3C:3A:B7:9E:E5:C4:19:11:7C:07'
+
 jobs:
   build:
     # A PR from this repository's own branch is already built by its push; build only PRs from forks.
@@ -35,18 +39,43 @@ jobs:
       - name: Decode signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           RELEASE: ${{ inputs.release }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "KNOB_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          elif [[ "$GITHUB_REF" == refs/tags/v* || -n "$RELEASE" ]]; then
-            # A release signed with a throwaway key could never be updated in place.
-            echo "::error::KEYSTORE_BASE64 secret is not set; refusing to publish a release"
-            exit 1
-          else
-            echo "::warning::KEYSTORE_BASE64 secret is not set, APK is signed with a throwaway debug key"
-          fi
+          releasing=false
+          if [[ "$GITHUB_REF" == refs/tags/v* || -n "$RELEASE" ]]; then releasing=true; fi
+          # A release must be signed with the real key (a throwaway one could never be updated in
+          # place); an ordinary build falls back to the debug key with a warning.
+          fail() {
+            if $releasing; then echo "::error::$1"; exit 1; fi
+            echo "::warning::$1; APK is signed with a throwaway debug key"
+            exit 0
+          }
+          # Secrets pasted by hand often carry spaces, line breaks or quotes (or the name itself).
+          trim() { printf '%s' "$1" | tr -d '\r\n\t"' | sed -e 's/^ *//' -e 's/ *$//'; }
+          b64=$(printf '%s' "$KEYSTORE_BASE64" | sed 's/KEYSTORE_BASE64//' | tr -cd 'A-Za-z0-9+/=')
+          [ -n "$b64" ] || fail "KEYSTORE_BASE64 secret is not set"
+          printf '%s' "$b64" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null ||
+            fail "KEYSTORE_BASE64 is not valid base64 (${#b64} usable characters, expected 5692): paste the whole line again"
+          store_pw=$(trim "$KEYSTORE_PASSWORD"); alias=$(trim "$KEY_ALIAS"); key_pw=$(trim "$KEY_PASSWORD")
+          for v in "$store_pw" "$key_pw"; do [ -n "$v" ] && echo "::add-mask::$v"; done
+          keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$store_pw" > /dev/null 2>&1 ||
+            fail "The keystore can't be opened: KEYSTORE_PASSWORD is wrong, or KEYSTORE_BASE64 is cut short (${#b64} characters, expected 5692)"
+          fingerprint=$(keytool -list -v -keystore "$RUNNER_TEMP/release.jks" -storepass "$store_pw" -alias "$alias" 2>/dev/null \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | head -1)
+          [ -n "$fingerprint" ] || fail "No key named '$alias' in the keystore: check KEY_ALIAS (it should be knobnext)"
+          # Installed copies only accept updates signed with this certificate.
+          [ "$fingerprint" = "$RELEASE_CERT_SHA256" ] ||
+            fail "The keystore holds a different key ($fingerprint); updates would not install over the existing app"
+          {
+            echo "KNOB_KEYSTORE=$RUNNER_TEMP/release.jks"
+            echo "KNOB_KEYSTORE_PASSWORD=$store_pw"
+            echo "KNOB_KEY_ALIAS=$alias"
+            echo "KNOB_KEY_PASSWORD=$key_pw"
+          } >> "$GITHUB_ENV"
+          echo "Signing with the release key ($fingerprint)"
 
       - name: Compute version
         env:
@@ -68,10 +97,7 @@ jobs:
           echo "VERSION_CODE=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
 
       - name: Build APK
-        env:
-          KNOB_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KNOB_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KNOB_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        # Signing values come from the step above, cleaned up and checked.
         run: |
           ./gradlew assembleGithubRelease assembleRustoreRelease --no-daemon \
             -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE"
