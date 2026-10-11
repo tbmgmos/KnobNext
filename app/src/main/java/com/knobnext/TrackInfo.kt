@@ -17,6 +17,18 @@ import java.util.Locale
 /** How much to say about a track. */
 enum class InfoLength(val sentences: Int) { SHORT(2), NORMAL(4), LONG(7) }
 
+/** Where the story comes from. */
+enum class InfoSource {
+    /** Gemini Nano tells what it knows itself: no internet, quick. */
+    GEMINI,
+
+    /** Facts from Wikipedia and MusicBrainz, retold by Gemini Nano (or the downloaded model). */
+    COMBINED,
+
+    /** The Wikipedia facts as they are, no model. */
+    WIKI,
+}
+
 /** The language of the story: one picked, or the phone's. */
 enum class InfoLanguage(val code: String?) {
     RU("ru"), EN("en"), SYSTEM(null);
@@ -42,12 +54,46 @@ object TrackInfo {
         val empty get() = song == null && artist == null && album == null && year == null
     }
 
-    fun cached(context: Context, track: Track, length: InfoLength, lang: String): String? =
-        cacheFile(context, track, length, lang).takeIf { it.exists() }?.readText()
+    fun cached(context: Context, track: Track, length: InfoLength, lang: String, source: InfoSource): String? =
+        cacheFile(context, track, length, lang, source).takeIf { it.exists() }?.readText()
 
-    fun remember(context: Context, track: Track, length: InfoLength, lang: String, story: String) {
-        runCatching { cacheFile(context, track, length, lang).writeText(story) }
+    fun remember(context: Context, track: Track, length: InfoLength, lang: String, source: InfoSource, story: String) {
+        runCatching { cacheFile(context, track, length, lang, source).writeText(story) }
         trimCache(context)
+    }
+
+    /** The opening line from the player's own data, no lookup needed. */
+    fun header(context: Context, track: Track, lang: String): String =
+        header(context, track, Facts(null, null, track.album, track.year), lang)
+
+    /** Gemini Nano tells about the track from what it knows, strictly in [lang]; null when it can't. */
+    suspend fun fromGemini(track: Track, length: InfoLength, lang: String): String? {
+        val nano = NanoBrain.ready() ?: return null
+        val prompt = buildString {
+            appendLine(
+                if (lang == "ru") {
+                    "Ты радиоведущий. Расскажи слушателю об этом треке и его исполнителе в ${length.sentences} предложениях: " +
+                        "о чём песня, история, альбом, стиль, чем известен исполнитель. Пиши ТОЛЬКО на русском языке. " +
+                        "Говори только то, в чём уверен; если о треке знаешь мало — расскажи об исполнителе, " +
+                        "а если и о нём не знаешь — честно скажи одним предложением, что сведений мало. " +
+                        "Не цитируй текст песни. Не повторяй название и исполнителя в начале — их уже назвали. Без списков и разметки."
+                } else {
+                    "You are a radio host. Tell the listener about this track and its artist in ${length.sentences} sentences: " +
+                        "what the song is about, its story, album, style, what the artist is known for. Write ONLY in English. " +
+                        "Say only what you are sure of; if you know little about the track, talk about the artist, and if you " +
+                        "know little about them too, say so in one sentence. Do not quote the lyrics. Do not repeat the title " +
+                        "and artist at the start — they were just said. No lists, no markup."
+                },
+            )
+            appendLine("Track: ${Speech.cleanTitle(track.title)}")
+            track.artist?.let { appendLine("Artist: ${Speech.cleanArtist(it)}") }
+            track.album?.let { appendLine("Album: $it") }
+            track.year?.let { appendLine("Year: $it") }
+        }
+        val answer = withTimeoutOrNull(RETELL_TIMEOUT_MS) { nano.complete(prompt, length.sentences * TOKENS_PER_SENTENCE) } ?: return null
+        val text = answer.replace(Regex("[*#_`]"), "").trim()
+        if (text.length < MIN_ANSWER_CHARS || !inLanguage(text, lang)) return null
+        return text
     }
 
     /** Everything found about the track, fetched all at once; null when nothing came back in time. */
@@ -230,8 +276,11 @@ object TrackInfo {
         return context.createConfigurationContext(config)
     }
 
-    private fun cacheFile(context: Context, track: Track, length: InfoLength, lang: String) =
-        File(File(context.filesDir, "trackinfo").apply { mkdirs() }, sha1("${track.title}\u0000${track.artist}\u0000$length\u0000$lang"))
+    private fun cacheFile(context: Context, track: Track, length: InfoLength, lang: String, source: InfoSource) =
+        File(
+            File(context.filesDir, "trackinfo").apply { mkdirs() },
+            sha1("${track.title}\u0000${track.artist}\u0000$length\u0000$lang\u0000$source"),
+        )
 
     private fun trimCache(context: Context) {
         val files = File(context.filesDir, "trackinfo").listFiles() ?: return

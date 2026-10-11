@@ -365,12 +365,29 @@ class Extras(private val context: Context, private val media: Media, private val
         )
         val lang = prefs.infoLanguage.resolve()
         val length = prefs.infoLength
+        val source = prefs.infoSource
         val pause = prefs.infoPause && c.isPlaying()
         val resume = { if (pause) c.transportControls.play() }
-        TrackInfo.cached(context, track, length, lang)?.let { story ->
+        TrackInfo.cached(context, track, length, lang, source)?.let { story ->
             if (pause) c.transportControls.pause()
             speaker.say(story, resume)
             return Outcome.done(context.getString(R.string.log_info_cached))
+        }
+        if (source == InfoSource.GEMINI) {
+            // Gemini Nano knows the track itself: the opening line at once, its story right after.
+            if (pause) c.transportControls.pause()
+            val header = TrackInfo.header(context, track, lang)
+            speaker.say(header)
+            infoJob = scope.launch {
+                val told = TrackInfo.fromGemini(track, length, lang)
+                if (told == null) {
+                    speaker.then(resume)
+                    return@launch
+                }
+                TrackInfo.remember(context, track, length, lang, source, "$header $told")
+                speaker.say(told, resume, queue = true)
+            }
+            return Outcome.done(context.getString(R.string.log_info_started))
         }
         infoJob = scope.launch {
             val facts = TrackInfo.facts(track, lang)
@@ -381,10 +398,10 @@ class Extras(private val context: Context, private val media: Media, private val
             if (pause) c.transportControls.pause()
             // The short part is said at once; the story follows when the model has it.
             val header = TrackInfo.header(context, track, facts, lang)
-            val hasModel = Brains.all(context).isNotEmpty()
-            if (!hasModel) {
+            val useModel = source == InfoSource.COMBINED && Brains.all(context).isNotEmpty()
+            if (!useModel) {
                 val story = listOfNotNull(header, TrackInfo.plainStory(facts, length, lang)).joinToString(" ")
-                TrackInfo.remember(context, track, length, lang, story)
+                TrackInfo.remember(context, track, length, lang, source, story)
                 speaker.say(story, resume)
                 return@launch
             }
@@ -395,7 +412,7 @@ class Extras(private val context: Context, private val media: Media, private val
                 speaker.then(resume)
                 return@launch
             }
-            TrackInfo.remember(context, track, length, lang, "$header $told")
+            TrackInfo.remember(context, track, length, lang, source, "$header $told")
             speaker.say(told, resume, queue = true)
         }
         return Outcome.done(context.getString(R.string.log_info_started))

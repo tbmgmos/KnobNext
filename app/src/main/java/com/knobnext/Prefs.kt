@@ -107,6 +107,7 @@ data class Settings(
     val infoLength: InfoLength,
     val infoPause: Boolean,
     val infoLanguage: InfoLanguage,
+    val infoSource: InfoSource,
     val keysOnPause: Boolean,
     val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
@@ -379,6 +380,11 @@ class Prefs(context: Context) {
         get() = InfoLength.entries.firstOrNull { it.name == sp.getString("info_length", null) } ?: InfoLength.NORMAL
         set(v) = sp.edit().putString("info_length", v.name).apply()
 
+    /** Where the story about a track comes from. */
+    var infoSource: InfoSource
+        get() = InfoSource.entries.firstOrNull { it.name == sp.getString("info_source", null) } ?: InfoSource.GEMINI
+        set(v) = sp.edit().putString("info_source", v.name).apply()
+
     /** The language of the story about a track. */
     var infoLanguage: InfoLanguage
         get() = InfoLanguage.entries.firstOrNull { it.name == sp.getString("info_language", null) } ?: InfoLanguage.RU
@@ -573,6 +579,7 @@ class Prefs(context: Context) {
         infoLength = infoLength,
         infoPause = infoPause,
         infoLanguage = infoLanguage,
+        infoSource = infoSource,
         keysOnPause = keysOnPause,
         smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
