@@ -32,6 +32,8 @@
         </intent>
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.google.android.apps.bard" />
+        <!-- Gemini Nano lives in this system service: its version tells why the model may be missing. -->
+        <package android:name="com.google.android.aicore" />
     </queries>
 
     <application

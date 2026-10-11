@@ -198,6 +198,9 @@
     <string name="brain_nano_downloadable">Можно загрузить модель. Нажмите, чтобы начать</string>
     <string name="brain_nano_downloading">Загружается системой…</string>
     <string name="brain_nano_unavailable">Недоступен на этом телефоне — работают правила</string>
+    <string name="brain_nano_no_aicore">Нет системной службы AICore (или она выключена) — в ней живёт Gemini Nano. Нажмите, чтобы открыть её в Google Play</string>
+    <string name="brain_nano_error">Система отказала: %1$s (AICore %2$s). Нажмите, чтобы проверить снова</string>
+    <string name="brain_nano_refused">AICore %1$s сообщает, что Gemini Nano для приложений недоступен. Частые причины: регион (в т.ч. через VPN), разблокированный загрузчик или root, устаревший AICore, модель ещё не загружена системой. Нажмите, чтобы проверить снова</string>
     <string name="brain_nano_checking">Проверяю…</string>
     <string name="brain_nano_failed">Загрузка не удалась. Нажмите, чтобы повторить</string>
     <string name="brain_voice">Понимать фразы своими словами</string>

@@ -45,16 +45,31 @@ class NanoBrain private constructor(private val model: GenerativeModel) : Brain 
         /** The last failure, for the event log (e.g. the system refusing use in the background). */
         @Volatile var lastError: String? = null
 
+        /** Why the last check found it unavailable, as the system put it; null when it gave no reason. */
+        @Volatile var unavailableReason: String? = null
+
+        private const val AICORE = "com.google.android.aicore"
+
+        private var clientError: String? = null
         private val client: GenerativeModel? by lazy {
             try {
                 Generation.getClient()
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                clientError = describe(e)
                 null
             }
         }
 
+        private fun describe(e: Throwable): String {
+            // GenAiException carries a numeric code the message doesn't always repeat.
+            val code = runCatching { e.javaClass.getMethod("getErrorCode").invoke(e) }.getOrNull()
+            return listOfNotNull(e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName, code?.let { "код $it" })
+                .joinToString(", ")
+        }
+
         suspend fun state(): State {
-            val model = client ?: return State.UNAVAILABLE
+            unavailableReason = null
+            val model = client ?: return State.UNAVAILABLE.also { unavailableReason = clientError }
             return try {
                 when (model.checkStatus()) {
                     FeatureStatus.AVAILABLE -> State.READY
@@ -62,8 +77,31 @@ class NanoBrain private constructor(private val model: GenerativeModel) : Brain 
                     FeatureStatus.DOWNLOADING -> State.DOWNLOADING
                     else -> State.UNAVAILABLE
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                unavailableReason = describe(e)
                 State.UNAVAILABLE
+            }
+        }
+
+        /** The system's AICore service (it holds Gemini Nano): its version, or null when it isn't installed or is off. */
+        fun aicoreVersion(context: Context): String? = try {
+            val info = context.packageManager.getPackageInfo(AICORE, 0)
+            if (info.applicationInfo?.enabled == false) null else info.versionName ?: "?"
+        } catch (_: Exception) {
+            null
+        }
+
+        fun openAicoreInStore(context: Context) {
+            val tries = listOf(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$AICORE")),
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=$AICORE")),
+            )
+            for (intent in tries) {
+                try {
+                    context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    return
+                } catch (_: Exception) {
+                }
             }
         }
 

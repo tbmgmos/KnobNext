@@ -636,20 +636,33 @@ private fun BrainCard(ctx: PageContext) {
         val local = Offline.supported
         Group(if (local) 4 else 3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val context = LocalContext.current
+                val aicore = remember(state) { NanoBrain.aicoreVersion(context) }
+                val unavailable = state == NanoBrain.State.UNAVAILABLE
                 ListRow(
                     shape(0), stringResource(R.string.brain_nano),
-                    subtitle = stringResource(
-                        when {
-                            failed -> R.string.brain_nano_failed
-                            state == null -> R.string.brain_nano_checking
-                            state == NanoBrain.State.READY -> R.string.brain_nano_ready
-                            state == NanoBrain.State.DOWNLOADABLE -> R.string.brain_nano_downloadable
-                            state == NanoBrain.State.DOWNLOADING -> R.string.brain_nano_downloading
-                            else -> R.string.brain_nano_unavailable
-                        },
-                    ),
-                    highlighted = state == NanoBrain.State.DOWNLOADABLE || failed,
-                    onClick = if (state == NanoBrain.State.DOWNLOADABLE || failed) download else null,
+                    subtitle = when {
+                        failed -> stringResource(R.string.brain_nano_failed)
+                        state == null -> stringResource(R.string.brain_nano_checking)
+                        state == NanoBrain.State.READY -> stringResource(R.string.brain_nano_ready)
+                        state == NanoBrain.State.DOWNLOADABLE -> stringResource(R.string.brain_nano_downloadable)
+                        state == NanoBrain.State.DOWNLOADING -> stringResource(R.string.brain_nano_downloading)
+                        // Say why, as precisely as the system lets us know.
+                        aicore == null -> stringResource(R.string.brain_nano_no_aicore)
+                        NanoBrain.unavailableReason != null ->
+                            stringResource(R.string.brain_nano_error, NanoBrain.unavailableReason ?: "", aicore)
+                        else -> stringResource(R.string.brain_nano_refused, aicore)
+                    },
+                    highlighted = state == NanoBrain.State.DOWNLOADABLE || failed || unavailable,
+                    onClick = when {
+                        state == NanoBrain.State.DOWNLOADABLE || failed -> download
+                        unavailable && aicore == null -> ({ NanoBrain.openAicoreInStore(context) })
+                        unavailable -> ({
+                            state = null
+                            scope.launch { state = NanoBrain.state() }
+                        })
+                        else -> null
+                    },
                     trailing = { Icon(KnobIcons.Sparkle, contentDescription = null) },
                 )
                 if (local) {
