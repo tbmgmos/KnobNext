@@ -63,8 +63,15 @@ class NanoBrain private constructor(private val model: GenerativeModel) : Brain 
         private fun describe(e: Throwable): String {
             // GenAiException carries a numeric code the message doesn't always repeat.
             val code = runCatching { e.javaClass.getMethod("getErrorCode").invoke(e) }.getOrNull()
-            return listOfNotNull(e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName, code?.let { "код $it" })
-                .joinToString(", ")
+            // Where it happened, for failures without a message (a NullPointerException says nothing).
+            val where = e.stackTrace.firstOrNull()?.let { "${it.className.substringAfterLast('.')}.${it.methodName}" }
+            val cause = e.cause?.let { it.javaClass.simpleName + (it.message?.let { m -> ": $m" } ?: "") }
+            return listOfNotNull(
+                e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName,
+                code?.let { "код $it" },
+                where?.let { "в $it" },
+                cause?.let { "причина: $it" },
+            ).joinToString(", ")
         }
 
         suspend fun state(): State {
