@@ -344,13 +344,24 @@ class Extras(private val context: Context, private val media: Media, private val
     private var infoJob: kotlinx.coroutines.Job? = null
 
     /**
+     * Set by the service: keeps the volume keys working while the music is paused for a story (with
+     * the screen off Android ignores them once nothing plays), so the same gesture can stop it.
+     */
+    var keepKeysAlive: ((Boolean) -> Unit)? = null
+
+    /** Ends the story under way (gives the music back); null when none is. */
+    private var storyEnd: (() -> Unit)? = null
+
+    /**
      * A few spoken sentences about the playing track, in the background: no app opens, the music only
      * gets quieter (or pauses, if so set). The same gesture again stops it.
      */
     private fun trackInfo(controller: MediaController?): Outcome {
-        if (infoJob?.isActive == true || speaker.speaking) {
+        if (infoJob?.isActive == true || speaker.speaking || storyEnd != null) {
             infoJob?.cancel()
             speaker.stop()
+            // Stopped at any point (even during the opening line): the music comes back.
+            storyEnd?.invoke()
             return Outcome.undone(context.getString(R.string.log_info_stopped))
         }
         val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
@@ -367,15 +378,33 @@ class Extras(private val context: Context, private val media: Media, private val
         val length = prefs.infoLength
         val source = prefs.infoSource
         val pause = prefs.infoPause && c.isPlaying()
-        val resume = { if (pause) c.transportControls.play() }
+        var paused = false
+        var ended = false
+        val pauseMusic = {
+            if (pause && !paused) {
+                paused = true
+                c.transportControls.pause()
+            }
+        }
+        // Runs once, whichever way the story ends: told, failed, or stopped by the gesture.
+        val resume = {
+            if (!ended) {
+                ended = true
+                storyEnd = null
+                if (pause) keepKeysAlive?.invoke(false)
+                if (paused) c.transportControls.play()
+            }
+        }
+        storyEnd = resume
+        if (pause) keepKeysAlive?.invoke(true)
         TrackInfo.cached(context, track, length, lang, source)?.let { story ->
-            if (pause) c.transportControls.pause()
+            pauseMusic()
             speaker.say(story, resume)
             return Outcome.done(context.getString(R.string.log_info_cached))
         }
         if (source == InfoSource.GEMINI) {
             // Gemini Nano knows the track itself: the opening line at once, its story right after.
-            if (pause) c.transportControls.pause()
+            pauseMusic()
             val header = TrackInfo.header(context, track, lang)
             speaker.say(header)
             infoJob = scope.launch {
@@ -392,10 +421,11 @@ class Extras(private val context: Context, private val media: Media, private val
         infoJob = scope.launch {
             val facts = TrackInfo.facts(track, lang)
             if (facts == null || facts.empty) {
+                resume()
                 speaker.say(context.getString(R.string.speak_info_none))
                 return@launch
             }
-            if (pause) c.transportControls.pause()
+            pauseMusic()
             // The short part is said at once; the story follows when the model has it.
             val header = TrackInfo.header(context, track, facts, lang)
             val useModel = source == InfoSource.COMBINED && Brains.all(context).isNotEmpty()

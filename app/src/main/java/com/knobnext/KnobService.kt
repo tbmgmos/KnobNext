@@ -29,6 +29,9 @@ class KnobService : AccessibilityService() {
 
     // Plays silence after a gesture pause, so the keys keep working with the screen off.
     private val silence = Silence()
+
+    // The music is paused for a story about the track: the silence stays until it ends.
+    private var storyHold = false
     private val handler = Handler(Looper.getMainLooper())
 
     // ---- Screen on: key events from the accessibility framework ----
@@ -407,6 +410,10 @@ class KnobService : AccessibilityService() {
         wave = WaveDetector(this, { prefs.waveCount }, { fireGesture(Gesture.WAVE) })
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:sensors").apply {
             setReferenceCounted(false)
+        }
+        extras.keepKeysAlive = { on ->
+            storyHold = on
+            if (on) silence.start() else if (pausedAt == 0L) silence.stop()
         }
         extras.onLikeNotConfirmed = { pkg ->
             val reason = getString(R.string.log_like_not_confirmed)
@@ -1403,7 +1410,7 @@ class KnobService : AccessibilityService() {
 
     /** The silence lasts only for the resume window, and never alongside real playback. */
     private fun checkSilence() {
-        if (!silence.playing) return
+        if (!silence.playing || storyHold) return
         when {
             !resumeWindowOpen() -> stopSilence(R.string.log_silence_window)
             media.controllers().any { it.isPlaying() } -> stopSilence(R.string.log_silence_resumed)

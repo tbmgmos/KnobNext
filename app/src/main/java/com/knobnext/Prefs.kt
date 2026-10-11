@@ -14,7 +14,8 @@ enum class Action {
     /** Actions that make sense when nothing is playing (they start playback or aren't about music). */
     val worksWhenIdle: Boolean
         get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER ||
-            this == VOICE
+            // The story pauses the music if so set; the same gesture must still be able to stop it.
+            this == VOICE || this == TRACK_INFO
 
     val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
 }
