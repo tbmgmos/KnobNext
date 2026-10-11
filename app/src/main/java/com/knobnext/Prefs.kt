@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE, ASK_GEMINI,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE, TRACK_INFO, ASK_GEMINI,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
@@ -104,6 +104,8 @@ data class Settings(
     val powerHoldFallback: Boolean,
     val smartVoice: Boolean,
     val blindGestures: Boolean,
+    val infoLength: InfoLength,
+    val infoPause: Boolean,
     val keysOnPause: Boolean,
     val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
@@ -371,6 +373,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("blind_gestures", false)
         set(v) = sp.edit().putBoolean("blind_gestures", v).apply()
 
+    /** How long the spoken story about a track is. */
+    var infoLength: InfoLength
+        get() = InfoLength.entries.firstOrNull { it.name == sp.getString("info_length", null) } ?: InfoLength.NORMAL
+        set(v) = sp.edit().putString("info_length", v.name).apply()
+
+    /** Pause the music for the story about a track (otherwise it only gets quieter). */
+    var infoPause: Boolean
+        get() = sp.getBoolean("info_pause", false)
+        set(v) = sp.edit().putBoolean("info_pause", v).apply()
+
     /** After a gesture pause, play silence for the resume window so the volume keys keep working. */
     var keysOnPause: Boolean
         get() = sp.getBoolean("keys_on_pause", true)
@@ -552,6 +564,8 @@ class Prefs(context: Context) {
         powerHoldFallback = powerHoldFallback,
         smartVoice = smartVoice,
         blindGestures = blindGestures,
+        infoLength = infoLength,
+        infoPause = infoPause,
         keysOnPause = keysOnPause,
         smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,

@@ -79,6 +79,7 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.FLASHLIGHT -> Outcome.of(torch.toggle())
         Action.RINGER -> toggleRinger()
         Action.ASK_GEMINI -> Outcome.of(askAbout(controller))
+        Action.TRACK_INFO -> trackInfo(controller)
         else -> Outcome.DONE
     }
 
@@ -339,6 +340,41 @@ class Extras(private val context: Context, private val media: Media, private val
 
     private fun openPlayer(controller: MediaController?): String? =
         openApp(controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player))
+
+    private var infoJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * A few spoken sentences about the playing track, in the background: no app opens, the music only
+     * gets quieter (or pauses, if so set). The same gesture again stops it.
+     */
+    private fun trackInfo(controller: MediaController?): Outcome {
+        if (infoJob?.isActive == true || speaker.speaking) {
+            infoJob?.cancel()
+            speaker.stop()
+            return Outcome.undone(context.getString(R.string.log_info_stopped))
+        }
+        val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val track = TrackInfo.Track(
+            title = title,
+            artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
+            album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
+            year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
+        )
+        infoJob = scope.launch {
+            val text = TrackInfo.describe(context, track, prefs.infoLength)
+            if (text == null) {
+                speaker.say(context.getString(R.string.speak_info_none))
+                return@launch
+            }
+            val pause = prefs.infoPause && c.isPlaying()
+            if (pause) c.transportControls.pause()
+            speaker.say(text) { if (pause) c.transportControls.play() }
+        }
+        return Outcome.done(context.getString(R.string.log_info_started))
+    }
 
     /**
      * Opens Gemini with a question about the playing track (who, the story of the song, similar

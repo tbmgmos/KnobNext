@@ -1435,7 +1435,7 @@ class KnobService : AccessibilityService() {
         val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
             Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT,
-            Action.ASK_GEMINI ->
+            Action.ASK_GEMINI, Action.TRACK_INFO ->
                 extras.perform(action, controller)
             Action.POCKET -> togglePocket()
             Action.VOICE -> startVoice()

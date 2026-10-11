@@ -1370,6 +1370,31 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
         }
     }
     item { SpeechCard(s, prefs) }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionTitle(stringResource(R.string.info_title))
+            Group(2) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(0), stringResource(R.string.info_length)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLength.SHORT to R.string.info_length_short,
+                                com.knobnext.InfoLength.NORMAL to R.string.info_length_normal,
+                                com.knobnext.InfoLength.LONG to R.string.info_length_long,
+                            ),
+                            selected = s.infoLength,
+                            onSelect = { prefs.infoLength = it },
+                        )
+                    }
+                    SwitchRow(
+                        shape(1), stringResource(R.string.info_pause), s.infoPause, { prefs.infoPause = it },
+                        subtitle = stringResource(R.string.info_pause_hint),
+                    )
+                }
+            }
+            Hint(stringResource(R.string.info_hint))
+        }
+    }
 }
 
 private fun LazyListScope.pauseSettings(ctx: PageContext) {

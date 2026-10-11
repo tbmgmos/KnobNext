@@ -186,13 +186,40 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     // Players that pause for an announcement resume only when the focus is given back. If the speech
     // engine never reports the end (it failed, was stopped or died), give it back anyway.
-    private val giveBackFocus = Runnable { audio.abandonAudioFocusRequest(focus) }
+    private val giveBackFocus = Runnable {
+        audio.abandonAudioFocusRequest(focus)
+        finished()
+    }
+
+    private fun finished() {
+        speaking = false
+        val done = whenDone
+        whenDone = null
+        done?.invoke()
+    }
+
+    /** Stops whatever is being said. */
+    fun stop() {
+        handler.removeCallbacks(giveBackFocus)
+        tts?.stop()
+        audio.abandonAudioFocusRequest(focus)
+        finished()
+    }
     private var engineName: String? = null
     private var ready = false
     private var pending: String? = null
     private var serial = 0
 
-    fun say(text: String) {
+    /** Called once when the phrase passed with it has been said (or stopped, or failed). */
+    private var whenDone: (() -> Unit)? = null
+
+    /** A phrase is being said. */
+    @Volatile var speaking = false
+        private set
+
+    fun say(text: String, onDone: (() -> Unit)? = null) {
+        finished()
+        whenDone = onDone
         val wanted = prefs.ttsEngine
         if (tts != null && wanted != engineName) release()
         if (tts == null) {
@@ -207,7 +234,12 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
     override fun onInit(status: Int) {
         val engine = tts ?: return
         ready = status == TextToSpeech.SUCCESS
-        if (!ready) return
+        if (!ready) {
+            // Nothing will be said: whoever waits for the end must not wait forever.
+            pending = null
+            handler.post(::finished)
+            return
+        }
         engine.language = Locale.getDefault()
         engine.setAudioAttributes(attributes)
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -215,16 +247,23 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
             // Focus is held for the whole phrase, which may be several pieces.
             override fun onDone(utteranceId: String?) {
-                if (utteranceId?.endsWith(LAST) == true) audio.abandonAudioFocusRequest(focus)
+                if (utteranceId?.endsWith(LAST) == true) {
+                    audio.abandonAudioFocusRequest(focus)
+                    handler.post(::finished)
+                }
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                if (utteranceId?.endsWith(LAST) == true) audio.abandonAudioFocusRequest(focus)
+                if (utteranceId?.endsWith(LAST) == true) {
+                    audio.abandonAudioFocusRequest(focus)
+                    handler.post(::finished)
+                }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 audio.abandonAudioFocusRequest(focus)
+                handler.post(::finished)
             }
         })
         pending?.let(::speak)
@@ -234,9 +273,10 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
     private fun speak(text: String) {
         val engine = tts ?: return
         val parts = if (prefs.ttsMultilang) Speech.split(text) else listOf(Speech.Part(text, null))
-        if (parts.isEmpty()) return
+        if (parts.isEmpty()) return finished()
         engine.setSpeechRate(prefs.ttsRate)
         audio.requestAudioFocus(focus)
+        speaking = true
         handler.removeCallbacks(giveBackFocus)
         handler.postDelayed(giveBackFocus, (FOCUS_BASE_MS + text.length * FOCUS_PER_CHAR_MS / prefs.ttsRate).toLong().coerceAtMost(FOCUS_MAX_MS))
         val id = ++serial
@@ -249,6 +289,7 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
                 // Nothing will be said, and no callback will come to give the focus back.
                 handler.removeCallbacks(giveBackFocus)
                 audio.abandonAudioFocusRequest(focus)
+                finished()
                 return
             }
         }
@@ -293,6 +334,6 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         const val LAST = "-last"
         const val FOCUS_BASE_MS = 3_000f
         const val FOCUS_PER_CHAR_MS = 120f
-        const val FOCUS_MAX_MS = 30_000L
+        const val FOCUS_MAX_MS = 120_000L
     }
 }

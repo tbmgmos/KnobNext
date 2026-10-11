@@ -109,7 +109,7 @@ object CommandBrain {
         NEXT | PREVIOUS | PLAY | PAUSE | RESTART
         SEEK <seconds, negative = back> | SEEKTO <seconds from the start>
         VOLUME <+steps or -steps> | VOLUMETO <percent>
-        LIKE | SHUFFLE | REPEAT | ANNOUNCE (say what is playing) | TIMELEFT | ASK (ask Gemini about the track)
+        LIKE | SHUFFLE | REPEAT | ANNOUNCE (say what is playing) | TIMELEFT | INFO (tell about the track or artist) | ASK (open Gemini)
         SLEEP <minutes> | SLEEP END (pause at the end of the track) | SLEEP OFF
         OPEN <app> (one of: ${apps.joinToString(", ").ifEmpty { "-" }})
         POCKET (pocket mode) | FLASHLIGHT | NONE (not a player command)
@@ -119,7 +119,8 @@ object CommandBrain {
         "выключи музыку через полчаса" -> SLEEP 30
         "включи что-нибудь другое" -> NEXT
         "верни прошлую песню" -> PREVIOUS
-        "а кто это поёт" -> ANNOUNCE
+        "что это играет" -> ANNOUNCE
+        "а что это за группа" -> INFO
         "хочу послушать спотифай" -> OPEN spotify
         "какая завтра погода" -> NONE
         Phrase: "${phrase.replace("\"", "")}"
@@ -148,6 +149,7 @@ object CommandBrain {
             "ANNOUNCE" -> Command.Run(Action.ANNOUNCE)
             "TIMELEFT" -> Command.Run(Action.TIME_LEFT)
             "ASK" -> Command.Run(Action.ASK_GEMINI)
+            "INFO" -> Command.Run(Action.TRACK_INFO)
             "SLEEP" -> when (arg?.uppercase()) {
                 "END" -> Command.SleepToTrackEnd
                 "OFF" -> Command.SleepCancel
