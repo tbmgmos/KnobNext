@@ -52,8 +52,24 @@ object TrackInfo {
     /** An article's facts (one sentence each) and the language they are in. */
     class Text(val facts: List<String>, val lang: String)
 
-    class Facts(val song: Text?, val artist: Text?, val album: String?, val year: String?, val albumText: Text?) {
-        val empty get() = song == null && artist == null && albumText == null
+    /** What is known, by subject; each subject from several sources (Wikipedia, TheAudioDB, Deezer, MusicBrainz). */
+    class Facts(val song: List<Text>, val artist: List<Text>, val album: String?, val year: String?, val albumText: List<Text>) {
+        val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
+    }
+
+    /**
+     * One subject's facts from all its sources, taking from each in turn so that consecutive tellings
+     * hear different sources; [lang]: only facts in that language.
+     */
+    private fun merged(texts: List<Text>, lang: String? = null): List<String> {
+        val lists = texts.filter { lang == null || it.lang == lang }.map { it.facts }
+        val out = ArrayList<String>()
+        var i = 0
+        while (lists.any { i < it.size }) {
+            lists.forEach { if (i < it.size) out += it[i] }
+            i++
+        }
+        return out
     }
 
     /** The opening line from the player's own data, said at once: title, artist, album, year. */
@@ -153,9 +169,12 @@ object TrackInfo {
                 },
             )
             appendTrack(track, facts.album, facts.year)
-            facts.song?.let { appendLine("About the song: " + rotation.next("song:${track.title}", it.facts, FACTS_FOR_MODEL).joinToString(" ")) }
-            facts.albumText?.let { appendLine("About the album: " + rotation.next("album:${facts.album}", it.facts, FACTS_FOR_MODEL).joinToString(" ")) }
-            facts.artist?.let { appendLine("About the artist: " + rotation.next("artist:${track.artist}", it.facts, FACTS_FOR_MODEL).joinToString(" ")) }
+            rotation.next("song:${track.title}", merged(facts.song), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
+                ?.let { appendLine("About the song: " + it.joinToString(" ")) }
+            rotation.next("album:${facts.album}", merged(facts.albumText), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
+                ?.let { appendLine("About the album: " + it.joinToString(" ")) }
+            rotation.next("artist:${track.artist}", merged(facts.artist), FACTS_FOR_MODEL).takeIf { it.isNotEmpty() }
+                ?.let { appendLine("About the artist: " + it.joinToString(" ")) }
             appendLine(structure(length, facts.album, lang))
             appendTold(told, lang)
         }
@@ -174,9 +193,9 @@ object TrackInfo {
             InfoLength.NORMAL -> Triple(1, 1, 2)
             InfoLength.LONG -> Triple(2, 2, 3)
         }
-        fun take(key: String, text: Text?, n: Int) =
-            text?.takeIf { it.lang == lang && n > 0 }?.let { rotation.next(key, it.facts, n) }.orEmpty()
-        val parts = take("song:${track.title}", facts.song, if (facts.albumText == null) song + album else song) +
+        fun take(key: String, texts: List<Text>, n: Int) = if (n > 0) rotation.next(key, merged(texts, lang), n) else emptyList()
+        val noAlbum = facts.albumText.none { it.lang == lang }
+        val parts = take("song:${track.title}", facts.song, if (noAlbum) song + album else song) +
             take("album:${facts.album}", facts.albumText, album) +
             take("artist:${track.artist}", facts.artist, artist)
         return parts.joinToString(" ").takeIf { it.isNotBlank() }
@@ -217,7 +236,7 @@ object TrackInfo {
 
     /** Everything found about the track, fetched all at once and kept on the phone. */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
-        val file = File(dir(context), "facts-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
+        val file = File(dir(context), "facts2-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { return readFacts(JSONObject(file.readText())) }
         }
@@ -226,6 +245,7 @@ object TrackInfo {
                 coroutineScope {
                     val title = Speech.cleanTitle(track.title)
                     val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() }
+                    val more = async { runCatching { MusicSources.gather(context, title, artist, track.album, lang) }.getOrNull() }
                     val song = async { article(lang) { l -> findSong(l, title, artist) } }
                     val about = async { artist?.let { a -> article(lang) { l -> findArtist(l, a) } } }
                     val brainz = async { if (artist != null && (track.album == null || track.year == null)) musicBrainz(title, artist) else null }
@@ -235,7 +255,14 @@ object TrackInfo {
                         name?.let { a -> article(lang) { l -> findAlbum(l, a, artist) } }
                     }
                     val b = brainz.await()
-                    Facts(song.await(), about.await(), track.album ?: b?.first, track.year ?: b?.second, albumText.await())
+                    val m = more.await()
+                    Facts(
+                        song = listOfNotNull(song.await()) + m?.song.orEmpty(),
+                        artist = listOfNotNull(about.await()) + m?.artist.orEmpty(),
+                        album = track.album ?: b?.first ?: m?.albumName,
+                        year = track.year ?: b?.second ?: m?.year,
+                        albumText = listOfNotNull(albumText.await()) + m?.album.orEmpty(),
+                    )
                 }
             }
         }
@@ -290,36 +317,41 @@ object TrackInfo {
     private fun search(lang: String, query: String): List<String> {
         val url = "https://$lang.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit=$SEARCH_RESULTS&srsearch=" +
             URLEncoder.encode(query, "UTF-8")
-        val results = get(url)?.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
+        val results = getJson(url)?.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
         return (0 until results.length()).map { results.getJSONObject(it).getString("title") }
     }
 
     private fun summary(lang: String, page: String): JSONObject? =
-        get("https://$lang.wikipedia.org/api/rest_v1/page/summary/" + URLEncoder.encode(page.replace(' ', '_'), "UTF-8"))
+        getJson("https://$lang.wikipedia.org/api/rest_v1/page/summary/" + URLEncoder.encode(page.replace(' ', '_'), "UTF-8"))
             ?.takeIf { it.optString("type") != "disambiguation" }
 
     /** The whole article as plain text, cut into facts: sentences of a fair length, before the reference sections. */
     private fun text(lang: String, page: String): List<String>? {
         val url = "https://$lang.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&exsectionformat=plain" +
             "&redirects=1&format=json&utf8=1&titles=" + URLEncoder.encode(page, "UTF-8")
-        val pages = get(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null
+        val pages = getJson(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null
         val extract = pages.keys().asSequence().map { pages.getJSONObject(it).optString("extract") }.firstOrNull { it.isNotBlank() }
             ?: return null
+        return splitFacts(extract).takeIf { it.isNotEmpty() }
+    }
+
+    /** A text cut into facts: sentences of a fair length, before the reference sections. */
+    internal fun splitFacts(text: String): List<String> {
         val facts = ArrayList<String>()
-        for (line in extract.take(MAX_ARTICLE_CHARS).lines()) {
+        for (line in text.take(MAX_ARTICLE_CHARS).lines()) {
             val l = line.trim()
             if (STOP_SECTIONS.any { l.equals(it, ignoreCase = true) }) break
             if (l.length < MIN_LINE_CHARS) continue
             sentences(l).filterTo(facts) { it.length in MIN_FACT_CHARS..MAX_FACT_CHARS }
         }
-        return facts.takeIf { it.isNotEmpty() }
+        return facts
     }
 
     /** The title of the same article in [to], from Wikipedia's links between languages. */
     private fun translation(from: String, page: String, to: String): String? {
         val url = "https://$from.wikipedia.org/w/api.php?action=query&prop=langlinks&format=json&utf8=1&lllang=$to&titles=" +
             URLEncoder.encode(page, "UTF-8")
-        val pages = get(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null
+        val pages = getJson(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null
         for (key in pages.keys()) {
             val link = pages.getJSONObject(key).optJSONArray("langlinks")?.optJSONObject(0) ?: continue
             return link.optString("*").takeIf { it.isNotBlank() }
@@ -330,7 +362,7 @@ object TrackInfo {
     /** The album and year of the earliest release with this recording. */
     private fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
         val query = "recording:\"${title.replace("\"", "")}\" AND artist:\"${artist.replace("\"", "")}\""
-        val json = get("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=1&query=" + URLEncoder.encode(query, "UTF-8"))
+        val json = getJson("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=1&query=" + URLEncoder.encode(query, "UTF-8"))
             ?: return null
         val recording = json.optJSONArray("recordings")?.optJSONObject(0) ?: return null
         if (recording.optInt("score") < MIN_SCORE) return null
@@ -339,7 +371,7 @@ object TrackInfo {
         return album to year
     }
 
-    private fun get(url: String): JSONObject? = runCatching {
+    internal fun getJson(url: String): JSONObject? = runCatching {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = REQUEST_TIMEOUT_MS
@@ -385,8 +417,8 @@ object TrackInfo {
 
     private fun writeFacts(f: Facts): JSONObject {
         val o = JSONObject()
-        fun putText(name: String, t: Text?) {
-            if (t != null) o.put(name, JSONObject().put("lang", t.lang).put("facts", JSONArray(t.facts)))
+        fun putText(name: String, texts: List<Text>) {
+            o.put(name, JSONArray(texts.map { JSONObject().put("lang", it.lang).put("facts", JSONArray(it.facts)) }))
         }
         putText("song", f.song)
         putText("artist", f.artist)
@@ -397,9 +429,13 @@ object TrackInfo {
     }
 
     private fun readFacts(o: JSONObject): Facts {
-        fun text(name: String) = o.optJSONObject(name)?.let { t ->
-            val list = t.getJSONArray("facts")
-            Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"))
+        fun text(name: String): List<Text> {
+            val arr = o.optJSONArray(name) ?: return emptyList()
+            return (0 until arr.length()).map { i ->
+                val t = arr.getJSONObject(i)
+                val list = t.getJSONArray("facts")
+                Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"))
+            }
         }
         return Facts(text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"))
     }
@@ -416,7 +452,7 @@ object TrackInfo {
         return if (lang == "ru") cyrillic * 10 >= letters.length * 6 else cyrillic * 10 <= letters.length * 2
     }
 
-    private fun localized(context: Context, lang: String): Context {
+    internal fun localized(context: Context, lang: String): Context {
         val config = android.content.res.Configuration(context.resources.configuration)
         config.setLocale(Locale(lang))
         return context.createConfigurationContext(config)
@@ -425,7 +461,8 @@ object TrackInfo {
     private fun dir(context: Context) = File(context.filesDir, "trackinfo").apply { mkdirs() }
 
     private fun trimCache(context: Context) {
-        val files = dir(context).listFiles { f -> f.name.startsWith("facts-") } ?: return
+        dir(context).listFiles { f -> f.name.startsWith("facts-") }?.forEach { it.delete() }
+        val files = dir(context).listFiles { f -> f.name.startsWith("facts2-") } ?: return
         if (files.size <= MAX_CACHED) return
         files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
     }

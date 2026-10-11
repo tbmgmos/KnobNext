@@ -116,15 +116,46 @@
     <string name="log_info_stopped">рассказ остановлен</string>
     <string name="speak_info_none">Больше сведений об этом треке не нашлось</string>
     <string name="info_album">альбом «%1$s»</string>
+    <string name="src_formed">Группа образована в %1$s году.</string>
+    <string name="src_style">Стиль — %1$s.</string>
+    <string name="src_album_date">Альбом вышел %1$s.</string>
+    <string name="src_label">Альбом выпущен на лейбле %1$s.</string>
+    <string name="src_genres">Жанры: %1$s.</string>
+    <string name="src_band_from">Группа родом отсюда: %1$s.</string>
+    <string name="src_artist_from">Исполнитель родом отсюда: %1$s.</string>
+    <plurals name="src_members">
+        <item quantity="one">В группе %1$d участник.</item>
+        <item quantity="few">В группе %1$d участника.</item>
+        <item quantity="many">В группе %1$d участников.</item>
+        <item quantity="other">В группе %1$d участника.</item>
+    </plurals>
+    <plurals name="src_tracks">
+        <item quantity="one">В альбоме %1$d трек.</item>
+        <item quantity="few">В альбоме %1$d трека.</item>
+        <item quantity="many">В альбоме %1$d треков.</item>
+        <item quantity="other">В альбоме %1$d трека.</item>
+    </plurals>
+    <plurals name="src_fans">
+        <item quantity="one">На Deezer у исполнителя %1$s поклонник.</item>
+        <item quantity="few">На Deezer у исполнителя %1$s поклонника.</item>
+        <item quantity="many">На Deezer у исполнителя %1$s поклонников.</item>
+        <item quantity="other">На Deezer у исполнителя %1$s поклонников.</item>
+    </plurals>
+    <plurals name="src_albums">
+        <item quantity="one">В каталоге Deezer у исполнителя %1$d альбом.</item>
+        <item quantity="few">В каталоге Deezer у исполнителя %1$d альбома.</item>
+        <item quantity="many">В каталоге Deezer у исполнителя %1$d альбомов.</item>
+        <item quantity="other">В каталоге Deezer у исполнителя %1$d альбома.</item>
+    </plurals>
     <string name="info_year">%1$s год</string>
     <string name="info_title">Рассказ о треке</string>
     <string name="info_source">Как рассказывать</string>
     <string name="info_source_gemini">Gemini</string>
-    <string name="info_source_combined">Gemini + Вики</string>
-    <string name="info_source_wiki">Википедия</string>
-    <string name="info_source_gemini_hint">Gemini Nano рассказывает сам, из своих знаний. Но система разрешает его только открытому приложению: из жеста в фоне факты берутся из Википедии и пересказываются скачанной моделью (или читаются как есть). Каждый раз — другие факты</string>
-    <string name="info_source_combined_hint">Факты из Википедии и MusicBrainz, пересказ — модель на телефоне (в фоне — скачанная). Каждый раз — другие факты. Нужен интернет (найденное сохраняется)</string>
-    <string name="info_source_wiki_hint">Факты из Википедии как есть, без модели; каждый раз — следующие. Нужен интернет (найденное сохраняется)</string>
+    <string name="info_source_combined">Факты + модель</string>
+    <string name="info_source_wiki">Без модели</string>
+    <string name="info_source_gemini_hint">Gemini Nano рассказывает сам, из своих знаний. Но система разрешает его только открытому приложению: из жеста в фоне факты берутся из Википедии и других источников и пересказываются скачанной моделью (или читаются как есть). Каждый раз — другие факты</string>
+    <string name="info_source_combined_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz, пересказ — модель на телефоне (в фоне — скачанная). Каждый раз — другие факты. Нужен интернет (найденное сохраняется)</string>
+    <string name="info_source_wiki_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz как есть, без модели; каждый раз — следующие. Нужен интернет (найденное сохраняется)</string>
     <string name="info_language">Язык рассказа</string>
     <string name="info_language_ru">Русский</string>
     <string name="info_language_en">English</string>
@@ -140,7 +171,7 @@
     <string name="info_music_hint">После рассказа музыка вернётся сама</string>
     <string name="info_music_duck">Приглушать</string>
     <string name="info_music_pause">Пауза</string>
-    <string name="info_hint">Назначьте действие «Рассказать о треке» на жест или скажите голосом «расскажи о песне». Сначала сразу звучат название, альбом и год, затем — рассказ: о самой песне (если есть что сказать), короткий факт об альбоме и короткий факт об исполнителе. С Википедией: статья ищется на выбранном языке, английская заменяется русской версией, а если её нет — переводит модель на телефоне. В Википедию и MusicBrainz отправляются только название, исполнитель и альбом; Gemini Nano работает на телефоне. Найденные факты сохраняются: второй раз быстрее и без интернета, а факты каждый раз новые. Тот же жест ещё раз — остановить.</string>
+    <string name="info_hint">Назначьте действие «Рассказать о треке» на жест или скажите голосом «расскажи о песне». Сначала сразу звучат название, альбом и год, затем — рассказ: о самой песне (если есть что сказать), короткий факт об альбоме и короткий факт об исполнителе. С Википедией: статья ищется на выбранном языке, английская заменяется русской версией, а если её нет — переводит модель на телефоне. В Википедию, TheAudioDB, Deezer и MusicBrainz отправляются только название, исполнитель и альбом; Gemini Nano работает на телефоне. Найденные факты сохраняются: второй раз быстрее и без интернета, а факты каждый раз новые. Тот же жест ещё раз — остановить.</string>
     <string name="log_no_track">плеер не сообщает, что играет</string>
     <string name="log_no_gemini">не найдены ни Gemini, ни браузер</string>
     <string name="gemini_question">Расскажи о треке %1$s: кто исполнитель, история песни, о чём она и что похожего послушать.</string>
