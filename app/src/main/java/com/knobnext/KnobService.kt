@@ -1201,14 +1201,18 @@ class KnobService : AccessibilityService() {
 
         updateTrackWatcher()
 
-        // The accelerometer and gyroscope don't wake the CPU; without sound playing it may sleep.
-        // (The proximity sensor used for the wave does wake it.) Right after a pause, stay up until
-        // the sensors have been rearranged for the silence.
+        // The accelerometer and gyroscope don't wake the CPU. (The proximity sensor used for the wave
+        // does.) Right after a pause, stay up until the sensors have been rearranged for the silence.
         val settling = pausedAt != 0L && now - pausedAt < PAUSE_SETTLE_MS * 2
-        val keepAwake = flip.running && flipPending || !playing && (tap || turn) || settling || fading
-        if (keepAwake && !wakeLock.isHeld) {
+        // Sound playing does not keep the CPU up either: on Pixel, music with the screen off is played by
+        // the audio chip, and the processor sleeps between buffers. The accelerometer's readings then wait
+        // in the sensor's own memory and are lost when it fills, so taps stopped being seen a while after
+        // the screen went off. Whenever taps or the twist are watched, the CPU stays up.
+        val keepAwake = flip.running && flipPending || tap || turn || settling || fading
+        if (keepAwake) {
+            // Not counted: acquiring again only moves the time limit, so it never runs out while needed.
             wakeLock.acquire(WAKE_LOCK_MAX_MS)
-        } else if (!keepAwake && wakeLock.isHeld) {
+        } else if (wakeLock.isHeld) {
             wakeLock.release()
         }
     }
