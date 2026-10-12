@@ -319,6 +319,17 @@ class KnobService : AccessibilityService() {
     private var announcedTrack: String? = null
     private var trackPlayer: String? = null
 
+    @Volatile private var tapNoteAt = 0L
+
+    /** Called on the sensor thread: says in the log why a tap was ignored, but not on every bump. */
+    private fun onTapRejected(why: BackTapDetector.Rejected) {
+        val at = SystemClock.elapsedRealtime()
+        if (at - tapNoteAt < TAP_NOTE_MS) return
+        tapNoteAt = at
+        val reason = getString(if (why == BackTapDetector.Rejected.VIBRATION) R.string.log_tap_vibration else R.string.log_tap_bump)
+        handler.post { log(reason) }
+    }
+
     private val motionCheck = object : Runnable {
         override fun run() {
             updateSensors()
@@ -402,7 +413,7 @@ class KnobService : AccessibilityService() {
         voice = VoiceListener(this, handler)
         volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, { prefs.blindGestures }, ::onScreen, ::onVolumeObserved)
         volumeWatcher.start()
-        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
+        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::onTapRejected) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
         flip = FlipDetector(this, ::onFlip)
@@ -1133,7 +1144,20 @@ class KnobService : AccessibilityService() {
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
-        if (tap) backTap.start(fastRate = !(prefs.backTapEco && screenDark())) else backTap.stop()
+        if (tap) {
+            backTap.start(fastRate = !(prefs.backTapEco && screenDark()))
+            // Sound plays, so the CPU is awake and the sensor should be reporting; if not, it needs registering again.
+            if (playing && backTap.starved()) {
+                backTap.restart()
+                val at = SystemClock.elapsedRealtime()
+                if (at - tapNoteAt > TAP_NOTE_MS) {
+                    tapNoteAt = at
+                    log(getString(R.string.log_tap_restarted))
+                }
+            }
+        } else {
+            backTap.stop()
+        }
         if (turn) twist.start() else twist.stop()
         if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
         // Taps and twists have no key press to arm the pocket check, so keep it on while they run
@@ -1506,6 +1530,7 @@ class KnobService : AccessibilityService() {
         const val LONG_HOLD_MIN_MS = 1_500L
         const val BOTH_HOLD_MS = 700L
         const val MOTION_CHECK_MS = 2_000L
+        const val TAP_NOTE_MS = 20_000L
         const val FLIP_RESUME_WINDOW_MS = 30 * 60 * 1000L
         const val WAKE_LOCK_MAX_MS = 60 * 60 * 1000L
         const val PAUSE_SETTLE_MS = 3_000L

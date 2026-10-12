@@ -410,6 +410,9 @@
     <string name="log_no_action">%1$s: действие не назначено</string>
     <string name="log_not_playing">%1$s: ничего не играет</string>
     <string name="log_pocket">%1$s: датчик приближения закрыт</string>
+    <string name="log_tap_vibration">постукивание не засчитано: телефон трясётся</string>
+    <string name="log_tap_bump">постукивание не засчитано: похоже на толчок, а не на касание</string>
+    <string name="log_tap_restarted">датчик постукивания молчал, включён заново</string>
     <string name="log_fired">%1$s → %2$s</string>
     <string name="pref_headphones">Только с наушниками</string>
     <string name="pref_headphones_hint">Проводные, Bluetooth или USB</string>

@@ -8,6 +8,7 @@ import android.hardware.SensorManager
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -18,6 +19,10 @@ import kotlin.math.sqrt
  * A tap on the back pushes the phone towards the user: a short spike along +Z (the axis pointing out
  * of the screen). A tap on the screen pushes it away, so its first spike is along −Z and is ignored.
  * Taps are only counted when the phone was otherwise still, which filters out walking and handling.
+ * Riding (a scooter, a bike, a bumpy road) is told apart from tapping in three ways: constant vibration
+ * keeps the detector shut for a moment after it calms down; a tap is a sharp pulse, while a bump keeps
+ * the phone shaking for tens of milliseconds, so wide pulses are dropped; and a sensor that has gone
+ * silent is noticed by [starved], so the service can register it again.
  * The sensor is registered only while [start]ed — the service does that while music is playing.
  */
 class BackTapDetector(
@@ -26,7 +31,11 @@ class BackTapDetector(
     /** Whether a third tap could still mean something; if not, two taps fire without waiting. */
     private val wantsTriple: () -> Boolean,
     private val onTaps: (count: Int) -> Unit,
+    /** A tap-like spike was ignored, and why; called on the sensor thread, as often as it happens. */
+    private val onRejected: (Rejected) -> Unit = {},
 ) : SensorEventListener {
+    enum class Rejected { VIBRATION, BUMP }
+
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val accelerometer: Sensor? = sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val thread = HandlerThread("back-tap").apply { start() }
@@ -44,6 +53,14 @@ class BackTapDetector(
     private var lastNegativeAt = 0L
     private var lastTapAt = 0L
     private var taps = 0
+    private var lastSampleAt = 0L
+    private var sampleMs = 5f
+    private var busyUntil = 0L
+    private var pendingAt = 0L
+    private var pendingAbove = 0f
+
+    /** When the sensor last reported, on the elapsed-realtime clock. */
+    @Volatile private var lastEventAt = 0L
 
     private val finish = Runnable {
         val count = taps
@@ -52,6 +69,26 @@ class BackTapDetector(
     }
 
     val available: Boolean get() = accelerometer != null
+
+    /** Registered, yet nothing has come from the sensor for a while. */
+    fun starved(): Boolean = running && SystemClock.elapsedRealtime() - lastEventAt > STARVED_MS
+
+    /** Registers the sensor again at the same rate. */
+    fun restart() {
+        if (!running) return
+        sensors?.unregisterListener(this)
+        reset()
+        sensors?.registerListener(this, accelerometer ?: return, if (fast) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME, sensorHandler)
+    }
+
+    private fun reset() {
+        initialized = false
+        taps = 0
+        pendingAt = 0L
+        busyUntil = 0L
+        lastEventAt = SystemClock.elapsedRealtime()
+        sensorHandler.removeCallbacks(finish)
+    }
 
     /**
      * [fastRate] false reads the sensor about 50 times a second instead of as often as it can: less
@@ -63,8 +100,7 @@ class BackTapDetector(
         if (running) sensors?.unregisterListener(this)
         running = true
         fast = fastRate
-        initialized = false
-        taps = 0
+        reset()
         val rate = if (fastRate) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME
         sensors.registerListener(this, sensor, rate, sensorHandler)
     }
@@ -84,6 +120,7 @@ class BackTapDetector(
     override fun onSensorChanged(event: SensorEvent) {
         val (x, y, z) = Triple(event.values[0], event.values[1], event.values[2])
         val now = event.timestamp / 1_000_000
+        lastEventAt = SystemClock.elapsedRealtime()
         if (!initialized) {
             gx = x; gy = y; gz = z
             initialized = true
@@ -97,30 +134,63 @@ class BackTapDetector(
         val dy = y - gy
         val dz = z - gz
         val limit = threshold()
+        val magnitude = sqrt(dx * dx + dy * dy + dz * dz)
+        val dt = (now - lastSampleAt).coerceIn(0L, 50L).toFloat()
+        lastSampleAt = now
+        if (dt > 0) sampleMs += (dt - sampleMs) * 0.05f
+
+        // Constant vibration keeps the detector shut a little after it calms down, so the lull between
+        // two bumps is not taken for quiet. (Not in the middle of a tap sequence: its own ringing counts.)
+        if (noise >= limit * QUIET_RATIO && taps == 0 && pendingAt == 0L) busyUntil = now + VIBRATION_HOLD_MS
 
         if (dz < -limit) lastNegativeAt = now
-        val isTap = now - lastPeakAt > REFRACTORY_MS &&
+        val spike = now - lastPeakAt > REFRACTORY_MS &&
+            pendingAt == 0L &&
             dz > limit &&
             dz > SIDEWAYS_RATIO * max(abs(dx), abs(dy)) &&
-            now - lastNegativeAt > FRONT_TAP_RINGING_MS &&
-            noise < limit * QUIET_RATIO
-        if (isTap) {
+            now - lastNegativeAt > FRONT_TAP_RINGING_MS
+        if (spike) {
             lastPeakAt = now
-            if (taps == 0 || now - lastTapAt > TAP_GAP_MS) taps = 0
-            taps++
-            lastTapAt = now
-            sensorHandler.removeCallbacks(finish)
-            if (taps >= 3 || taps == 2 && !wantsTriple()) {
-                // Nothing longer can follow: answer now instead of waiting for another tap.
-                sensorHandler.post(finish)
+            if (noise < limit * QUIET_RATIO && now >= busyUntil) {
+                pendingAt = now
+                pendingAbove = 0f
             } else {
-                sensorHandler.postDelayed(finish, SETTLE_MS)
+                onRejected(Rejected.VIBRATION)
+            }
+        }
+
+        if (pendingAt != 0L) {
+            // How long the phone keeps shaking after the spike: a tap dies out at once, a bump doesn't.
+            if (magnitude > limit * PULSE_RATIO) pendingAbove += dt
+            if (now - pendingAt >= JUDGE_MS) {
+                // Too slow a sensor (power saving) can't tell the pulse's width.
+                val bump = sampleMs <= PRECISE_SAMPLE_MS && pendingAbove > MAX_PULSE_MS
+                val at = pendingAt
+                pendingAt = 0L
+                if (bump) {
+                    busyUntil = now + BUMP_HOLD_MS
+                    onRejected(Rejected.BUMP)
+                } else {
+                    countTap(at)
+                }
             }
         }
 
         // Background motion level; spikes are clipped so the taps themselves barely raise it.
-        val magnitude = sqrt(dx * dx + dy * dy + dz * dz)
         noise += (minOf(magnitude, limit * QUIET_RATIO * 2) - noise) * NOISE_SMOOTHING
+    }
+
+    private fun countTap(at: Long) {
+        if (taps == 0 || at - lastTapAt > TAP_GAP_MS) taps = 0
+        taps++
+        lastTapAt = at
+        sensorHandler.removeCallbacks(finish)
+        if (taps >= 3 || taps == 2 && !wantsTriple()) {
+            // Nothing longer can follow: answer now instead of waiting for another tap.
+            sensorHandler.post(finish)
+        } else {
+            sensorHandler.postDelayed(finish, SETTLE_MS)
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -134,5 +204,12 @@ class BackTapDetector(
         const val FRONT_TAP_RINGING_MS = 40L
         const val TAP_GAP_MS = 500L
         const val SETTLE_MS = 450L
+        const val VIBRATION_HOLD_MS = 1_200L
+        const val BUMP_HOLD_MS = 700L
+        const val JUDGE_MS = 60L
+        const val MAX_PULSE_MS = 45f
+        const val PULSE_RATIO = 0.5f
+        const val PRECISE_SAMPLE_MS = 12f
+        const val STARVED_MS = 4_000L
     }
 }
