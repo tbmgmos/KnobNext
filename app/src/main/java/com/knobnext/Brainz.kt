@@ -34,15 +34,20 @@ object Brainz {
 
     /**
      * [said]: everything already found, lowercased; a fact whose names are all in it is not said twice.
+     * [mbid]: the artist's MusicBrainz id from Wikidata. Without it, a name search ("Kino") may find a
+     * namesake, so it is used only when nothing else was found about the artist.
      */
-    suspend fun gather(context: Context, lang: String, title: String, artist: String, album: String?, said: String): Found? {
+    suspend fun gather(context: Context, lang: String, title: String, artist: String, album: String?, said: String, mbid: String? = null): Found? {
         val res = TrackInfo.localized(context, lang)
         val recording = recording(title, artist, album)
-        val artistId = recording?.artistId ?: artistId(artist) ?: return null
+        val artistId = mbid ?: recording?.artistId ?: (if (said.isBlank()) artistId(artist) else null) ?: return null
         val a = get("$API/artist/$artistId?inc=artist-rels+url-rels&fmt=json") ?: return null
         val rec = recording?.id?.let { get("$API/recording/$it?inc=artist-rels+place-rels&fmt=json") }
         val known = said.lowercase(Locale.ROOT)
         fun new(vararg names: String) = names.any { !known.contains(it.lowercase(Locale.ROOT)) }
+        // MusicBrainz writes names as the artists do: "Kurt Cobain" in a Russian story about a band the
+        // articles already present in Russian would only jar. For a small artist it is all there is.
+        fun sayable(name: String) = lang != "ru" || said.isBlank() || name.any { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
 
         val group = a.optString("type") == "Group"
         val relations = a.optJSONArray("relations")?.let { r -> (0 until r.length()).mapNotNull { r.optJSONObject(it) } }.orEmpty()
@@ -53,13 +58,19 @@ object Brainz {
         if (group) {
             val band = members.filter { it.optString("direction") == "backward" }
             val first = band.filter { "original" in attributes(it) }.mapNotNull { name(it, "artist") }.distinct()
-            if (first.size >= 2 && new(*first.toTypedArray())) artistFacts += res.getString(R.string.src_mb_first_lineup, first.joinToString(", "))
-            band.filter { year(it, "begin") != null }.take(MAX_MEMBERS).forEach { m ->
-                val who = name(m, "artist") ?: return@forEach
-                val since = year(m, "begin")!!
-                val until = year(m, "end")
-                val plays = attributes(m).mapNotNull { instrument(it, lang) }.distinct().take(2).joinToString(if (lang == "ru") " и " else " and ")
+            if (first.size >= 2 && first.all(::sayable) && new(*first.toTypedArray())) {
+                artistFacts += res.getString(R.string.src_mb_first_lineup, first.joinToString(", "))
+            }
+            // MusicBrainz keeps one relation per instrument: one sentence per person, all they play.
+            band.groupBy { name(it, "artist") }.entries.filter { (who, _) -> who != null && sayable(who) }.take(MAX_MEMBERS).forEach { (who, rels) ->
+                val since = rels.mapNotNull { year(it, "begin") }.minOrNull() ?: return@forEach
+                val ended = rels.all { year(it, "end") != null }
+                val until = if (ended) rels.mapNotNull { year(it, "end") }.maxOrNull() else null
+                val plays = rels.flatMap { attributes(it) }.mapNotNull { instrument(it, lang) }.distinct().take(2)
+                    .joinToString(if (lang == "ru") " и " else " and ")
                 artistFacts += when {
+                    until == since && plays.isNotEmpty() -> res.getString(R.string.src_mb_member_plays_year, who, plays, since)
+                    until == since -> res.getString(R.string.src_mb_member_year, who, since)
                     until != null && plays.isNotEmpty() -> res.getString(R.string.src_mb_member_plays_span, who, plays, since, until)
                     until != null -> res.getString(R.string.src_mb_member_span, who, since, until)
                     plays.isNotEmpty() -> res.getString(R.string.src_mb_member_plays_since, who, plays, since)
@@ -70,7 +81,7 @@ object Brainz {
             // A singer's bands are the artists around them.
             members.filter { it.optString("direction") == "forward" }.take(MAX_MEMBERS).forEach { m ->
                 // Already said (Wikidata's "member of"): not again.
-                val bandName = name(m, "artist")?.takeIf { new(it) } ?: return@forEach
+                val bandName = name(m, "artist")?.takeIf { new(it) && sayable(it) } ?: return@forEach
                 val since = year(m, "begin")
                 val until = year(m, "end")
                 circle += when {
@@ -85,10 +96,10 @@ object Brainz {
         val songFacts = ArrayList<String>()
         val recRelations = rec?.optJSONArray("relations")?.let { r -> (0 until r.length()).mapNotNull { r.optJSONObject(it) } }.orEmpty()
         fun people(vararg types: String) = recRelations.filter { it.optString("type") in types }.mapNotNull { name(it, "artist") }.distinct().take(MAX_NAMES)
-        people("producer").takeIf { it.isNotEmpty() && new(*it.toTypedArray()) }?.let { songFacts += res.getString(R.string.src_mb_producer, it.joinToString(", ")) }
-        people("engineer", "recording").takeIf { it.isNotEmpty() && new(*it.toTypedArray()) }?.let { songFacts += res.getString(R.string.src_mb_engineer, it.joinToString(", ")) }
+        people("producer").takeIf { it.isNotEmpty() && it.all(::sayable) && new(*it.toTypedArray()) }?.let { songFacts += res.getString(R.string.src_mb_producer, it.joinToString(", ")) }
+        people("engineer", "recording").takeIf { it.isNotEmpty() && it.all(::sayable) && new(*it.toTypedArray()) }?.let { songFacts += res.getString(R.string.src_mb_engineer, it.joinToString(", ")) }
         recRelations.filter { it.optString("type") == "recorded at" }.mapNotNull { name(it, "place") }.firstOrNull()
-            ?.takeIf { new(it) }?.let { songFacts += res.getString(R.string.src_mb_studio, it) }
+            ?.takeIf { new(it) && sayable(it) }?.let { songFacts += res.getString(R.string.src_mb_studio, it) }
 
         val pages = LinkedHashMap<String, String>()
         relations.forEach { r ->
@@ -101,9 +112,10 @@ object Brainz {
         }
 
         val basics = ArrayList<String>()
-        val begin = a.optJSONObject("life-span")?.optString("begin")?.take(4)?.takeIf { it.length == 4 }
+        val begin = a.optJSONObject("life-span")?.let { year(it, "begin") }
         if (group && begin != null) basics += res.getString(R.string.src_formed, begin)
-        (a.optJSONObject("begin-area") ?: a.optJSONObject("area"))?.optString("name")?.takeIf { it.isNotBlank() }
+        // Places come in English ("Sankt-Peterburg"): said in a Russian story only for a small artist.
+        (a.optJSONObject("begin-area") ?: a.optJSONObject("area"))?.optString("name")?.takeIf { it.isNotBlank() && sayable(it) }
             ?.let { basics += res.getString(if (group) R.string.src_band_from else R.string.src_artist_from, it) }
 
         return Found(
@@ -146,6 +158,7 @@ object Brainz {
 
     private fun name(r: JSONObject, target: String) = r.optJSONObject(target)?.optString("name")?.takeIf { it.isNotBlank() }
 
+    // optString gives "null" for a JSON null: only four digits count.
     private fun year(r: JSONObject, field: String) = r.optString(field).take(4).takeIf { it.length == 4 && it.all(Char::isDigit) }
 
     /** An instrument's name to say; one not in the list is left out rather than said in English to a Russian ear. */

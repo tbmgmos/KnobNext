@@ -47,7 +47,10 @@ class StoryLiveTest {
         // MusicBrainz, deeper: what joins the facts in the background after the first telling.
         println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"}, setlist.fm: ${if (Prefs(context).setlistKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
         for (track in tracks) {
-            val found = Brainz.gather(context, "ru", track.title, track.artist!!, track.album, said = "")
+            // As the background step does: with what was already found, and Wikidata's MusicBrainz id.
+            val quick = TrackInfo.facts(context, track, "ru")
+            val said = quick?.let { q -> (q.song + q.artist + q.albumText).flatMap { it.facts }.joinToString(" ") }.orEmpty()
+            val found = Brainz.gather(context, "ru", track.title, track.artist!!, track.album, said, quick?.mbid)
             println("${track.artist}: песня ${found?.song?.facts} | исполнитель ${found?.artist?.facts} | основы ${found?.basics} | круг ${found?.circle} | обложка ${found?.coverUrl} | страницы ${found?.pages}")
             found?.let { f ->
                 val live = Setlist.gather(context, "ru", f.artistMbid, track.title)

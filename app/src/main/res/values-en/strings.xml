@@ -22,6 +22,8 @@
     <string name="src_wd_members">The band: %1$s.</string>
     <string name="src_mb_first_lineup">The original lineup: %1$s.</string>
     <string name="src_mb_member_plays_span">%1$s, %2$s, was in the band from %3$s to %4$s.</string>
+    <string name="src_mb_member_year">%1$s was in the band in %2$s.</string>
+    <string name="src_mb_member_plays_year">%1$s, %2$s, was in the band in %3$s.</string>
     <string name="src_mb_member_span">%1$s was in the band from %2$s to %3$s.</string>
     <string name="src_mb_member_plays_since">%1$s, %2$s, has been in the band since %3$s.</string>
     <string name="src_mb_member_since">%1$s has been in the band since %2$s.</string>

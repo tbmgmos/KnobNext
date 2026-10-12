@@ -83,6 +83,8 @@ object TrackInfo {
         val pages: Map<String, String> = emptyMap(),
         /** MusicBrainz's slower facts have joined these. */
         val deep: Boolean = false,
+        /** The artist's MusicBrainz id from Wikidata, for MusicBrainz and setlist.fm. */
+        val mbid: String? = null,
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
     }
@@ -405,7 +407,12 @@ object TrackInfo {
     private fun artistFacts(facts: Facts, lang: String?): List<String> {
         val texts = facts.artist.filter { lang == null || it.lang == lang }
         val story = texts.firstOrNull()?.facts.orEmpty()
-        val others = merged(texts.drop(1))
+        // A fact the article already gives ("formed in 1987") is not woven in again.
+        val told = story.joinToString(" ").lowercase(Locale.ROOT)
+        val others = merged(texts.drop(1)).filterNot { fact ->
+            val marks = Regex("""\b\d{4}\b""").findAll(fact).map { it.value }.toList()
+            marks.isNotEmpty() && marks.all { told.contains(it) } && fact.length < SHORT_FACT_CHARS / 2
+        }
         val out = ArrayList<String>()
         var next = 0
         story.forEachIndexed { i, fact ->
@@ -580,6 +587,7 @@ object TrackInfo {
                         related = d?.related.orEmpty() + lf?.similarNames.orEmpty(),
                         relatedIds = d?.relatedIds.orEmpty(),
                         artistId = d?.artistId,
+                        mbid = d?.mbid,
                     )
                 }
             }
@@ -617,7 +625,7 @@ object TrackInfo {
     private suspend fun deepen(context: Context, track: Track, lang: String, file: File, base: Facts): Facts? {
         val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
         val said = (base.song + base.artist + base.albumText).flatMap { it.facts }.joinToString(" ") + " " + base.intro.joinToString(" ")
-        val b = runCatching { Brainz.gather(context, lang, track.title, artist, base.album ?: track.album, said) }.getOrNull()
+        val b = runCatching { Brainz.gather(context, lang, track.title, artist, base.album ?: track.album, said, base.mbid) }.getOrNull()
             // Not found, or not reachable: tried again next time.
             ?: return null
         // The artist on stage, now that their MusicBrainz id is known.
@@ -639,6 +647,7 @@ object TrackInfo {
             coverUrl = b.coverUrl ?: base.coverUrl,
             pages = b.pages + base.pages,
             deep = true,
+            mbid = base.mbid,
         )
         // Nothing to say even now: not kept, so the next look is a fresh one.
         if (!merged.empty) runCatching { file.writeText(writeFacts(merged).toString()) }
@@ -854,6 +863,7 @@ object TrackInfo {
         o.put("relatedIds", JSONArray(f.relatedIds))
         f.artistId?.let { o.put("artistId", it) }
         f.coverUrl?.let { o.put("coverUrl", it) }
+        f.mbid?.let { o.put("mbid", it) }
         o.put("pages", JSONObject(f.pages))
         o.put("deep", f.deep)
         return o
@@ -875,6 +885,7 @@ object TrackInfo {
             coverUrl = o.optString("coverUrl").ifBlank { null },
             pages = o.optJSONObject("pages")?.let { p -> p.keys().asSequence().associateWith { p.optString(it) } }.orEmpty(),
             deep = o.optBoolean("deep"),
+            mbid = o.optString("mbid").ifBlank { null },
         )
     }
 
@@ -974,7 +985,7 @@ object TrackInfo {
     private const val MAX_CACHED = 300
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
-    private const val FACTS_PREFIX = "facts7-"
+    private const val FACTS_PREFIX = "facts8-"
 
     /** In the artist's story, a fact from the other sources after this many of the article's. */
     private const val WEAVE_EVERY = 3

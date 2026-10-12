@@ -159,12 +159,13 @@ object MusicSources {
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
         val facts = ArrayList<String>()
         val group = a.optString("type") == "Group"
-        val begin = a.optJSONObject("life-span")?.optString("begin")?.take(4)?.takeIf { it.length == 4 }
+        val begin = a.optJSONObject("life-span")?.optString("begin")?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
         if (group && begin != null) facts += res.getString(R.string.src_formed, begin)
         val place = a.optJSONObject("begin-area")?.optString("name")?.takeIf { it.isNotBlank() }
             ?: a.optJSONObject("area")?.optString("name")?.takeIf { it.isNotBlank() }
-        place?.let { facts += res.getString(if (group) R.string.src_band_from else R.string.src_artist_from, it) }
-        a.optJSONArray("tags")?.let { tags ->
+        // MusicBrainz's places and tags are in English: in a Russian story they would jar.
+        place?.takeIf { lang != "ru" || cyrillic(it) }?.let { facts += res.getString(if (group) R.string.src_band_from else R.string.src_artist_from, it) }
+        if (lang == "en") a.optJSONArray("tags")?.let { tags ->
             val names = (0 until tags.length()).mapNotNull { tags.optJSONObject(it) }
                 .sortedByDescending { it.optInt("count") }.map { it.optString("name") }.filter { it.isNotBlank() }.take(3)
             if (names.isNotEmpty()) facts += res.getString(R.string.src_genres, names.joinToString(", "))
@@ -229,6 +230,8 @@ object MusicSources {
     private const val MIN_TEXT_CHARS = 60
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+    private fun cyrillic(s: String) = s.any { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
 
     /** The source found this artist, not one with a similar name. */
     private fun sameName(found: String, wanted: String): Boolean {

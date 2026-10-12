@@ -34,6 +34,8 @@ object Wikidata {
         val relatedIds: List<String> = emptyList(),
         /** The artist's item. */
         val artistId: String? = null,
+        /** The artist's MusicBrainz id, as Wikidata knows it: the right one even when names collide. */
+        val mbid: String? = null,
     )
 
     /** A Wikipedia article: its language and title. */
@@ -89,6 +91,7 @@ object Wikidata {
             related = circle?.related.orEmpty(),
             relatedIds = circle?.relatedIds.orEmpty(),
             artistId = ids[2],
+            mbid = ids[2]?.let { items[it] }?.let { stringValue(it, "P434") },
         )
     }
 
@@ -248,6 +251,11 @@ object Wikidata {
         val all = (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("rank") != "deprecated" }
         return all.filter { it.optString("rank") == "preferred" }.ifEmpty { all }
     }
+
+    private fun stringValue(claims: JSONObject, property: String): String? =
+        statements(claims, property).firstNotNullOfOrNull {
+            it.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value")?.takeIf { v -> v.isNotBlank() }
+        }
 
     private fun itemValues(claims: JSONObject, property: String): List<String> =
         statements(claims, property).mapNotNull {

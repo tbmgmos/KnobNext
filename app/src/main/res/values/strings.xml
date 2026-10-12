@@ -140,6 +140,8 @@
     <string name="src_wd_members">В составе группы: %1$s.</string>
     <string name="src_mb_first_lineup">В первом составе: %1$s.</string>
     <string name="src_mb_member_plays_span">%1$s — %2$s, в составе группы с %3$s по %4$s год.</string>
+    <string name="src_mb_member_year">%1$s — в составе группы в %2$s году.</string>
+    <string name="src_mb_member_plays_year">%1$s — %2$s, в составе группы в %3$s году.</string>
     <string name="src_mb_member_span">%1$s — в составе группы с %2$s по %3$s год.</string>
     <string name="src_mb_member_plays_since">%1$s — %2$s, в составе группы с %3$s года.</string>
     <string name="src_mb_member_since">%1$s — в составе группы с %2$s года.</string>
