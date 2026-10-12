@@ -875,7 +875,7 @@ object TrackInfo {
 
     /** How the start of a band reads in an album's article. */
     private val BAND_STORY = Regex(
-        "(образовал(ась|ись|ся)?|основан[аы]?|сформирова(л|н)\w*|собрал(ась|ись)) .{0,40}\b(19|20)\d\d|\b(formed|founded) in\b",
+        """(образовал(ась|ись|ся)?|основан[аы]?|сформирова(л|н)\w*|собрал(ась|ись)) .{0,40}\b(19|20)\d\d|\b(formed|founded) in\b""",
         RegexOption.IGNORE_CASE,
     )
 }
