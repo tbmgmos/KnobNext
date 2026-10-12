@@ -156,6 +156,8 @@ private fun buildChecks(
             )
         },
     )
+    // What became of the back taps: when they stop working, the reason is here.
+    if (s.backTap) add(Check(stringResource(R.string.diag_back_tap), rememberTapSummary(), null))
     add(
         Check(
             stringResource(R.string.diag_battery),

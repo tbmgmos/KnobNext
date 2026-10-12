@@ -320,14 +320,22 @@ class KnobService : AccessibilityService() {
     private var announcedTrack: String? = null
     private var trackPlayer: String? = null
 
-    @Volatile private var tapNoteAt = 0L
+    private val tapNoteAt = java.util.concurrent.ConcurrentHashMap<TapStats.Verdict, Long>()
 
-    /** Called on the sensor thread: says in the log why a tap was ignored, but not on every bump. */
-    private fun onTapRejected(why: BackTapDetector.Rejected) {
+    /** Says in the log why a tap was not taken, each reason at most once in a while (any thread). */
+    private fun noteTap(why: TapStats.Verdict) {
         val at = SystemClock.elapsedRealtime()
-        if (at - tapNoteAt < TAP_NOTE_MS) return
-        tapNoteAt = at
-        val reason = getString(if (why == BackTapDetector.Rejected.VIBRATION) R.string.log_tap_vibration else R.string.log_tap_bump)
+        if (at - (tapNoteAt[why] ?: 0L) < TAP_NOTE_MS) return
+        tapNoteAt[why] = at
+        val reason = getString(
+            when (why) {
+                TapStats.Verdict.VIBRATION -> R.string.log_tap_vibration
+                TapStats.Verdict.BUMP -> R.string.log_tap_bump
+                TapStats.Verdict.SINGLE -> R.string.log_tap_single
+                TapStats.Verdict.RESTARTED -> R.string.log_tap_restarted
+                else -> return
+            },
+        )
         handler.post { log(reason) }
     }
 
@@ -414,7 +422,7 @@ class KnobService : AccessibilityService() {
         voice = VoiceListener(this, handler)
         volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, { prefs.blindGestures }, ::onScreen, ::onVolumeObserved)
         volumeWatcher.start()
-        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::onTapRejected) { count ->
+        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::noteTap) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
         // Build 22241d6 could take KnobNext's own session for the player and remember it as one.
@@ -1182,11 +1190,8 @@ class KnobService : AccessibilityService() {
             // Sound plays, so the CPU is awake and the sensor should be reporting; if not, it needs registering again.
             if (playing && backTap.starved()) {
                 backTap.restart()
-                val at = SystemClock.elapsedRealtime()
-                if (at - tapNoteAt > TAP_NOTE_MS) {
-                    tapNoteAt = at
-                    log(getString(R.string.log_tap_restarted))
-                }
+                TapStats.note(TapStats.Verdict.RESTARTED)
+                noteTap(TapStats.Verdict.RESTARTED)
             }
         } else {
             backTap.stop()
@@ -1310,11 +1315,14 @@ class KnobService : AccessibilityService() {
             log(getString(R.string.log_no_action, name))
             return false
         }
+        val tapGesture = gesture == Gesture.BACK_TAP_2 || gesture == Gesture.BACK_TAP_3
         if (target == null || (target.mode == Mode.COMBO_ONLY && !action.worksWhenIdle)) {
+            if (tapGesture) TapStats.note(TapStats.Verdict.NOT_PLAYING)
             log(getString(R.string.log_not_playing, name))
             return false
         }
         if (!fromHeadset && pocketCovered()) {
+            if (tapGesture) TapStats.note(TapStats.Verdict.POCKET)
             // The presses were accidental: undo their volume change too.
             restoreVolumeTo?.let(::restoreVolume)
             log(getString(R.string.log_pocket, name))
@@ -1570,7 +1578,7 @@ class KnobService : AccessibilityService() {
         const val LONG_HOLD_MIN_MS = 1_500L
         const val BOTH_HOLD_MS = 700L
         const val MOTION_CHECK_MS = 2_000L
-        const val TAP_NOTE_MS = 20_000L
+        const val TAP_NOTE_MS = 10_000L
         const val FLIP_RESUME_WINDOW_MS = 30 * 60 * 1000L
         const val WAKE_LOCK_MAX_MS = 60 * 60 * 1000L
         const val PAUSE_SETTLE_MS = 3_000L

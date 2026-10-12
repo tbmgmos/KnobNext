@@ -980,7 +980,7 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(if (s.backTap) 5 else 1) {
+        Group(if (s.backTap) 6 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -1006,6 +1006,11 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                         SwitchRow(
                             shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
                             subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
+                        )
+                        ListRow(
+                            shape = shape(5),
+                            title = stringResource(R.string.tap_stats_title),
+                            subtitle = rememberTapSummary() + "\n" + stringResource(R.string.tap_stats_hint),
                         )
                     }
                 }
