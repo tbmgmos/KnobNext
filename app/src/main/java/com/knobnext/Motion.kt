@@ -41,43 +41,94 @@ abstract class SensorGesture(context: Context, type: Int, private val rate: Int)
 
 /**
  * Face down for a moment → [onFlip] (true); turned back up → [onFlip] (false).
+ *
+ * Reads the gravity sensor (the fused, smooth direction of gravity; a smoothed accelerometer where
+ * there is none), so moving the phone doesn't break the reading, and allows about 45° of tilt, so a
+ * cushion or an uneven table still counts. Face down also needs the proximity sensor covered — the
+ * screen lies against something — which tells a phone put down from one held above the face in bed.
  * The first reading after start only sets the baseline, so starting while already face down does nothing.
  */
-class FlipDetector(context: Context, private val onFlip: (faceDown: Boolean) -> Unit) :
-    SensorGesture(context, Sensor.TYPE_ACCELEROMETER, SensorManager.SENSOR_DELAY_UI) {
+class FlipDetector(context: Context, private val onFlip: (faceDown: Boolean) -> Unit) : SensorEventListener {
+    private val sensors: SensorManager? = context.getSystemService(SensorManager::class.java)
+    private val gravitySensor: Sensor? = sensors?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+    private val motion: Sensor? = gravitySensor
+        ?: sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER, true)
+        ?: sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val proximity: Sensor? = sensors?.getDefaultSensor(Sensor.TYPE_PROXIMITY, true)
+        ?: sensors?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+
+    var running = false
+        private set
+
     private var faceDown: Boolean? = null
     private var candidateSince = 0L
+    private var lastFlipAt = 0L
+    private var z = Float.NaN
+    // No proximity sensor: gravity alone decides.
+    private var covered = proximity == null
 
-    override fun onStart() {
+    fun start() {
+        val m = motion ?: return
+        if (running) return
+        running = true
         faceDown = null
         candidateSince = 0L
+        z = Float.NaN
+        covered = proximity == null
+        sensors?.registerListener(this, m, SensorManager.SENSOR_DELAY_UI)
+        proximity?.let { sensors?.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+    }
+
+    fun stop() {
+        if (!running) return
+        running = false
+        sensors?.unregisterListener(this)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        val z = event.values[2]
+        when (event.sensor.type) {
+            Sensor.TYPE_PROXIMITY -> covered = event.values[0] < minOf(event.sensor.maximumRange, NEAR_CM)
+            else -> {
+                val raw = event.values[2]
+                // The gravity sensor is already smooth; the raw accelerometer gets a low-pass filter.
+                z = if (z.isNaN() || event.sensor.type == Sensor.TYPE_GRAVITY) raw else z + SMOOTHING * (raw - z)
+            }
+        }
+        if (z.isNaN()) return
+        val down = z < FACE_DOWN_Z && covered
+        val up = z > FACE_UP_Z
         val now = SystemClock.elapsedRealtime()
         val current = faceDown
         if (current == null) {
-            faceDown = z < FACE_DOWN_Z
+            faceDown = down
             return
         }
-        val flipped = if (current) z > FACE_UP_Z else z < FACE_DOWN_Z
+        val flipped = if (current) up else down
         if (!flipped) {
             candidateSince = 0L
             return
         }
         if (candidateSince == 0L) candidateSince = now
-        if (now - candidateSince >= STABLE_MS) {
+        if (now - candidateSince >= STABLE_MS && now - lastFlipAt >= COOLDOWN_MS) {
             faceDown = !current
             candidateSince = 0L
+            lastFlipAt = now
             onFlip(!current)
         }
     }
 
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
     private companion object {
-        const val FACE_DOWN_Z = -8.0f
-        const val FACE_UP_Z = 5.0f
-        const val STABLE_MS = 600L
+        /** About 45° from flat, screen down. */
+        const val FACE_DOWN_Z = -6.9f
+
+        /** Clearly turned back over (above about 20° screen up). */
+        const val FACE_UP_Z = 3.4f
+        const val STABLE_MS = 400L
+        const val COOLDOWN_MS = 1_000L
+        const val SMOOTHING = 0.2f
+        const val NEAR_CM = 3f
     }
 }
 

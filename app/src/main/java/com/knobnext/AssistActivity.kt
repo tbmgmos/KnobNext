@@ -24,6 +24,20 @@ class AssistActivity : Activity() {
     }
 }
 
+/**
+ * The headset's voice button (a long press on some headphones) starts the "voice command" intent. While
+ * the setting is on, this activity is enabled and takes it: it runs the assigned action, or, when there
+ * is none, opens the usual assistant, so nothing is lost.
+ */
+class HeadsetHoldActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val handled = HeadsetHold.handler?.invoke() ?: false
+        if (!handled) PowerHold.openOtherAssistant(this)
+        finish()
+    }
+}
+
 object PowerHold {
     /** Set by the service while it runs: true when the hold was used (the action ran or was checked). */
     @Volatile var handler: (() -> Boolean)? = null

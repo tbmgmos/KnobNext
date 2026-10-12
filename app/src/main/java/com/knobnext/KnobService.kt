@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.knobnext.ui.actionLabel
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.knobnext.ui.gestureLabel
 
 class KnobService : AccessibilityService() {
@@ -24,6 +26,12 @@ class KnobService : AccessibilityService() {
     private lateinit var haptics: Haptics
     private lateinit var proximity: ProximityProbe
     private val cues = Cues()
+
+    // Plays silence after a gesture pause, so the keys keep working with the screen off.
+    private val silence = Silence()
+
+    // The music is paused for a story about the track: the silence stays until it ends.
+    private var storyHold = false
     private val handler = Handler(Looper.getMainLooper())
 
     // ---- Screen on: key events from the accessibility framework ----
@@ -284,6 +292,7 @@ class KnobService : AccessibilityService() {
     // ---- Motion gestures: sensors run only while music plays ----
 
     private lateinit var backTap: BackTapDetector
+    private lateinit var headset: HeadsetButtons
     private lateinit var flip: FlipDetector
     private lateinit var twist: TwistDetector
     private lateinit var wave: WaveDetector
@@ -310,6 +319,26 @@ class KnobService : AccessibilityService() {
     private var trackWatcher: NowPlayingTracker? = null
     private var announcedTrack: String? = null
     private var trackPlayer: String? = null
+
+    private val tapNoteAt = java.util.concurrent.ConcurrentHashMap<TapStats.Verdict, Long>()
+    private var backgroundRetryAt = 0L
+
+    /** Says in the log why a tap was not taken, each reason at most once in a while (any thread). */
+    private fun noteTap(why: TapStats.Verdict) {
+        val at = SystemClock.elapsedRealtime()
+        if (at - (tapNoteAt[why] ?: 0L) < TAP_NOTE_MS) return
+        tapNoteAt[why] = at
+        val reason = getString(
+            when (why) {
+                TapStats.Verdict.VIBRATION -> R.string.log_tap_vibration
+                TapStats.Verdict.BUMP -> R.string.log_tap_bump
+                TapStats.Verdict.SINGLE -> R.string.log_tap_single
+                TapStats.Verdict.RESTARTED -> R.string.log_tap_restarted
+                else -> return
+            },
+        )
+        handler.post { log(reason) }
+    }
 
     private val motionCheck = object : Runnable {
         override fun run() {
@@ -353,6 +382,10 @@ class KnobService : AccessibilityService() {
         }
     }
 
+    // ---- Voice commands ----
+    private lateinit var voice: VoiceListener
+    private val scope = kotlinx.coroutines.MainScope()
+
     // ---- Pocket mode ----
     private lateinit var pocket: PocketScreen
     private var pocketShownAt = 0L
@@ -376,6 +409,7 @@ class KnobService : AccessibilityService() {
         prefs.migrate()
         log(getString(R.string.log_service_started))
         media = Media(this)
+        media.silencePlaying = { silence.playing }
         extras = Extras(this, media, prefs)
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
@@ -386,16 +420,26 @@ class KnobService : AccessibilityService() {
         }
         lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         pocket = PocketScreen(this, ::onPocketLeft)
-        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, ::onScreen, ::onVolumeObserved)
+        voice = VoiceListener(this, handler)
+        volumeWatcher = VolumeWatcher(this, handler, ::sequencesActive, { prefs.blindGestures }, ::onScreen, ::onVolumeObserved)
         volumeWatcher.start()
-        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }) { count ->
+        backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::noteTap) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
+        // Build 22241d6 could take KnobNext's own session for the player and remember it as one.
+        prefs.forgetPlayer(packageName)
+        headset = HeadsetButtons(this, handler, prefs, media, { handler.post { log(it) } }, ::onHeadsetKey)
+        HeadsetHold.handler = ::onHeadsetHold
         flip = FlipDetector(this, ::onFlip)
         twist = TwistDetector(this) { fireGesture(Gesture.TWIST) }
         wave = WaveDetector(this, { prefs.waveCount }, { fireGesture(Gesture.WAVE) })
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KnobNext:sensors").apply {
             setReferenceCounted(false)
+        }
+        extras.log = { handler.post { log(it) } }
+        extras.keepKeysAlive = { on ->
+            storyHold = on
+            if (on) silence.start() else if (pausedAt == 0L) silence.stop()
         }
         extras.onLikeNotConfirmed = { pkg ->
             val reason = getString(R.string.log_like_not_confirmed)
@@ -408,23 +452,35 @@ class KnobService : AccessibilityService() {
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
         PocketScreen.toggle = { handler.post { togglePocket() } }
         PowerHold.handler = ::onPowerHold
-        ScreenOffService.sync(this)
+        VoiceListener.trigger = { handler.post { startVoice() } }
+        // Bound by the system as an accessibility service, the app may start it from the background.
+        ScreenOffService.sync(this, inForeground = true)
         Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {
         if (::prefs.isInitialized) log(getString(R.string.log_service_stopped))
-        ScreenOffService.stop(this)
+        // Only when it is no longer wanted (the accessibility service turned off, gestures off). The
+        // system also restarts this service on its own; stopping the background service then left the
+        // sensors without it until the app was next opened, and Android stops sending sensor readings
+        // to an app about a minute after it goes to the background: taps stopped working.
+        if (!ScreenOffService.shouldRun(this)) ScreenOffService.stop(this)
         GestureTest.onChange = null
         SleepTimer.fader = null
         PocketScreen.toggle = null
         PowerHold.handler = null
+        HeadsetHold.handler = null
+        VoiceListener.trigger = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             pocket.hide(PocketScreen.Reason.STOPPED)
+            voice.cancel()
+            scope.cancel()
+            silence.stop()
             volumeWatcher.stop()
             trackWatcher?.stop()
             backTap.release()
+            headset.release()
             flip.stop()
             twist.stop()
             wave.stop()
@@ -598,7 +654,7 @@ class KnobService : AccessibilityService() {
         if (!prefs.enabled) return false
         // With the screen off and nothing playing, Android ignores the volume keys altogether, so a
         // pause made there can only be undone with the screen on: allow that during the resume window.
-        return mode == DoubleMode.ALWAYS || screenDark() || (resumeWindowOpen() && !audio.isMusicActive)
+        return mode == DoubleMode.ALWAYS || screenDark() || (resumeWindowOpen() && !media.musicActive())
     }
 
     private fun resumeWindowOpen(): Boolean {
@@ -654,7 +710,7 @@ class KnobService : AccessibilityService() {
         // With the screen off, only volume changes tell what the keys do. Both keys pressed together
         // give a step and its opposite at (nearly) the same moment; a key held down gives steps faster
         // than anyone presses, repeated by the system.
-        val blind = !power.isInteractive && source == VolumeWatcher.Source.POLL
+        val blind = prefs.blindGestures && !power.isInteractive && source == VolumeWatcher.Source.POLL
         if (blind && sequence.size == 1 && direction == -sequence[0] && now - sequenceLastAt < BOTH_GAP_MS) {
             val base = sequenceBase
             resetSequence()
@@ -788,6 +844,31 @@ class KnobService : AccessibilityService() {
         return fired || testing
     }
 
+    /** A button of the headphones: the play/pause key also arrives as separate "play" and "pause". */
+    private fun onHeadsetKey(gesture: Gesture, key: Int) {
+        if (gesture == Gesture.HS_PLAY_PAUSE) {
+            val playing = media.musicActive()
+            // The headphones can be behind: "pause" for what is already paused (taken out of the ear) is not a press.
+            if (key == KeyEvent.KEYCODE_MEDIA_PAUSE && !playing || key == KeyEvent.KEYCODE_MEDIA_PLAY && playing) {
+                log(getString(R.string.log_headset_same, KeyEvent.keyCodeToString(key)))
+                return
+            }
+        }
+        fireGesture(gesture, fromHeadset = true)
+    }
+
+    /** The headset's voice button, passed to KnobNext. */
+    private fun onHeadsetHold(): Boolean {
+        if (HeadsetLive.learning) {
+            HeadsetLive.report(Gesture.HS_ASSIST, 0)
+            return true
+        }
+        val testing = GestureTest.active
+        if (!testing && (!prefs.enabled || !prefs.headsetHold || prefs.action(Gesture.HS_ASSIST, prefs.lastPlayer) == Action.NONE)) return false
+        log(getString(R.string.log_headset_assist))
+        return fireGesture(Gesture.HS_ASSIST, fromHeadset = true) || testing
+    }
+
     private fun powerDoubleAssigned() = prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) != Action.NONE
 
     private fun onScreenOff() {
@@ -804,7 +885,7 @@ class KnobService : AccessibilityService() {
         pocketPending = false
         // Just left (a second power press, or ended by silence): stay off.
         if (now - pocketLeftAt < POCKET_SETTLE_MS) return
-        val auto = prefs.pocketAuto && prefs.enabled && audio.isMusicActive && !media.isInCall()
+        val auto = prefs.pocketAuto && prefs.enabled && media.musicActive() && !media.isInCall()
         if (requested || auto) {
             // A second press may follow (the power-button gesture): wait until it can't any more.
             val wait = if (!requested && powerDoubleAssigned()) POWER_DOUBLE_MS + POCKET_WAKE_DELAY_MS else POCKET_WAKE_DELAY_MS
@@ -834,7 +915,7 @@ class KnobService : AccessibilityService() {
             // The system didn't let the screen turn on: don't leave a black window for the next time.
             !power.isInteractive && now - pocketShownAt < POCKET_SETTLE_MS -> return pocket.hide(PocketScreen.Reason.FAILED)
             media.isInCall() -> return pocket.hide(PocketScreen.Reason.CALL)
-            audio.isMusicActive || fading -> pocketQuietSince = 0L
+            media.musicActive() || fading -> pocketQuietSince = 0L
             pocketQuietSince == 0L -> pocketQuietSince = now
             now - pocketQuietSince > POCKET_IDLE_MS -> return pocket.hide(PocketScreen.Reason.IDLE)
         }
@@ -866,6 +947,163 @@ class KnobService : AccessibilityService() {
             ownScreenChangeAt = SystemClock.elapsedRealtime()
             performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
+    }
+
+    // ---- Voice commands ----
+
+    /** Listens for one spoken command; the same gesture again while listening cancels it. */
+    private fun startVoice(): Outcome {
+        if (voice.listening) {
+            voice.cancel()
+            return Outcome.unchanged(getString(R.string.log_voice_cancelled))
+        }
+        if (!voice.hasMicPermission()) {
+            extras.say(getString(R.string.speak_voice_permission))
+            return Outcome.failed(getString(R.string.voice_err_permission))
+        }
+        voice.listen(::onVoice)
+        return Outcome.done(getString(R.string.log_voice_listening))
+    }
+
+    private fun onVoice(result: VoiceListener.Result) {
+        when (result) {
+            is VoiceListener.Result.Failed -> {
+                log(getString(R.string.log_voice_failed, result.reason))
+                playCue(Action.VOICE, Outcome.failed(result.reason), pausing = false, pkg = prefs.lastPlayer)
+            }
+            is VoiceListener.Result.Heard -> {
+                val players = prefs.seenPlayers.associateBy { appLabel(this, it).lowercase() }
+                val match = result.phrases.firstNotNullOfOrNull { p -> CommandRules.parse(p, players)?.let { p to it } }
+                if (match != null) return runCommand(match.first, match.second)
+                val heard = result.phrases.first()
+                if (!prefs.smartVoice) return notUnderstood(heard)
+                // Not one of the known phrases: the on-phone model may still make sense of it.
+                scope.launch {
+                    val brains = Brains.all(this@KnobService)
+                    val answer = Brains.ask(this@KnobService, CommandBrain.prompt(heard, players.keys), BRAIN_COMMAND_TOKENS)
+                    val command = answer?.let { CommandBrain.parse(it.second, players) }
+                    when {
+                        command != null -> runCommand(heard, command, via = answer?.first?.name)
+                        brains.isNotEmpty() && answer == null -> {
+                            log(getString(R.string.log_brain_failed, brains.joinToString { it.name }, NanoBrain.lastError ?: "-"))
+                            notUnderstood(heard)
+                        }
+                        else -> notUnderstood(heard)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun notUnderstood(heard: String) {
+        log(getString(R.string.log_voice_unknown, heard))
+        playCue(Action.VOICE, Outcome.failed(heard), pausing = false, pkg = prefs.lastPlayer)
+        extras.say(getString(R.string.speak_voice_unknown, heard))
+    }
+
+    /** Carries out a spoken command, with the same log, vibration and sound as a gesture. */
+    private fun runCommand(phrase: String, command: Command, via: String? = null) {
+        val controller = media.resolve(prefs)?.controller ?: media.pick(media.controllers())
+        val pkg = controller?.packageName
+        val playing = controller?.isPlaying() ?: media.musicActive()
+        var cueAction = Action.NONE
+        var pausing = false
+        val outcome: Outcome = when (command) {
+            is Command.Run -> {
+                cueAction = command.action
+                pausing = command.action == Action.PLAY_PAUSE && playing
+                if (command.action == Action.VOICE) Outcome.DONE else execute(command.action, controller)
+            }
+            Command.Play -> {
+                cueAction = Action.PLAY_PAUSE
+                resumedByUs()
+                controller?.transportControls?.play() ?: media.sendKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+                Outcome.DONE
+            }
+            Command.Pause -> {
+                cueAction = Action.PLAY_PAUSE
+                pausing = true
+                controller?.transportControls?.pause() ?: media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                pausedByUs(pkg)
+                Outcome.DONE
+            }
+            is Command.SeekBy -> {
+                cueAction = if (command.ms > 0) Action.SEEK_FORWARD else Action.SEEK_BACK
+                media.perform(cueAction, controller, kotlin.math.abs(command.ms))
+                Outcome.DONE
+            }
+            is Command.SeekTo -> {
+                cueAction = Action.SEEK_FORWARD
+                if (controller == null) Outcome.failed(getString(R.string.log_needs_access)) else {
+                    controller.transportControls.seekTo(command.ms)
+                    Outcome.DONE
+                }
+            }
+            is Command.VolumeBy -> {
+                val direction = if (command.steps > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                repeat(kotlin.math.abs(command.steps).coerceAtMost(MAX_VOICE_VOLUME_STEPS)) {
+                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
+                }
+                Outcome.DONE
+            }
+            is Command.VolumeTo -> {
+                val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, (max * command.percent + 50) / 100, 0)
+                lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                Outcome.DONE
+            }
+            is Command.Sleep -> {
+                cueAction = Action.SLEEP_TIMER
+                SleepTimer.start(this, prefs, command.minutes)
+                extras.say(getString(R.string.speak_sleep_in, resources.getQuantityString(R.plurals.minutes, command.minutes, command.minutes)))
+                Outcome.DONE
+            }
+            Command.SleepToTrackEnd -> {
+                cueAction = Action.SLEEP_TIMER
+                val progress = media.progress(controller)
+                if (progress == null) Outcome.failed(getString(R.string.log_voice_no_length)) else {
+                    SleepTimer.startIn(this, prefs, progress.second - progress.first)
+                    extras.say(getString(R.string.speak_sleep_track_end))
+                    Outcome.DONE
+                }
+            }
+            Command.SleepCancel -> {
+                cueAction = Action.SLEEP_TIMER
+                SleepTimer.cancel(this, prefs)
+                extras.say(getString(R.string.speak_sleep_cancelled))
+                Outcome.undone(getString(R.string.log_sleep_cancelled))
+            }
+            is Command.Open -> {
+                cueAction = Action.OPEN_PLAYER
+                Outcome.of(extras.openApp(command.packageName))
+            }
+        }
+        val failed = outcome.result == Outcome.Result.FAILED
+        log(
+            getString(R.string.log_voice_heard, phrase) + (via?.let { " ($it)" } ?: "") + " → " + describe(command) +
+                (outcome.message?.let { ": $it" } ?: ""),
+        )
+        if (cueAction != Action.NONE && command !is Command.Run) {
+            if (prefs.vibrate) haptics.play(cueAction)
+        }
+        if (cueAction != Action.NONE || failed) playCue(if (failed) Action.VOICE else cueAction, outcome, pausing, pkg)
+    }
+
+    private fun describe(command: Command): String = when (command) {
+        is Command.Run -> getString(actionLabel(command.action))
+        Command.Play -> getString(R.string.voice_cmd_play)
+        Command.Pause -> getString(R.string.voice_cmd_pause)
+        is Command.SeekBy -> getString(
+            if (command.ms > 0) R.string.voice_cmd_seek_forward else R.string.voice_cmd_seek_back,
+            kotlin.math.abs(command.ms) / 1000,
+        )
+        is Command.SeekTo -> getString(R.string.voice_cmd_seek_to, positionPhrase(command.ms))
+        is Command.VolumeBy -> getString(R.string.voice_cmd_volume_by, command.steps)
+        is Command.VolumeTo -> getString(R.string.voice_cmd_volume_to, command.percent)
+        is Command.Sleep -> getString(R.string.voice_cmd_sleep, command.minutes)
+        Command.SleepToTrackEnd -> getString(R.string.voice_cmd_sleep_end)
+        Command.SleepCancel -> getString(R.string.voice_cmd_sleep_off)
+        is Command.Open -> getString(R.string.voice_cmd_open, appLabel(this, command.packageName))
     }
 
     /** The pocket-mode action: on, or off again (the screen then goes off). */
@@ -938,20 +1176,40 @@ class KnobService : AccessibilityService() {
         val testing = GestureTest.active
         val enabled = prefs.enabled || testing
         // While checking gestures the sensors run as if music played.
-        val playing = enabled && (audio.isMusicActive || testing)
+        val playing = enabled && (media.musicActive() || testing)
         val now = SystemClock.elapsedRealtime()
         // Playing again some other way (the player itself, headphones): the window is no longer needed.
-        if (audio.isMusicActive && pausedAt != 0L && now - pausedAt > PAUSE_SETTLE_MS) pausedAt = 0L
+        if (media.musicActive() && pausedAt != 0L && now - pausedAt > PAUSE_SETTLE_MS) pausedAt = 0L
+        checkSilence()
         val resumable = enabled && !playing && resumeWindowOpen()
 
         val player = prefs.lastPlayer
         fun wanted(on: Boolean, vararg gestures: Gesture) =
             on && (playing || resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
 
+        headset.update()
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
-        if (tap) backTap.start(fastRate = !(prefs.backTapEco && screenDark())) else backTap.stop()
+        // The background service is what keeps sensor readings coming with the screen off. If it is not
+        // running though it should, start it again (not more often than every so often, and say so).
+        val sensorsOn = tap || turn || flip.running || wave.running
+        if (sensorsOn && !ScreenOffService.running && now - backgroundRetryAt > BACKGROUND_RETRY_MS && ScreenOffService.shouldRun(this)) {
+            backgroundRetryAt = now
+            log(getString(R.string.log_background_restart))
+            ScreenOffService.sync(this, inForeground = true)
+        }
+        if (tap) {
+            backTap.start(fastRate = !(prefs.backTapEco && screenDark()))
+            // Sound plays, so the CPU is awake and the sensor should be reporting; if not, it needs registering again.
+            if (playing && backTap.starved()) {
+                backTap.restart()
+                TapStats.note(TapStats.Verdict.RESTARTED)
+                noteTap(TapStats.Verdict.RESTARTED)
+            }
+        } else {
+            backTap.stop()
+        }
         if (turn) twist.start() else twist.stop()
         if (wanted(prefs.wave, Gesture.WAVE)) wave.start() else wave.stop()
         // Taps and twists have no key press to arm the pocket check, so keep it on while they run
@@ -962,14 +1220,18 @@ class KnobService : AccessibilityService() {
 
         updateTrackWatcher()
 
-        // The accelerometer and gyroscope don't wake the CPU; without sound playing it may sleep.
-        // (The proximity sensor used for the wave does wake it.) Right after a pause, stay up until
-        // the sensors have been rearranged for the silence.
+        // The accelerometer and gyroscope don't wake the CPU. (The proximity sensor used for the wave
+        // does.) Right after a pause, stay up until the sensors have been rearranged for the silence.
         val settling = pausedAt != 0L && now - pausedAt < PAUSE_SETTLE_MS * 2
-        val keepAwake = flip.running && flipPending || !playing && (tap || turn) || settling || fading
-        if (keepAwake && !wakeLock.isHeld) {
+        // Sound playing does not keep the CPU up either: on Pixel, music with the screen off is played by
+        // the audio chip, and the processor sleeps between buffers. The accelerometer's readings then wait
+        // in the sensor's own memory and are lost when it fills, so taps stopped being seen a while after
+        // the screen went off. Whenever taps or the twist are watched, the CPU stays up.
+        val keepAwake = flip.running && flipPending || tap || turn || settling || fading
+        if (keepAwake) {
+            // Not counted: acquiring again only moves the time limit, so it never runs out while needed.
             wakeLock.acquire(WAKE_LOCK_MAX_MS)
-        } else if (!keepAwake && wakeLock.isHeld) {
+        } else if (wakeLock.isHeld) {
             wakeLock.release()
         }
     }
@@ -991,6 +1253,9 @@ class KnobService : AccessibilityService() {
 
     /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
     private fun onTrack(now: NowPlaying?) {
+        headset.mirror(now?.controller)
+        // Playing again, whichever way: the silence that kept the keys alive is no longer needed.
+        if (now?.playing == true && silence.playing) stopSilence(R.string.log_silence_resumed)
         val pkg = now?.controller?.packageName
         if (pkg != null && pkg != trackPlayer) {
             trackPlayer = pkg
@@ -1018,7 +1283,7 @@ class KnobService : AccessibilityService() {
             return GestureTest.report(GestureTest.Event.Note(getString(if (faceDown) R.string.test_flip_down else R.string.test_flip_up)))
         }
         if (faceDown) {
-            if (!audio.isMusicActive) return
+            if (!media.musicActive()) return
             media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
             flipPausedAt = SystemClock.elapsedRealtime()
             pausedAt = flipPausedAt
@@ -1045,6 +1310,8 @@ class KnobService : AccessibilityService() {
         restoreVolumeTo: Int? = null,
         /** Only check and announce the start: the caller performs the action itself (smooth seeking). */
         startOnly: Boolean = false,
+        /** The press came from headphones, which are not in a pocket whatever the proximity sensor says. */
+        fromHeadset: Boolean = false,
     ): Boolean {
         val name = getString(gestureLabel(gesture))
         val target = media.resolve(prefs)
@@ -1062,11 +1329,14 @@ class KnobService : AccessibilityService() {
             log(getString(R.string.log_no_action, name))
             return false
         }
+        val tapGesture = gesture == Gesture.BACK_TAP_2 || gesture == Gesture.BACK_TAP_3
         if (target == null || (target.mode == Mode.COMBO_ONLY && !action.worksWhenIdle)) {
+            if (tapGesture) TapStats.note(TapStats.Verdict.NOT_PLAYING)
             log(getString(R.string.log_not_playing, name))
             return false
         }
-        if (pocketCovered()) {
+        if (!fromHeadset && pocketCovered()) {
+            if (tapGesture) TapStats.note(TapStats.Verdict.POCKET)
             // The presses were accidental: undo their volume change too.
             restoreVolumeTo?.let(::restoreVolume)
             log(getString(R.string.log_pocket, name))
@@ -1084,12 +1354,10 @@ class KnobService : AccessibilityService() {
             return true
         }
         // Same decision as Media.perform: the player's own state, or the audio when there is no player.
-        val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: audio.isMusicActive)
-        if (action == Action.PLAY_PAUSE) {
-            pausedAt = if (pausing) SystemClock.elapsedRealtime() else 0L
-            if (pausing) stayAwake()
-        }
+        val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: media.musicActive())
+        if (action == Action.PLAY_PAUSE && !pausing) resumedByUs()
         val outcome = execute(action, player)
+        if (action == Action.PLAY_PAUSE && pausing) pausedByUs(player?.packageName)
         log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" }
             ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
         playCue(action, outcome, pausing, player?.packageName)
@@ -1131,7 +1399,7 @@ class KnobService : AccessibilityService() {
         if (fading) return
         val start = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         log(getString(R.string.log_sleep_fade))
-        if (!audio.isMusicActive || start <= 0) {
+        if (!media.musicActive() || start <= 0) {
             media.sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
             return
         }
@@ -1148,7 +1416,7 @@ class KnobService : AccessibilityService() {
         val step = object : Runnable {
             override fun run() {
                 val now = SystemClock.elapsedRealtime()
-                if (!audio.isMusicActive) {
+                if (!media.musicActive()) {
                     // A moment of silence is usually the next track loading; only a longer one means the
                     // music was paused by hand, and then the fade is over.
                     if (silentSince == 0L) silentSince = now
@@ -1200,6 +1468,43 @@ class KnobService : AccessibilityService() {
     }
 
     /** Until the next sensor check decides; with the screen off the CPU could otherwise sleep before it. */
+    /**
+     * A gesture paused [pkg]: remember it (play goes back to it), open the resume window and, with
+     * the screen off in mind, keep the volume keys alive with silence for that window.
+     */
+    private fun pausedByUs(pkg: String?) {
+        pausedAt = SystemClock.elapsedRealtime()
+        if (pkg != null) prefs.pausedPlayer = pkg
+        stayAwake()
+        if (prefs.keysOnPause && prefs.resumeMinutes > 0 && !silence.playing) {
+            // Started a moment later: some players report "paused" only after their audio stopped.
+            handler.postDelayed({
+                val stillPlaying = media.controllers().any { it.isPlaying() }
+                if (resumeWindowOpen() && !stillPlaying && !silence.playing && silence.start()) log(getString(R.string.log_silence_on))
+            }, SILENCE_DELAY_MS)
+        }
+    }
+
+    private fun resumedByUs() {
+        pausedAt = 0L
+        if (silence.playing) stopSilence(null)
+    }
+
+    private fun stopSilence(reason: Int?) {
+        silence.stop()
+        reason?.let { log(getString(it)) }
+    }
+
+    /** The silence lasts only for the resume window, and never alongside real playback. */
+    private fun checkSilence() {
+        if (!silence.playing || storyHold) return
+        when {
+            !resumeWindowOpen() -> stopSilence(R.string.log_silence_window)
+            media.controllers().any { it.isPlaying() } -> stopSilence(R.string.log_silence_resumed)
+            media.isInCall() -> stopSilence(null)
+        }
+    }
+
     private fun stayAwake() {
         if (!wakeLock.isHeld) wakeLock.acquire(WAKE_LOCK_MAX_MS)
     }
@@ -1223,9 +1528,11 @@ class KnobService : AccessibilityService() {
     private fun execute(action: Action, controller: MediaController?): Outcome {
         val outcome = when (action) {
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT ->
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT,
+            Action.ASK_GEMINI, Action.TRACK_INFO ->
                 extras.perform(action, controller)
             Action.POCKET -> togglePocket()
+            Action.VOICE -> startVoice()
             else -> {
                 media.perform(action, controller, prefs.seekStepMs(controller?.packageName))
                 Outcome.DONE
@@ -1285,11 +1592,13 @@ class KnobService : AccessibilityService() {
         const val LONG_HOLD_MIN_MS = 1_500L
         const val BOTH_HOLD_MS = 700L
         const val MOTION_CHECK_MS = 2_000L
+        const val TAP_NOTE_MS = 10_000L
+        const val BACKGROUND_RETRY_MS = 30_000L
         const val FLIP_RESUME_WINDOW_MS = 30 * 60 * 1000L
         const val WAKE_LOCK_MAX_MS = 60 * 60 * 1000L
         const val PAUSE_SETTLE_MS = 3_000L
         const val MAX_REPLAYED_STEPS = 4
-        const val LOG_LINES = 10
+        const val LOG_LINES = 30
         const val SEQUENCE_GAP_MS = 450L
         const val SEQUENCE_GAP_MIN_MS = 350L
         const val SEQUENCE_GAP_MAX_MS = 700L
@@ -1324,6 +1633,9 @@ class KnobService : AccessibilityService() {
 
         /** The screen came on this shortly before the assistant was called: the hold turned it on. */
         const val POWER_HOLD_WAKE_MS = 2_500L
+        const val MAX_VOICE_VOLUME_STEPS = 15
+        const val SILENCE_DELAY_MS = 800L
+        const val BRAIN_COMMAND_TOKENS = 16
         const val RELOCK_DELAY_MS = 400L
         const val CONFIRM_MS = 300L
         const val RAMP_QUIET_MS = 600L

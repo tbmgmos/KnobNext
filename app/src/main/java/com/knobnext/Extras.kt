@@ -17,6 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /** What an action did: [message] goes to the event log, [result] picks the sound cue. */
 class Outcome(val message: String?, val result: Result) {
@@ -48,6 +50,12 @@ class Extras(private val context: Context, private val media: Media, private val
     private val audio = context.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val speaker = Speaker(context, prefs)
+    private val scope = kotlinx.coroutines.MainScope()
+
+    // Model-cleaned names, so a track is sent to the model once.
+    private val smartTitles = object : LinkedHashMap<String, Pair<String, String?>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, String?>>?) = size > SMART_TITLE_CACHE
+    }
 
     // Players don't report shuffle/repeat state through the framework API, so we remember what we set.
     private val shuffleOn = HashMap<String, Boolean>()
@@ -70,6 +78,8 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.SWITCH_PLAYER -> switchPlayer(controller)
         Action.FLASHLIGHT -> Outcome.of(torch.toggle())
         Action.RINGER -> toggleRinger()
+        Action.ASK_GEMINI -> Outcome.of(askAbout(controller))
+        Action.TRACK_INFO -> trackInfo(controller)
         else -> Outcome.DONE
     }
 
@@ -77,6 +87,7 @@ class Extras(private val context: Context, private val media: Media, private val
     fun say(text: String) = speaker.say(text)
 
     fun release() {
+        scope.cancel()
         speaker.release()
         torch.release()
     }
@@ -133,7 +144,25 @@ class Extras(private val context: Context, private val media: Media, private val
             speaker.say(context.getString(R.string.speak_unknown))
             return context.getString(R.string.log_no_metadata)
         }
-        speaker.say(Speech.announcement(title, artist, prefs.cleanTitles))
+        if (!prefs.smartTitles || !prefs.cleanTitles) {
+            speaker.say(Speech.announcement(title, artist, prefs.cleanTitles))
+            return null
+        }
+        // A model, when the phone has one, catches what the rules miss; waiting is capped so the
+        // announcement never lags much behind the gesture.
+        val key = "$title\u0000$artist"
+        smartTitles[key]?.let { (t, a) ->
+            speaker.say(Speech.announcement(t, a, clean = true))
+            return null
+        }
+        scope.launch {
+            val cleaned = kotlinx.coroutines.withTimeoutOrNull(SMART_TITLE_WAIT_MS) {
+                Brains.ask(context, TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.second?.let(TitleBrain::parse)
+            }
+            if (cleaned != null) smartTitles[key] = cleaned
+            val (t, a) = cleaned ?: (title to artist)
+            speaker.say(Speech.announcement(t, a, clean = true))
+        }
         return null
     }
 
@@ -309,8 +338,112 @@ class Extras(private val context: Context, private val media: Media, private val
     private fun clock(wallMs: Long): String =
         java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(wallMs))
 
-    private fun openPlayer(controller: MediaController?): String? {
-        val pkg = controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player)
+    private fun openPlayer(controller: MediaController?): String? =
+        openApp(controller?.packageName ?: prefs.lastPlayer ?: return context.getString(R.string.log_no_player))
+
+    private var infoJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Set by the service: keeps the volume keys working while the music is paused for a story (with
+     * the screen off Android ignores them once nothing plays), so the same gesture can stop it.
+     */
+    var keepKeysAlive: ((Boolean) -> Unit)? = null
+
+    /** Set by the service: a line for the event log. */
+    var log: ((String) -> Unit)? = null
+
+    /** Ends the story under way (gives the music back); null when none is. */
+    private var storyEnd: (() -> Unit)? = null
+
+    /**
+     * A few spoken sentences about the playing track, in the background: no app opens, the music only
+     * gets quieter (or pauses, if so set). The same gesture again stops it.
+     */
+    private fun trackInfo(controller: MediaController?): Outcome {
+        if (infoJob?.isActive == true || speaker.speaking || storyEnd != null) {
+            infoJob?.cancel()
+            speaker.stop()
+            // Stopped at any point (even during the opening line): the music comes back.
+            storyEnd?.invoke()
+            return Outcome.undone(context.getString(R.string.log_info_stopped))
+        }
+        val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val track = TrackInfo.Track(
+            title = title,
+            artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
+            album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
+            year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
+        )
+        val lang = prefs.infoLanguage.resolve()
+        val length = prefs.infoLength
+        val source = prefs.infoSource
+        val pause = prefs.infoPause && c.isPlaying()
+        var paused = false
+        var ended = false
+        val pauseMusic = {
+            if (pause && !paused) {
+                paused = true
+                c.transportControls.pause()
+            }
+        }
+        // Runs once, whichever way the story ends: told, failed, or stopped by the gesture.
+        val resume = {
+            if (!ended) {
+                ended = true
+                storyEnd = null
+                if (pause) keepKeysAlive?.invoke(false)
+                if (paused) c.transportControls.play()
+            }
+        }
+        storyEnd = resume
+        if (pause) keepKeysAlive?.invoke(true)
+        // The opening line at once, from the player's own data; the story follows when it is ready.
+        pauseMusic()
+        speaker.say(TrackInfo.header(context, track, lang))
+        infoJob = scope.launch {
+            val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
+            if (told == null) {
+                speaker.say(context.getString(R.string.speak_info_none), resume, queue = true)
+                return@launch
+            }
+            speaker.say(told, resume, queue = true)
+        }
+        return Outcome.done(context.getString(R.string.log_info_started))
+    }
+
+    /**
+     * Opens Gemini with a question about the playing track (who, the story of the song, similar
+     * music); without Gemini, a Google search for it.
+     */
+    private fun askAbout(controller: MediaController?): String? {
+        val meta = controller?.metadata ?: return context.getString(R.string.log_no_track)
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            ?: return context.getString(R.string.log_no_track)
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        val track = if (artist.isNullOrBlank()) "«${Speech.cleanTitle(title)}»" else "«${Speech.cleanTitle(title)}» — ${Speech.cleanArtist(artist)}"
+        val question = context.getString(R.string.gemini_question, track)
+        val tries = listOf(
+            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, question).setPackage(GEMINI),
+            Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, question).setPackage(GOOGLE),
+            Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.google.com/search?q=" + android.net.Uri.encode(question))),
+        )
+        for (intent in tries) {
+            try {
+                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return null
+            } catch (_: Exception) {
+            }
+        }
+        return context.getString(R.string.log_no_gemini)
+    }
+
+    /** Opens a player and starts it playing; a message when that failed. */
+    fun openApp(pkg: String): String? {
         val launch = context.packageManager.getLaunchIntentForPackage(pkg)
             ?: return context.getString(R.string.log_no_player)
         return try {
@@ -324,6 +457,11 @@ class Extras(private val context: Context, private val media: Media, private val
     }
 
     companion object {
+        private const val SMART_TITLE_CACHE = 50
+        private const val SMART_TITLE_WAIT_MS = 2_500L
+        private const val SMART_TITLE_TOKENS = 64
+        private const val GEMINI = "com.google.android.apps.bard"
+        private const val GOOGLE = "com.google.android.googlequicksearchbox"
         private val LIKE = listOf(
             Regex("like"), Regex("thumbs?_?up"), Regex("thumb up"), Regex("favou?rite"), Regex("heart"), Regex("love"),
             Regex("collection"), Regex("library"), Regex("save"), Regex("нрав"), Regex("любим"), Regex("избранн"),
@@ -419,9 +557,7 @@ class SleepReceiver : BroadcastReceiver() {
             return SleepTimer.pauseLater(context)
         }
         prefs.sleepUntil = 0L
-        val audio = context.getSystemService(AudioManager::class.java)
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
+        Media(context).sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
     }
 }
 

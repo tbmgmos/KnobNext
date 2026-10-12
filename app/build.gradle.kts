@@ -22,7 +22,11 @@ android {
     // so that build has no network permission at all.
     flavorDimensions += "store"
     productFlavors {
-        create("github") { dimension = "store" }
+        create("github") {
+            dimension = "store"
+            // The downloadable model and Vosk bring native code: phones only (no x86 emulators).
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        }
         create("rustore") { dimension = "store" }
     }
 
@@ -41,7 +45,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
@@ -64,4 +68,10 @@ dependencies {
     implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Gemini Nano on phones that have it (AICore); nothing is bundled.
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
+    // GitHub build only (it can download models): a local language model and offline speech recognition.
+    "githubImplementation"("com.google.mediapipe:tasks-genai:0.10.27")
+    "githubImplementation"("com.alphacephei:vosk-android:0.3.47")
+    "githubImplementation"("net.java.dev.jna:jna:5.13.0@aar")
 }

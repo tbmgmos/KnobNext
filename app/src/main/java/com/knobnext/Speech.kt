@@ -95,13 +95,15 @@ object Speech {
         val parts = ArrayList<Part>()
         val piece = StringBuilder()
         var script: Script? = null
+        // Numbers (dates, counts) are said in the language of the sentence, not of the word next to them.
+        val main = mainScript(text)
         fun flush() {
             val t = piece.toString().trim()
             if (t.isNotEmpty()) parts += Part(t, localeFor(script, t))
             piece.clear()
         }
         text.codePoints().forEach { cp ->
-            val s = scriptOf(cp)
+            val s = scriptOf(cp) ?: main.takeIf { Character.isDigit(cp) }
             if (s != null && script != null && s != script) {
                 flush()
                 script = s
@@ -112,6 +114,20 @@ object Speech {
         }
         flush()
         return parts
+    }
+
+    /** The alphabet most of the letters are in. */
+    private fun mainScript(text: String): Script? =
+        text.codePoints().toArray().toList().mapNotNull(::scriptOf).groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+
+    /**
+     * The voice for reading all of [text] with one voice: the language most of it is in, so a Russian
+     * story with English names is read by the Russian voice (not the phone's language, which may differ).
+     */
+    fun mainLocale(text: String): Locale? {
+        val script = mainScript(text) ?: return null
+        val letters = text.filter { scriptOf(it.code) == script }
+        return localeFor(script, letters)
     }
 
     private val CYRILLIC_LANGUAGES = setOf("ru", "uk", "be", "bg", "sr", "mk", "kk", "ky", "tg", "mn")
@@ -182,12 +198,49 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         .setAudioAttributes(attributes)
         .build()
     private var tts: TextToSpeech? = null
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    // Players that pause for an announcement resume only when the focus is given back. If the speech
+    // engine never reports the end (it failed, was stopped or died), give it back anyway.
+    private val giveBackFocus = Runnable {
+        audio.abandonAudioFocusRequest(focus)
+        finished()
+    }
+
+    private fun finished() {
+        speaking = false
+        val done = whenDone
+        whenDone = null
+        done?.invoke()
+    }
+
+    /** Stops whatever is being said. */
+    fun stop() {
+        handler.removeCallbacks(giveBackFocus)
+        tts?.stop()
+        audio.abandonAudioFocusRequest(focus)
+        finished()
+    }
     private var engineName: String? = null
     private var ready = false
     private var pending: String? = null
     private var serial = 0
 
-    fun say(text: String) {
+    /** Called once when the phrase passed with it has been said (or stopped, or failed). */
+    private var whenDone: (() -> Unit)? = null
+
+    /** A phrase is being said. */
+    @Volatile var speaking = false
+        private set
+
+    /**
+     * Says [text]. [queue]: after what is being said now (one story told in parts), instead of cutting
+     * it off; the audio focus stays taken in between.
+     */
+    fun say(text: String, onDone: (() -> Unit)? = null, queue: Boolean = false) {
+        if (!(queue && speaking)) finished()
+        whenDone = onDone
+        queued = queue && speaking
         val wanted = prefs.ttsEngine
         if (tts != null && wanted != engineName) release()
         if (tts == null) {
@@ -199,10 +252,36 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         if (ready) speak(text) else pending = text
     }
 
+    private var queued = false
+
+    /** Runs [onDone] once what is being said now ends, or at once when nothing is. */
+    fun then(onDone: () -> Unit) {
+        if (speaking) whenDone = onDone else onDone()
+    }
+
+    /** The phrase an utterance belongs to: "knob-<phrase>-<piece>[-last]". */
+    private fun phraseOf(utteranceId: String?) = utteranceId?.split('-')?.getOrNull(1)?.toIntOrNull()
+
+    /** The end of a phrase counts only for the latest one: an earlier part of a story doesn't end it. */
+    private fun ended(utteranceId: String?) {
+        val phrase = phraseOf(utteranceId)
+        handler.post {
+            if (phrase != null && phrase != serial) return@post
+            handler.removeCallbacks(giveBackFocus)
+            audio.abandonAudioFocusRequest(focus)
+            finished()
+        }
+    }
+
     override fun onInit(status: Int) {
         val engine = tts ?: return
         ready = status == TextToSpeech.SUCCESS
-        if (!ready) return
+        if (!ready) {
+            // Nothing will be said: whoever waits for the end must not wait forever.
+            pending = null
+            handler.post(::finished)
+            return
+        }
         engine.language = Locale.getDefault()
         engine.setAudioAttributes(attributes)
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -210,17 +289,15 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
             // Focus is held for the whole phrase, which may be several pieces.
             override fun onDone(utteranceId: String?) {
-                if (utteranceId?.endsWith(LAST) == true) audio.abandonAudioFocusRequest(focus)
+                if (utteranceId?.endsWith(LAST) == true) ended(utteranceId)
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                if (utteranceId?.endsWith(LAST) == true) audio.abandonAudioFocusRequest(focus)
+                if (utteranceId?.endsWith(LAST) == true) ended(utteranceId)
             }
 
             @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                audio.abandonAudioFocusRequest(focus)
-            }
+            override fun onError(utteranceId: String?) = ended(utteranceId)
         })
         pending?.let(::speak)
         pending = null
@@ -228,16 +305,27 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     private fun speak(text: String) {
         val engine = tts ?: return
-        val parts = if (prefs.ttsMultilang) Speech.split(text) else listOf(Speech.Part(text, null))
-        if (parts.isEmpty()) return
+        val parts = if (prefs.ttsMultilang) Speech.split(text) else listOf(Speech.Part(text, Speech.mainLocale(text)))
+        if (parts.isEmpty()) return finished()
         engine.setSpeechRate(prefs.ttsRate)
         audio.requestAudioFocus(focus)
+        speaking = true
+        handler.removeCallbacks(giveBackFocus)
+        handler.postDelayed(giveBackFocus, (FOCUS_BASE_MS + text.length * FOCUS_PER_CHAR_MS / prefs.ttsRate).toLong().coerceAtMost(FOCUS_MAX_MS))
         val id = ++serial
         parts.forEachIndexed { i, part ->
             // The voice is taken when the piece is queued, so each piece keeps its own.
             useLanguage(engine, part.locale ?: Locale.getDefault())
             val utterance = "knob-$id-$i" + if (i == parts.lastIndex) LAST else ""
-            engine.speak(part.text, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, utterance)
+            val mode = if (i == 0 && !queued) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            val result = engine.speak(part.text, mode, null, utterance)
+            if (result != TextToSpeech.SUCCESS) {
+                // Nothing will be said, and no callback will come to give the focus back.
+                handler.removeCallbacks(giveBackFocus)
+                audio.abandonAudioFocusRequest(focus)
+                finished()
+                return
+            }
         }
     }
 
@@ -269,6 +357,8 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
         }
 
     fun release() {
+        handler.removeCallbacks(giveBackFocus)
+        audio.abandonAudioFocusRequest(focus)
         tts?.shutdown()
         tts = null
         ready = false
@@ -276,5 +366,8 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     private companion object {
         const val LAST = "-last"
+        const val FOCUS_BASE_MS = 3_000f
+        const val FOCUS_PER_CHAR_MS = 120f
+        const val FOCUS_MAX_MS = 120_000L
     }
 }

@@ -88,12 +88,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         GestureTest.setVisible(true)
+        HeadsetLive.setVisible(true)
     }
 
     override fun onStop() {
         // By the time the screen-off stop arrives, the device is already non-interactive.
         val screenOff = !getSystemService(android.os.PowerManager::class.java).isInteractive
         GestureTest.setVisible(false, screenOff)
+        HeadsetLive.setVisible(false)
         super.onStop()
     }
 

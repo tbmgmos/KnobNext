@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only what the English story about a track says aloud; the rest of the app is in Russian. -->
+<resources>
+    <string name="info_album">album “%1$s”</string>
+    <string name="info_year">%1$s</string>
+    <string name="src_formed">The band was formed in %1$s.</string>
+    <string name="src_style">Their style: %1$s.</string>
+    <string name="src_album_date">The album came out on %1$s.</string>
+    <string name="src_label">The album was released on the %1$s label.</string>
+    <string name="src_genres">Genres: %1$s.</string>
+    <string name="src_band_from">The band comes from %1$s.</string>
+    <string name="src_artist_from">The artist comes from %1$s.</string>
+    <plurals name="src_members">
+        <item quantity="one">The band has %1$d member.</item>
+        <item quantity="other">The band has %1$d members.</item>
+    </plurals>
+    <plurals name="src_tracks">
+        <item quantity="one">The album has %1$d track.</item>
+        <item quantity="other">The album has %1$d tracks.</item>
+    </plurals>
+    <plurals name="src_fans">
+        <item quantity="one">The artist has %1$s fan on Deezer.</item>
+        <item quantity="other">The artist has %1$s fans on Deezer.</item>
+    </plurals>
+    <plurals name="src_albums">
+        <item quantity="one">Deezer lists %1$d album by the artist.</item>
+        <item quantity="other">Deezer lists %1$d albums by the artist.</item>
+    </plurals>
+</resources>

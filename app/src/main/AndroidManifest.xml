@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Pocket mode turns the screen back on (black) when it was just turned off. -->
     <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
+    <!-- Voice commands: the microphone is used only after a gesture asks for one phrase. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Lets the app show names and icons of players (package visibility on Android 11+). -->
     <queries>
@@ -24,8 +26,14 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
         <!-- Holding the power button with nothing playing hands over to the usual assistant. -->
+        <!-- Speech recognizers, for voice commands. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.google.android.apps.bard" />
+        <!-- Gemini Nano lives in this system service: its version tells why the model may be missing. -->
+        <package android:name="com.google.android.aicore" />
     </queries>
 
     <application
@@ -60,6 +68,23 @@
             android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- The headset's voice button. Off until the setting is on, so the system never offers it as a
+             second voice assistant to people who did not ask for it. -->
+        <activity
+            android:name=".HeadsetHoldActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/assist_label"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

@@ -6,14 +6,16 @@ import android.content.SharedPreferences
 /** VOLUME_* on a held gesture keeps changing the volume until release; elsewhere it is one step. */
 enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
-    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET,
+    ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE, TRACK_INFO, ASK_GEMINI,
 
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
 
     /** Actions that make sense when nothing is playing (they start playback or aren't about music). */
     val worksWhenIdle: Boolean
-        get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER
+        get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER ||
+            // The story pauses the music if so set; the same gesture must still be able to stop it.
+            this == VOICE || this == TRACK_INFO
 
     val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
 }
@@ -27,7 +29,7 @@ enum class ProfilePreset {
     SEEK,
 }
 
-enum class GestureGroup { KEYS, SEQUENCE, MOTION }
+enum class GestureGroup { KEYS, SEQUENCE, MOTION, HEADSET }
 
 enum class Gesture(val key: String, val group: GestureGroup, val default: Action) {
     HOLD_UP("action_hold_up", GestureGroup.KEYS, Action.NEXT),
@@ -53,7 +55,29 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     BACK_TAP_3("action_back_tap_3", GestureGroup.MOTION, Action.PREVIOUS),
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
     WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
+
+    // Buttons of headphones and speakers. What they send is up to the device: a tap, two or three taps
+    // usually arrive as play/pause, next and previous. Each is the same as before until reassigned.
+    HS_PLAY_PAUSE("action_hs_play_pause", GestureGroup.HEADSET, Action.PLAY_PAUSE),
+    HS_NEXT("action_hs_next", GestureGroup.HEADSET, Action.NEXT),
+    HS_PREVIOUS("action_hs_previous", GestureGroup.HEADSET, Action.PREVIOUS),
+    HS_FORWARD("action_hs_forward", GestureGroup.HEADSET, Action.SEEK_FORWARD),
+    HS_REWIND("action_hs_rewind", GestureGroup.HEADSET, Action.SEEK_BACK),
+
+    // For devices that send every tap as a plain play/pause: KnobNext counts the presses itself.
+    HS_PLAY_PAUSE_DOUBLE("action_hs_play_pause_double", GestureGroup.HEADSET, Action.NONE),
+    HS_PLAY_PAUSE_TRIPLE("action_hs_play_pause_triple", GestureGroup.HEADSET, Action.NONE),
+    HS_PLAY_PAUSE_HOLD("action_hs_play_pause_hold", GestureGroup.HEADSET, Action.NONE),
+
+    // The headset's "voice assistant" button; works once it is passed to KnobNext (a setting).
+    HS_ASSIST("action_hs_assist", GestureGroup.HEADSET, Action.NONE),
 }
+
+/**
+ * What the finger does on the headphones. KnobNext only sees the command that arrives; which gesture
+ * sends it is set in the headphones' own app, so the person tells it once, per headphones.
+ */
+enum class HeadsetMotion { TAP, DOUBLE_TAP, TRIPLE_TAP, HOLD, DOUBLE_TAP_HOLD, SWIPE_FORWARD, SWIPE_BACK, BUTTON }
 
 /** How hard the back has to be tapped; values are high-pass acceleration thresholds in m/s². */
 enum class TapSensitivity(val threshold: Float) { LOW(5.0f), MEDIUM(3.5f), HIGH(2.4f) }
@@ -101,6 +125,19 @@ data class Settings(
     val backTapEco: Boolean,
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
+    val headsetButtons: Boolean,
+    val headsetHold: Boolean,
+    /** The headphones connected last, and the gestures their commands were named after there. */
+    val headsetDevice: String?,
+    val headsetMotions: Map<Gesture, HeadsetMotion>,
+    val smartVoice: Boolean,
+    val blindGestures: Boolean,
+    val infoLength: InfoLength,
+    val infoPause: Boolean,
+    val infoLanguage: InfoLanguage,
+    val infoSource: InfoSource,
+    val keysOnPause: Boolean,
+    val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
     val profileSeekSteps: Map<String, Int>,
@@ -272,7 +309,7 @@ class Prefs(context: Context) {
 
     /** Read pieces in another alphabet with a voice of their language. */
     var ttsMultilang: Boolean
-        get() = sp.getBoolean("tts_multilang", true)
+        get() = sp.getBoolean("tts_multilang", false)
         set(v) = sp.edit().putBoolean("tts_multilang", v).apply()
 
     /** Drop "(Remastered 2011)", "[Official Video]", emoji and the like before reading a title. */
@@ -349,9 +386,81 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
 
     /** Holding power with nothing to do opens Gemini (or the Google assistant), as it would without us. */
+    /** Buttons of Bluetooth and wired headphones go through KnobNext, so they can be reassigned. */
+    var headsetButtons: Boolean
+        get() = sp.getBoolean("headset_buttons", false)
+        set(v) = sp.edit().putBoolean("headset_buttons", v).apply()
+
+    /** The headset's assistant button opens KnobNext's action instead of the assistant. */
+    var headsetHold: Boolean
+        get() = sp.getBoolean("headset_hold", false)
+        set(v) = sp.edit().putBoolean("headset_hold", v).apply()
+
+    /** The headphones whose buttons came through KnobNext last. */
+    var lastHeadset: String?
+        get() = sp.getString("last_headset", null)
+        set(v) = sp.edit().putString("last_headset", v).apply()
+
+    /** Which gesture on [device] sends the command behind [g], as the person said; null: not said. */
+    fun headsetMotion(device: String, g: Gesture): HeadsetMotion? =
+        sp.getString("hs_motion@$device@${g.key}", null)?.let { name -> HeadsetMotion.entries.firstOrNull { it.name == name } }
+
+    fun setHeadsetMotion(device: String, g: Gesture, m: HeadsetMotion?) {
+        val key = "hs_motion@$device@${g.key}"
+        if (m == null) sp.edit().remove(key).apply() else sp.edit().putString(key, m.name).apply()
+    }
+
     var powerHoldFallback: Boolean
         get() = sp.getBoolean("power_hold_fallback", true)
         set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
+
+    /** The player a gesture paused last: play goes back to it (not a stored setting, just memory). */
+    var pausedPlayer: String?
+        get() = sp.getString("paused_player", null)
+        set(v) = sp.edit().putString("paused_player", v).apply()
+
+    /**
+     * With the screen off: a held key (system-repeated steps) and both keys together. Off by default:
+     * Bluetooth headphones can echo a volume step back, which looks just like both keys pressed.
+     */
+    var blindGestures: Boolean
+        get() = sp.getBoolean("blind_gestures", false)
+        set(v) = sp.edit().putBoolean("blind_gestures", v).apply()
+
+    /** How long the spoken story about a track is. */
+    var infoLength: InfoLength
+        get() = InfoLength.entries.firstOrNull { it.name == sp.getString("info_length", null) } ?: InfoLength.NORMAL
+        set(v) = sp.edit().putString("info_length", v.name).apply()
+
+    /** Where the story about a track comes from. */
+    var infoSource: InfoSource
+        get() = InfoSource.entries.firstOrNull { it.name == sp.getString("info_source", null) } ?: InfoSource.GEMINI
+        set(v) = sp.edit().putString("info_source", v.name).apply()
+
+    /** The language of the story about a track. */
+    var infoLanguage: InfoLanguage
+        get() = InfoLanguage.entries.firstOrNull { it.name == sp.getString("info_language", null) } ?: InfoLanguage.RU
+        set(v) = sp.edit().putString("info_language", v.name).apply()
+
+    /** Pause the music for the story about a track (otherwise it only gets quieter). */
+    var infoPause: Boolean
+        get() = sp.getBoolean("info_pause", false)
+        set(v) = sp.edit().putBoolean("info_pause", v).apply()
+
+    /** After a gesture pause, play silence for the resume window so the volume keys keep working. */
+    var keysOnPause: Boolean
+        get() = sp.getBoolean("keys_on_pause", true)
+        set(v) = sp.edit().putBoolean("keys_on_pause", v).apply()
+
+    /** Phrases the rules don't know go to the on-phone model, when there is one. */
+    var smartVoice: Boolean
+        get() = sp.getBoolean("smart_voice", true)
+        set(v) = sp.edit().putBoolean("smart_voice", v).apply()
+
+    /** Track names are tidied for reading aloud by the on-phone model, when there is one. */
+    var smartTitles: Boolean
+        get() = sp.getBoolean("smart_titles", true)
+        set(v) = sp.edit().putBoolean("smart_titles", v).apply()
 
     /** Apps for which the "make a profile" suggestion was dismissed. */
     var dismissedSuggestions: Set<String>
@@ -405,6 +514,15 @@ class Prefs(context: Context) {
         if (packageName !in seen) sp.edit().putStringSet("seen_players", seen + packageName).apply()
     }
 
+    /** Takes [packageName] out of everything that remembers players (KnobNext's own session was once taken for one). */
+    fun forgetPlayer(packageName: String) {
+        val edit = sp.edit()
+        seenPlayers.takeIf { packageName in it }?.let { edit.putStringSet("seen_players", it - packageName) }
+        if (lastPlayer == packageName) edit.remove("last_player")
+        if (pausedPlayer == packageName) edit.remove("paused_player")
+        edit.apply()
+    }
+
     fun action(g: Gesture): Action {
         sp.getString(g.key, null)?.let { stored ->
             return Action.entries.firstOrNull { it.name == stored } ?: Action.NONE
@@ -450,10 +568,17 @@ class Prefs(context: Context) {
 
     /** One-time fixes of settings saved by older versions. */
     fun migrate() {
-        if (sp.getInt("migrated", 0) >= 1) return
+        val level = sp.getInt("migrated", 0)
+        if (level >= 2) return
+        val edit = sp.edit()
+        // One voice for a whole phrase sounds more natural than switching voices mid-sentence.
+        if (level < 2) edit.putBoolean("tts_multilang", false)
+        if (level >= 1) {
+            edit.putInt("migrated", 2).apply()
+            return
+        }
         // Profiles made from the first "seek" preset had next/previous on the long hold, which a seeking
         // hold makes unreachable (and which used to stop the hold from seeking smoothly).
-        val edit = sp.edit()
         profileApps.forEach { pkg ->
             listOf(
                 Gesture.HOLD_UP to Gesture.LONG_HOLD_UP,
@@ -467,7 +592,7 @@ class Prefs(context: Context) {
                 }
             }
         }
-        edit.putInt("migrated", 1).apply()
+        edit.putInt("migrated", 2).apply()
     }
 
     fun deleteProfile(pkg: String) {
@@ -517,6 +642,21 @@ class Prefs(context: Context) {
         backTapEco = backTapEco,
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
+        headsetButtons = headsetButtons,
+        headsetHold = headsetHold,
+        headsetDevice = lastHeadset,
+        headsetMotions = lastHeadset?.let { device ->
+            Gesture.entries.filter { it.group == GestureGroup.HEADSET }
+                .mapNotNull { g -> headsetMotion(device, g)?.let { g to it } }.toMap()
+        }.orEmpty(),
+        smartVoice = smartVoice,
+        blindGestures = blindGestures,
+        infoLength = infoLength,
+        infoPause = infoPause,
+        infoLanguage = infoLanguage,
+        infoSource = infoSource,
+        keysOnPause = keysOnPause,
+        smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },
         cuesOffApps = profileApps.filter { cuesOff(it) }.toSet(),

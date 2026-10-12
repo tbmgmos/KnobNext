@@ -28,6 +28,8 @@ class VolumeWatcher(
     private val context: Context,
     private val handler: Handler,
     private val shouldPoll: () -> Boolean,
+    /** Whether to recover up-and-down pairs the poll missed (both keys with the screen off). */
+    private val wantPairs: () -> Boolean,
     /** The screen turned off (false) or on (true). */
     private val onScreen: (on: Boolean) -> Unit,
     private val onVolume: (value: Int, source: Source) -> Unit,
@@ -59,7 +61,7 @@ class VolumeWatcher(
             // where the volume was a moment ago: replay that step and its undoing.
             val prev = intent.getIntExtra(EXTRA_PREV_VALUE, -1)
             val seen = prev == polledFrom && SystemClock.elapsedRealtime() - polledChangeAt < SEEN_MS
-            if (pollActive && prev >= 0 && prev != value && value == polled && !seen) {
+            if (pollActive && prev >= 0 && prev != value && value == polled && !seen && wantPairs()) {
                 polledFrom = prev
                 polledChangeAt = SystemClock.elapsedRealtime()
                 report(prev, Source.POLL)

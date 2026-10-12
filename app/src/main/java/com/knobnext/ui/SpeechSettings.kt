@@ -53,7 +53,7 @@ fun SpeechCard(s: Settings, prefs: Prefs) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ControlRow(shape(0), stringResource(R.string.speech_foreign), caption = stringResource(R.string.speech_foreign_hint)) {
                     ConnectedChoice(
-                        options = listOf(true to R.string.speech_foreign_auto, false to R.string.speech_foreign_one),
+                        options = listOf(false to R.string.speech_foreign_one, true to R.string.speech_foreign_auto),
                         selected = s.ttsMultilang,
                         onSelect = { prefs.ttsMultilang = it },
                     )

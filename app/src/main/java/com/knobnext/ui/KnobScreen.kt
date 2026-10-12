@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -61,6 +62,10 @@ import com.knobnext.Cues
 import com.knobnext.PocketScreen
 import com.knobnext.PowerButton
 import com.knobnext.PowerHold
+import com.knobnext.VoiceListener
+import com.knobnext.NanoBrain
+import com.knobnext.Offline
+import com.knobnext.OfflineFile
 import com.knobnext.Prefs
 import com.knobnext.ProfilePreset
 import com.knobnext.R
@@ -96,9 +101,18 @@ private enum class Page(val title: Int) {
     KEYS(R.string.section_keys),
     SEQUENCES(R.string.section_double),
     MOTION(R.string.section_motion),
+    HEADSET(R.string.section_headset),
     PLAYERS(R.string.players_title),
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
+    SETTINGS_GENERAL(R.string.settings_general),
+    SETTINGS_ACTIONS(R.string.settings_actions),
+    SETTINGS_SOUNDS(R.string.settings_sounds),
+    SETTINGS_SPEECH(R.string.settings_speech),
+    SETTINGS_VOICE(R.string.settings_voice),
+    SETTINGS_PAUSE(R.string.settings_pause),
+    SETTINGS_POCKET(R.string.settings_pocket),
+    SETTINGS_ABOUT(R.string.settings_about),
     TEST(R.string.test_title),
     DIAGNOSTICS(R.string.diag_title),
 }
@@ -107,7 +121,9 @@ private enum class Page(val title: Int) {
 private val Page.parent: Page
     get() = when (this) {
         Page.PROFILE -> Page.PLAYERS
-        Page.DIAGNOSTICS -> Page.SETTINGS
+        Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH,
+        Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
+        Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
         else -> Page.HOME
     }
 
@@ -227,6 +243,8 @@ fun KnobScreen(
         ) { current ->
             // Composed only while the check page is shown: that is what keeps the service in check mode.
             val check = if (current == Page.TEST) rememberGestureCheck() else null
+            // Likewise: while the headphones page is shown, presses on them only show there.
+            val learn = if (current == Page.HEADSET) rememberHeadsetLearn() else null
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -241,9 +259,21 @@ fun KnobScreen(
                     Page.KEYS -> keysPage(ctx)
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
+                    Page.HEADSET -> headsetPage(ctx, learn ?: HeadsetLearnState())
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
+                    Page.SETTINGS_GENERAL -> generalSettings(ctx)
+                    Page.SETTINGS_ACTIONS -> actionSettings(ctx)
+                    Page.SETTINGS_SOUNDS -> item { CueCard(ctx) }
+                    Page.SETTINGS_SPEECH -> speechSettings(ctx)
+                    Page.SETTINGS_VOICE -> {
+                        item { VoiceCard(ctx) }
+                        item { BrainCard(ctx) }
+                    }
+                    Page.SETTINGS_PAUSE -> pauseSettings(ctx)
+                    Page.SETTINGS_POCKET -> pocketSettings(ctx)
+                    Page.SETTINGS_ABOUT -> aboutSettings(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
                     Page.DIAGNOSTICS -> {
                         item { DiagnosticsCard(s, prefs, setup, actions, nowPlaying, versionName) }
@@ -325,7 +355,7 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
     item {
         Column {
             SectionTitle(stringResource(R.string.gestures_title))
-            Group(3) {
+            Group(4) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PageTile(
                         0, MaterialShapes.Sunny, KnobIcons.VolumeUp, R.string.section_keys,
@@ -347,6 +377,10 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                         2, MaterialShapes.SoftBurst, KnobIcons.TouchApp, R.string.section_motion,
                         if (motionOn == 0) stringResource(R.string.tile_off) else stringResource(R.string.tile_motion, motionOn),
                     ) { ctx.open(Page.MOTION) }
+                    PageTile(
+                        3, MaterialShapes.Cookie6Sided, KnobIcons.MusicNote, R.string.section_headset,
+                        if (s.headsetButtons) stringResource(R.string.tile_headset_on) else stringResource(R.string.tile_off),
+                    ) { ctx.open(Page.HEADSET) }
                 }
             }
         }
@@ -427,7 +461,17 @@ private fun LazyListScope.keysPage(ctx: PageContext) {
     item { HoldAdvice(ctx) }
     item { PowerCard(ctx) }
     item { Hint(stringResource(R.string.section_keys_hint)) }
-    item { Hint(stringResource(R.string.blind_keys_hint)) }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Group(1) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pref_blind), s.blindGestures, { ctx.prefs.blindGestures = it },
+                    subtitle = stringResource(R.string.pref_blind_hint), enabled = s.enabled,
+                )
+            }
+            Hint(stringResource(R.string.blind_keys_hint))
+        }
+    }
 }
 
 /** The power button pressed twice: its gesture, and whether the system's own double press is in the way. */
@@ -512,13 +556,231 @@ private fun PowerCard(ctx: PageContext) {
     }
 }
 
+/** Voice commands: microphone permission, which recognizer is there, a try-it button and examples. */
+@Composable
+private fun VoiceCard(ctx: PageContext) {
+    val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
+    val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
+    fun granted() = context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    var mic by remember { mutableStateOf(granted()) }
+    val askMic = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { mic = it || granted() }
+    val engine = remember { VoiceListener.availability(context) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.voice_title))
+        val vosk = Offline.supported && engine != VoiceListener.Availability.ON_DEVICE
+        Group(if (vosk) 4 else 3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ListRow(
+                    shape(0), stringResource(R.string.voice_mic),
+                    subtitle = stringResource(if (mic) R.string.voice_mic_on else R.string.voice_mic_off),
+                    highlighted = !mic,
+                    onClick = if (mic) null else ({ askMic.launch(android.Manifest.permission.RECORD_AUDIO) }),
+                    leading = {
+                        if (mic) {
+                            ShapeBadge(MaterialShapes.Circle, KnobIcons.Check, scheme.primary, scheme.onPrimary, size = 40)
+                        } else {
+                            ShapeBadge(MaterialShapes.Pentagon, KnobIcons.Close, scheme.error, scheme.onError, size = 40)
+                        }
+                    },
+                )
+                ListRow(
+                    shape(1), stringResource(R.string.voice_engine),
+                    subtitle = stringResource(
+                        when (engine) {
+                            VoiceListener.Availability.ON_DEVICE -> R.string.voice_engine_on_device
+                            VoiceListener.Availability.ONLINE -> R.string.voice_engine_online
+                            VoiceListener.Availability.NONE -> R.string.voice_engine_none
+                        },
+                    ),
+                )
+                if (vosk) {
+                    OfflineRow(
+                        shape(2), stringResource(R.string.offline_vosk),
+                        hint = stringResource(R.string.offline_vosk_hint),
+                        state = { Offline.vosk(it) },
+                        download = { Offline.downloadVosk(it) },
+                        delete = { Offline.deleteVosk(it) },
+                    )
+                }
+                ListRow(
+                    shape(if (vosk) 3 else 2), stringResource(R.string.voice_try),
+                    subtitle = stringResource(if (running) R.string.voice_try_hint else R.string.voice_need_service),
+                    enabled = running && mic && engine != VoiceListener.Availability.NONE,
+                    onClick = { VoiceListener.trigger?.invoke() },
+                    trailing = { Icon(KnobIcons.Mic, contentDescription = null) },
+                )
+            }
+        }
+        Hint(stringResource(R.string.voice_hint))
+    }
+}
+
+/** The on-phone model: whether Gemini Nano is there (and fetching it), and what it is used for. */
+@Composable
+private fun BrainCard(ctx: PageContext) {
+    val s = ctx.s
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<NanoBrain.State?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { state = NanoBrain.state() }
+    val download: () -> Unit = {
+        failed = false
+        state = NanoBrain.State.DOWNLOADING
+        scope.launch {
+            try {
+                NanoBrain.download()?.collect { if (it == "failed") failed = true }
+            } catch (_: Exception) {
+                failed = true
+            }
+            state = NanoBrain.state()
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.brain_title))
+        val local = Offline.supported
+        Group(if (local) 4 else 3) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val context = LocalContext.current
+                val aicore = remember(state) { NanoBrain.aicoreVersion(context) }
+                val unavailable = state == NanoBrain.State.UNAVAILABLE
+                val openStore: () -> Unit = { NanoBrain.openAicoreInStore(context) }
+                val recheck: () -> Unit = {
+                    state = null
+                    scope.launch { state = NanoBrain.state() }
+                }
+                ListRow(
+                    shape(0), stringResource(R.string.brain_nano),
+                    subtitle = when {
+                        failed -> stringResource(R.string.brain_nano_failed)
+                        state == null -> stringResource(R.string.brain_nano_checking)
+                        state == NanoBrain.State.READY -> stringResource(R.string.brain_nano_ready)
+                        state == NanoBrain.State.DOWNLOADABLE -> stringResource(R.string.brain_nano_downloadable)
+                        state == NanoBrain.State.DOWNLOADING -> stringResource(R.string.brain_nano_downloading)
+                        // Say why, as precisely as the system lets us know.
+                        aicore == null -> stringResource(R.string.brain_nano_no_aicore)
+                        NanoBrain.unavailableReason != null ->
+                            stringResource(R.string.brain_nano_error, NanoBrain.unavailableReason ?: "", aicore)
+                        else -> stringResource(R.string.brain_nano_refused, aicore)
+                    },
+                    highlighted = state == NanoBrain.State.DOWNLOADABLE || failed || unavailable,
+                    onClick = when {
+                        state == NanoBrain.State.DOWNLOADABLE || failed -> download
+                        unavailable && aicore == null -> openStore
+                        unavailable -> recheck
+                        else -> null
+                    },
+                    trailing = { Icon(KnobIcons.Sparkle, contentDescription = null) },
+                )
+                if (local) {
+                    OfflineRow(
+                        shape(1), stringResource(R.string.offline_llm),
+                        hint = stringResource(R.string.offline_llm_hint),
+                        state = { Offline.llm(it) },
+                        download = { context -> scope.launch { Offline.downloadLlm(context) } },
+                        delete = { Offline.deleteLlm(it) },
+                    )
+                }
+                val n = if (local) 1 else 0
+                SwitchRow(
+                    shape(1 + n), stringResource(R.string.brain_voice), s.smartVoice, { ctx.prefs.smartVoice = it },
+                    subtitle = stringResource(R.string.brain_voice_hint),
+                )
+                SwitchRow(
+                    shape(2 + n), stringResource(R.string.brain_titles), s.smartTitles, { ctx.prefs.smartTitles = it },
+                    subtitle = stringResource(R.string.brain_titles_hint),
+                )
+            }
+        }
+        Hint(stringResource(R.string.brain_hint))
+    }
+}
+
+/** A downloadable model: its state (with progress while downloading), download and delete. */
+@Composable
+private fun GroupScope.OfflineRow(
+    shape: androidx.compose.ui.graphics.Shape,
+    title: String,
+    hint: String,
+    state: (android.content.Context) -> OfflineFile,
+    download: (android.content.Context) -> Unit,
+    delete: (android.content.Context) -> Unit,
+) {
+    val context = LocalContext.current
+    var file by remember { mutableStateOf(state(context)) }
+    var tick by remember { mutableIntStateOf(0) }
+    // While something is going on, look again every second.
+    LaunchedEffect(tick, file.state) {
+        if (file.state == OfflineFile.State.DOWNLOADING || file.state == OfflineFile.State.UNPACKING || tick == 0) {
+            kotlinx.coroutines.delay(1_000)
+            file = state(context)
+            tick++
+        }
+    }
+    var confirmDelete by remember { mutableStateOf(false) }
+    ListRow(
+        shape, title,
+        subtitle = when (file.state) {
+            OfflineFile.State.MISSING -> hint
+            OfflineFile.State.DOWNLOADING -> if (file.totalMb > 0) {
+                stringResource(R.string.offline_downloading_of, file.downloadedMb, file.totalMb)
+            } else {
+                stringResource(R.string.offline_downloading)
+            }
+            OfflineFile.State.UNPACKING -> stringResource(R.string.offline_unpacking)
+            OfflineFile.State.READY -> if (file.totalMb > 0) {
+                stringResource(R.string.offline_ready_size, file.totalMb)
+            } else {
+                stringResource(R.string.offline_ready)
+            }
+            OfflineFile.State.FAILED -> file.error ?: stringResource(R.string.offline_err_download)
+        },
+        highlighted = file.state == OfflineFile.State.FAILED,
+        onClick = {
+            when (file.state) {
+                OfflineFile.State.MISSING, OfflineFile.State.FAILED -> {
+                    download(context)
+                    file = OfflineFile(OfflineFile.State.DOWNLOADING)
+                    tick++
+                }
+                else -> confirmDelete = true
+            }
+        },
+        trailing = {
+            Icon(
+                if (file.state == OfflineFile.State.MISSING || file.state == OfflineFile.State.FAILED) KnobIcons.Download else KnobIcons.Close,
+                contentDescription = null,
+            )
+        },
+    )
+    if (confirmDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(title) },
+            text = { Text(stringResource(R.string.offline_delete_confirm)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    delete(context)
+                    file = state(context)
+                    confirmDelete = false
+                }) { Text(stringResource(R.string.offline_delete)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+}
+
 /** Pocket mode: turned on by the power button while music plays, or right now to try it. */
 @Composable
 private fun PocketCard(ctx: PageContext) {
     val s = ctx.s
     val running = ctx.setup.serviceEnabled && ctx.setup.serviceRunning
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionTitle(stringResource(R.string.pocket_title))
         Group(2) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
@@ -605,11 +867,148 @@ private fun LazyListScope.sequencesPage(ctx: PageContext) {
 
 // ---------------------------------------------------------------- Motion
 
+private fun LazyListScope.headsetPage(ctx: PageContext, learn: HeadsetLearnState) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item { Hint(stringResource(R.string.headset_intro)) }
+    item {
+        Group(1) {
+            SwitchRow(
+                shape(0), stringResource(R.string.headset_title), s.headsetButtons, { prefs.headsetButtons = it },
+                subtitle = stringResource(R.string.headset_subtitle), enabled = s.enabled,
+                leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.MusicNote, primary = true) },
+            )
+        }
+    }
+    if (!s.headsetButtons) return
+    item { HeadsetLiveCard(ctx, learn) }
+    item {
+        HeadsetRows(
+            ctx, learn,
+            (learn.device ?: s.headsetDevice)?.let { stringResource(R.string.headset_gestures_of, it) }
+                ?: stringResource(R.string.headset_commands),
+            listOf(
+                Gesture.HS_PLAY_PAUSE to MaterialShapes.Circle,
+                Gesture.HS_NEXT to MaterialShapes.Pill,
+                Gesture.HS_PREVIOUS to MaterialShapes.Arch,
+                Gesture.HS_FORWARD to MaterialShapes.Triangle,
+                Gesture.HS_REWIND to MaterialShapes.Diamond,
+            ),
+        )
+    }
+    item {
+        HeadsetRows(
+            ctx, learn, stringResource(R.string.headset_counted),
+            listOf(
+                Gesture.HS_PLAY_PAUSE_DOUBLE to MaterialShapes.Puffy,
+                Gesture.HS_PLAY_PAUSE_TRIPLE to MaterialShapes.Flower,
+                Gesture.HS_PLAY_PAUSE_HOLD to MaterialShapes.Sunny,
+            ),
+        )
+    }
+    item { Hint(stringResource(R.string.headset_counted_hint)) }
+    item {
+        Column {
+            SectionTitle(stringResource(R.string.headset_hold))
+            Group(if (s.headsetHold) 2 else 1) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SwitchRow(
+                        shape(0), stringResource(R.string.headset_hold_switch), s.headsetHold, { prefs.headsetHold = it },
+                        subtitle = stringResource(R.string.headset_hold_hint), enabled = s.enabled,
+                    )
+                    AnimatedVisibility(s.headsetHold) {
+                        GestureRow(
+                            1, Gesture.HS_ASSIST, s, MaterialShapes.SoftBoom, accent = true,
+                            highlighted = learn.fresh == Gesture.HS_ASSIST, onEdit = ctx.edit,
+                        )
+                    }
+                }
+            }
+        }
+    }
+    item { Hint(stringResource(R.string.headset_hint)) }
+}
+
+/** Which headphones are caught, what the last press on them was, and which gesture that was. */
+@Composable
+private fun HeadsetLiveCard(ctx: PageContext, learn: HeadsetLearnState) {
+    val last = learn.last
+    val device = learn.device?.takeIf { it != "?" }
+    val motion = last?.let { ctx.s.headsetMotions[it.gesture] }?.takeIf { device != null && device == ctx.s.headsetDevice }
+    val title: String
+    val subtitle: String
+    when {
+        learn.device == null -> {
+            title = stringResource(R.string.headset_live_none)
+            subtitle = stringResource(R.string.headset_live_none_hint)
+        }
+        last == null -> {
+            title = stringResource(R.string.headset_live_try)
+            subtitle = stringResource(R.string.headset_live_try_hint, learn.device.orEmpty())
+        }
+        else -> {
+            title = motion?.let { stringResource(R.string.headset_live_got_motion, stringResource(motionLabel(it)), stringResource(gestureLabel(last.gesture))) }
+                ?: stringResource(R.string.headset_live_got, stringResource(gestureLabel(last.gesture)))
+            subtitle = if (last.key == 0) {
+                stringResource(R.string.headset_live_got_hint_voice)
+            } else {
+                stringResource(R.string.headset_live_got_hint, android.view.KeyEvent.keyCodeToString(last.key).removePrefix("KEYCODE_"))
+            }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Group(1) {
+            ListRow(
+                shape = shape(0),
+                title = title,
+                subtitle = subtitle,
+                highlighted = learn.fresh != null,
+                leading = { Badge(MaterialShapes.Cookie9Sided, KnobIcons.TouchApp) },
+            )
+        }
+        if (last != null && device != null) {
+            MotionQuestion(device, motion) { ctx.prefs.setHeadsetMotion(device, last.gesture, it) }
+        }
+    }
+}
+
+/**
+ * One line per command, named after the gesture that sends it on these headphones once that is known
+ * ("Double tap"); until then by the command, with the gesture that usually sends it.
+ */
+@Composable
+private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: String, rows: List<Pair<Gesture, RoundedPolygon>>) {
+    val s = ctx.s
+    val scheme = MaterialTheme.colorScheme
+    Column {
+        SectionTitle(title)
+        Group(rows.size) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                rows.forEachIndexed { i, (g, polygon) ->
+                    val action = s.actions[g] ?: Action.NONE
+                    val motion = s.headsetMotions[g]
+                    val command = stringResource(gestureLabel(g))
+                    ListRow(
+                        shape = shape(i),
+                        title = motion?.let { stringResource(motionLabel(it)) } ?: command,
+                        subtitle = stringResource(R.string.headset_row_action, stringResource(actionLabel(action))) + "\n" +
+                            (if (motion != null) command else stringResource(typicalMotion(g))),
+                        enabled = s.enabled,
+                        highlighted = learn.fresh == g,
+                        onClick = { ctx.edit(g) },
+                        leading = { ShapeBadge(polygon, actionIcon(action), scheme.secondaryContainer, scheme.onSecondaryContainer) },
+                    )
+                }
+            }
+        }
+    }
+}
+
 private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(if (s.backTap) 5 else 1) {
+        Group(if (s.backTap) 6 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -635,6 +1034,11 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                         SwitchRow(
                             shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
                             subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
+                        )
+                        ListRow(
+                            shape = shape(5),
+                            title = stringResource(R.string.tap_stats_title),
+                            subtitle = rememberTapSummary() + "\n" + stringResource(R.string.tap_stats_hint),
                         )
                     }
                 }
@@ -921,16 +1325,144 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
         if (s.wave) add(Gesture.WAVE)
     }
     if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, actions, check) }
+    if (s.headsetButtons) {
+        item {
+            CheckList(
+                stringResource(R.string.section_headset),
+                Gesture.entries.filter { it.group == GestureGroup.HEADSET && (s.headsetHold || it != Gesture.HS_ASSIST) },
+                actions, check,
+            )
+        }
+    }
     item { Hint(stringResource(R.string.test_hint)) }
 }
 
 // ---------------------------------------------------------------- Settings
 
 private fun LazyListScope.settingsPage(ctx: PageContext) {
+    item { SettingsHub(ctx) }
+}
+
+/** One line of the settings list: opens [page]; [summary] tells what is set there now. */
+private class Category(val page: Page, val icon: androidx.compose.ui.graphics.vector.ImageVector, val summary: String)
+
+/** The settings, Android style: a short list of sections, each telling what is set inside. */
+@Composable
+private fun SettingsHub(ctx: PageContext) {
+    val s = ctx.s
+    val context = LocalContext.current
+    fun sentence(parts: List<String>) = parts.joinToString(" · ").replaceFirstChar { it.uppercase() }
+    val mic = context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    val groups = listOf(
+        listOf(
+            Category(
+                Page.SETTINGS_GENERAL, KnobIcons.Tune,
+                sentence(
+                    buildList {
+                        if (s.onlyWhenPlaying) add(stringResource(R.string.sum_when_playing))
+                        if (s.headphonesOnly) add(stringResource(R.string.sum_headphones))
+                        if (s.vibrate) add(stringResource(R.string.sum_vibrate))
+                    }.ifEmpty { listOf(stringResource(R.string.sum_no_limits)) },
+                ),
+            ),
+            Category(
+                Page.SETTINGS_ACTIONS, KnobIcons.FastForward,
+                sentence(
+                    listOf(
+                        stringResource(if (s.seekSmooth) R.string.sum_seek_smooth else R.string.sum_seek_steps),
+                        stringResource(R.string.sum_seek_step, s.seekStepSec),
+                    ),
+                ),
+            ),
+            Category(
+                Page.SETTINGS_SOUNDS, KnobIcons.VolumeUp,
+                stringResource(if (s.cueStyle == CueStyle.OFF) R.string.sum_off else R.string.sum_cues_on),
+            ),
+            Category(
+                Page.SETTINGS_SPEECH, KnobIcons.RecordVoice,
+                stringResource(
+                    when {
+                        s.announceAllTracks -> R.string.sum_speech_all
+                        s.announceSkips -> R.string.sum_speech_skips
+                        else -> R.string.sum_speech_gesture
+                    },
+                ),
+            ),
+        ),
+        listOf(
+            Category(
+                Page.SETTINGS_VOICE, KnobIcons.Mic,
+                stringResource(if (mic) R.string.sum_voice_ready else R.string.sum_voice_mic),
+            ),
+            Category(
+                Page.SETTINGS_PAUSE, KnobIcons.Bedtime,
+                sentence(
+                    buildList {
+                        add(
+                            if (s.resumeMinutes > 0) {
+                                stringResource(R.string.sum_resume, s.resumeMinutes)
+                            } else {
+                                stringResource(R.string.sum_resume_off)
+                            },
+                        )
+                        if (s.sleepUntil > System.currentTimeMillis()) {
+                            add(
+                                stringResource(
+                                    R.string.sum_sleep_until,
+                                    java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(s.sleepUntil)),
+                                ),
+                            )
+                        }
+                    },
+                ),
+            ),
+            Category(
+                Page.SETTINGS_POCKET, KnobIcons.PhoneDark,
+                sentence(
+                    buildList {
+                        add(stringResource(if (s.pocketAuto) R.string.sum_pocket_power else R.string.sum_pocket_manual))
+                        if (s.pocketGuard) add(stringResource(R.string.sum_pocket_guard))
+                    },
+                ),
+            ),
+        ),
+        listOf(
+            Category(Page.SETTINGS_ABOUT, KnobIcons.Info, stringResource(R.string.sum_about, ctx.versionName)),
+        ),
+    )
+    val scheme = MaterialTheme.colorScheme
+    // Each section its own colour, as in the system settings.
+    val tints = listOf(
+        scheme.primaryContainer to scheme.onPrimaryContainer,
+        scheme.secondaryContainer to scheme.onSecondaryContainer,
+        scheme.tertiaryContainer to scheme.onTertiaryContainer,
+    )
+    var n = 0
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        groups.forEach { group ->
+            Group(group.size) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    group.forEachIndexed { i, c ->
+                        val (bg, fg) = tints[n++ % tints.size]
+                        ListRow(
+                            shape(i), stringResource(c.page.title),
+                            subtitle = c.summary,
+                            onClick = { ctx.open(c.page) },
+                            leading = { ShapeBadge(MaterialShapes.Circle, c.icon, bg, fg, size = 40) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.generalSettings(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(5) {
+        Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.pref_only_when_playing), s.onlyWhenPlaying, { prefs.onlyWhenPlaying = it },
@@ -941,26 +1473,22 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     subtitle = stringResource(R.string.pref_headphones_hint), enabled = s.enabled,
                 )
                 SwitchRow(
-                    shape(2), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
-                    subtitle = stringResource(R.string.pref_pocket_hint), enabled = s.enabled,
-                )
-                SwitchRow(
-                    shape(3), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
+                    shape(2), stringResource(R.string.pref_vibrate), s.vibrate, { prefs.vibrate = it },
                     subtitle = stringResource(R.string.pref_vibrate_hint), enabled = s.enabled,
-                )
-                SwitchRow(
-                    shape(4), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
-                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
                 )
             }
         }
     }
+}
+
+private fun LazyListScope.actionSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Column {
-            SectionTitle(stringResource(R.string.actions_title))
             // The two smooth-seeking options only show when smooth seeking is chosen.
             val extra = if (s.seekSmooth) 2 else 0
-            Group(4 + extra) {
+            Group(3 + extra) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.pref_seek_hold), caption = stringResource(R.string.pref_seek_hold_hint), enabled = s.enabled) {
                         ConnectedChoice(
@@ -992,19 +1520,97 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                         shape(2 + extra), stringResource(R.string.pref_like_toggle), s.likeToggle, { prefs.likeToggle = it },
                         subtitle = stringResource(R.string.pref_like_toggle_hint), enabled = s.enabled,
                     )
-                    SwitchRow(
-                        shape(3 + extra), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
-                        subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
-                    )
                 }
             }
         }
     }
-    item { PocketCard(ctx) }
-    item { SpeechCard(s, prefs) }
-    item { CueCard(ctx) }
+}
+
+private fun LazyListScope.speechSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
-        Group(1) {
+        Group(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
+                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
+                )
+                SwitchRow(
+                    shape(1), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
+                    subtitle = stringResource(R.string.pref_announce_all_hint), enabled = s.enabled,
+                )
+            }
+        }
+    }
+    item { SpeechCard(s, prefs) }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionTitle(stringResource(R.string.info_title))
+            Group(4) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(
+                        shape(0), stringResource(R.string.info_source),
+                        caption = stringResource(
+                            when (s.infoSource) {
+                                com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini_hint
+                                com.knobnext.InfoSource.COMBINED -> R.string.info_source_combined_hint
+                                com.knobnext.InfoSource.WIKI -> R.string.info_source_wiki_hint
+                            },
+                        ),
+                    ) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoSource.GEMINI to R.string.info_source_gemini,
+                                com.knobnext.InfoSource.COMBINED to R.string.info_source_combined,
+                                com.knobnext.InfoSource.WIKI to R.string.info_source_wiki,
+                            ),
+                            selected = s.infoSource,
+                            onSelect = { prefs.infoSource = it },
+                        )
+                    }
+                    ControlRow(shape(1), stringResource(R.string.info_language)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLanguage.RU to R.string.info_language_ru,
+                                com.knobnext.InfoLanguage.EN to R.string.info_language_en,
+                                com.knobnext.InfoLanguage.SYSTEM to R.string.info_language_system,
+                            ),
+                            selected = s.infoLanguage,
+                            onSelect = { prefs.infoLanguage = it },
+                        )
+                    }
+                    ControlRow(shape(2), stringResource(R.string.info_length)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLength.SHORT to R.string.info_length_short,
+                                com.knobnext.InfoLength.NORMAL to R.string.info_length_normal,
+                                com.knobnext.InfoLength.LONG to R.string.info_length_long,
+                            ),
+                            selected = s.infoLength,
+                            onSelect = { prefs.infoLength = it },
+                        )
+                    }
+                    ControlRow(shape(3), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
+                        ConnectedChoice(
+                            options = listOf(false to R.string.info_music_duck, true to R.string.info_music_pause),
+                            selected = s.infoPause,
+                            onSelect = { prefs.infoPause = it },
+                        )
+                    }
+                }
+            }
+            Hint(stringResource(R.string.info_hint))
+        }
+    }
+}
+
+private fun LazyListScope.pauseSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item {
+        Group(2) {
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ControlRow(shape(0), stringResource(R.string.pref_resume), caption = stringResource(R.string.pref_resume_hint), enabled = s.enabled) {
                 ConnectedChoice(
                     options = listOf(
@@ -1018,11 +1624,15 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
                     enabled = s.enabled,
                 )
             }
+            SwitchRow(
+                shape(1), stringResource(R.string.pref_keys_on_pause), s.keysOnPause, { prefs.keysOnPause = it },
+                subtitle = stringResource(R.string.pref_keys_on_pause_hint), enabled = s.enabled && s.resumeMinutes > 0,
+            )
+          }
         }
     }
-    // Only relevant once a gesture is assigned to the sleep timer (or one is running).
     val sleepActive = s.sleepUntil > System.currentTimeMillis()
-    if (sleepActive || Action.SLEEP_TIMER in s.actions.values) item {
+    item {
         val context = LocalContext.current
         Group(2) {
           Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1061,6 +1671,25 @@ private fun LazyListScope.settingsPage(ctx: PageContext) {
           }
         }
     }
+}
+
+private fun LazyListScope.pocketSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item { PocketCard(ctx) }
+    item {
+        Group(1) {
+            SwitchRow(
+                shape(0), stringResource(R.string.pref_pocket), s.pocketGuard, { prefs.pocketGuard = it },
+                subtitle = stringResource(R.string.pref_pocket_hint), enabled = s.enabled,
+            )
+        }
+    }
+}
+
+private fun LazyListScope.aboutSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1260,6 +1889,7 @@ private fun GroupScope.GestureRow(
     accent: Boolean,
     enabled: Boolean = true,
     actions: Map<Gesture, Action> = s.actions,
+    highlighted: Boolean = false,
     onEdit: (Gesture) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -1269,6 +1899,7 @@ private fun GroupScope.GestureRow(
         title = stringResource(gestureLabel(gesture)),
         subtitle = stringResource(actionLabel(action)),
         enabled = enabled && s.enabled,
+        highlighted = highlighted,
         onClick = { onEdit(gesture) },
         leading = {
             ShapeBadge(

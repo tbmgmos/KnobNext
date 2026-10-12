@@ -32,32 +32,47 @@ class Media(private val context: Context) {
         return enabled.split(':').any { ComponentName.unflattenFromString(it) == listenerComponent }
     }
 
+    /** Drops KnobNext's own session from a list the system gave: it only mirrors the real player. */
+    fun players(list: List<MediaController>): List<MediaController> = list.filter { it.packageName != context.packageName }
+
+    /** Every player's session; KnobNext's own (the one that catches headphone buttons) is not a player. */
     fun controllers(): List<MediaController> =
         if (!hasAccess()) {
             emptyList()
         } else {
             try {
-                sessions.getActiveSessions(listenerComponent)
+                players(sessions.getActiveSessions(listenerComponent))
             } catch (_: SecurityException) {
                 emptyList()
             }
         }
 
     /**
-     * Prefer a session that is actually playing; among several, the one that started last. Otherwise
-     * the one played most recently. Ties keep the system's priority order (maxBy keeps the first).
+     * The session that plays, in the system's priority order (the one that started playing last comes
+     * first). When none plays: [paused], the player a gesture paused, so play goes back to it and not
+     * to some app that merely showed a video preview; otherwise the system's first.
      */
-    fun pick(list: List<MediaController>): MediaController? =
-        list.filter { it.isPlaying() }.maxByOrNull { PlayOrder.of(it.packageName) }
-            ?: list.maxByOrNull { PlayOrder.of(it.packageName) }
+    fun pick(list: List<MediaController>, paused: String? = null): MediaController? =
+        list.firstOrNull { it.isPlaying() }
+            ?: paused?.let { p -> list.firstOrNull { it.packageName == p } }
+            ?: list.firstOrNull()
+
+    /** Set by the service: true while it plays silence to keep the keys working on pause. */
+    var silencePlaying: () -> Boolean = { false }
+
+    /** Music is audible, not counting that silence. */
+    fun musicActive(): Boolean = audio.isMusicActive && !silencePlaying()
 
     fun isInCall(): Boolean = when (audio.mode) {
         AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> true
         else -> false
     }
 
-    fun headphonesConnected(): Boolean =
-        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADPHONE_TYPES }
+    fun headphonesConnected(): Boolean = externalOutput() != null
+
+    /** Headphones or a speaker the sound goes to besides the phone's own. */
+    fun externalOutput(): AudioDeviceInfo? =
+        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in HEADPHONE_TYPES }
 
     /** Decides whether gestures should be handled now and which player they go to. */
     fun resolve(prefs: Prefs): Target? {
@@ -67,14 +82,14 @@ class Media(private val context: Context) {
         val all = controllers()
         all.forEach { prefs.rememberPlayer(it.packageName) }
         val filtering = prefs.appFilter && hasAccess()
-        val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all)
+        val controller = pick(if (filtering) all.filter { it.packageName in prefs.allowedApps } else all, prefs.pausedPlayer)
         if (filtering && controller == null) return null
         controller?.packageName?.let { if (it != prefs.lastPlayer) prefs.lastPlayer = it }
 
         // Sound must be audible, and it must be the player's: a game or a video without a media session
         // also makes sound, and then a hold would skip (and start) a paused player. Without player
         // access there is no player to ask, so the sound alone decides.
-        val playing = audio.isMusicActive && (controller?.isPlaying() ?: !filtering)
+        val playing = musicActive() && (controller?.isPlaying() ?: !filtering)
         val mode = if (playing || !prefs.onlyWhenPlaying) Mode.FULL else Mode.COMBO_ONLY
         return Target(controller, mode)
     }
@@ -96,7 +111,8 @@ class Media(private val context: Context) {
             Action.VOLUME_DOWN -> volumeStep(AudioManager.ADJUST_LOWER)
             // Handled by Extras: they need the service (speech, alarms, launching apps).
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
-            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET -> Unit
+            Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET, Action.VOICE,
+            Action.ASK_GEMINI, Action.TRACK_INFO -> Unit
         }
     }
 
@@ -132,12 +148,23 @@ class Media(private val context: Context) {
     }
 
     fun sendKey(code: Int) {
+        // The key comes back to KnobNext if its session is the one that catches media buttons.
+        sentCode = code
+        sentAt = SystemClock.elapsedRealtime()
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
     }
 
     companion object {
         const val SEEK_STEP_MS = 10_000L
+
+        @Volatile private var sentCode = 0
+        @Volatile private var sentAt = 0L
+
+        /** Whether this key is the one [sendKey] sent a moment ago, coming back. */
+        fun justSent(code: Int): Boolean = code == sentCode && SystemClock.elapsedRealtime() - sentAt < ECHO_MS
+
+        private const val ECHO_MS = 500L
 
         private val HEADPHONE_TYPES = setOf(
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
