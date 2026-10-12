@@ -255,6 +255,20 @@ object TrackInfo {
         return (plan.intro + listOfNotNull(note)).joinToString(" ").takeIf { it.isNotBlank() }
     }
 
+    /**
+     * A sentence as it is said: no asides in brackets (nested ones too: "(«Нирва́на»; МФА: [...])"), no
+     * stress marks, ordinary spaces (Wikipedia puts a no-break space before the dash).
+     */
+    internal fun speakable(text: String): String {
+        var t = text.replace('\u00A0', ' ').replace(STRESS, "")
+        while (true) {
+            val next = t.replace(BRACKETS, "")
+            if (next == t) break
+            t = next
+        }
+        return t.replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("\\s{2,}"), " ").trim()
+    }
+
     private fun quote(name: String, lang: String) = if (lang == "ru") "«$name»" else "\"$name\""
 
     /** What one telling is about. */
@@ -295,8 +309,13 @@ object TrackInfo {
         if (sentences == 0) return Plan(intro, null, emptyList())
         val any = topics.filter { it.third.isNotEmpty() }
         if (any.isEmpty()) return Plan(intro, null, emptyList())
-        val fresh = any.firstOrNull { (_, key, list) -> rotation.left(key, list.size) > 0 }
-        if (fresh != null) return Plan(intro, fresh.first, rotation.next(fresh.second, fresh.third, sentences))
+        // Subjects with untold facts take turns for the same track: the song first, then the album, then
+        // the artist's story; each new track begins with its song again.
+        val fresh = any.filter { (_, key, list) -> rotation.left(key, list.size) > 0 }
+        if (fresh.isNotEmpty()) {
+            val turn = fresh[rotation.bump("turn:${track.artist}/${track.title}") % fresh.size]
+            return Plan(intro, turn.first, rotation.next(turn.second, turn.third, sentences))
+        }
         // All told. Too little to go round again: say so. Otherwise remind, the oldest first, each subject in turn.
         if (any.sumOf { it.third.size } < FEW_FACTS) return Plan(intro, null, emptyList(), exhausted = true)
         val turn = any[rotation.bump("repeat:${track.artist}") % any.size]
@@ -324,8 +343,13 @@ object TrackInfo {
      * ("He also…", "In the same year…", "This became…") just confuses.
      */
     private fun standsAlone(sentence: String): Boolean {
-        val s = sentence.trimStart().lowercase(Locale.ROOT)
-        return DEPENDENT_STARTS.none { s.startsWith(it) } && sentence.count { it == ',' } <= MAX_COMMAS
+        val s = sentence.trim().lowercase(Locale.ROOT)
+        return DEPENDENT_STARTS.none { s.startsWith(it) } &&
+            sentence.count { it == ',' } <= MAX_COMMAS &&
+            // "…parodies were shot by various bloggers:" leads into a list that is not there.
+            !s.endsWith(":") &&
+            // "I", "we", "us": a quote from someone, out of its context.
+            !FIRST_PERSON.containsMatchIn(sentence)
     }
 
     /**
@@ -333,8 +357,7 @@ object TrackInfo {
      * short ones when there are any.
      */
     private fun brief(facts: List<String>): List<String> {
-        val compact = facts.map { it.replace(BRACKETS, "").replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("\\s{2,}"), " ").trim() }
-            .filter { it.length >= MIN_FACT_CHARS }
+        val compact = facts.map(::speakable).filter { it.length >= MIN_FACT_CHARS }
         return compact.filter { it.length <= SHORT_FACT_CHARS }.ifEmpty { compact }
     }
 
@@ -421,9 +444,15 @@ object TrackInfo {
                     // Wikidata, for the very items behind the articles found.
                     val data = async {
                         runCatching {
+                            val songArticle = song.await()
+                            val albumArticle = albumText.await()
+                            val artistArticle = about.await()
                             Wikidata.gather(
-                                context, lang, song.await()?.page, albumText.await()?.page, about.await()?.page,
+                                context, lang, songArticle?.page, albumArticle?.page, artistArticle?.page,
                                 deadline = started + WIKIDATA_DEADLINE_MS,
+                                said = listOfNotNull(songArticle, albumArticle, artistArticle)
+                                    .mapNotNull { it.text?.facts?.joinToString(" ") }.joinToString(" ").let(::speakable),
+                                albumKnown = track.album != null,
                             )
                         }.getOrNull()
                     }
@@ -437,7 +466,7 @@ object TrackInfo {
                         album = track.album ?: b?.first ?: m?.albumName,
                         year = track.year ?: b?.second ?: m?.year,
                         albumText = listOfNotNull(albumText.await()?.text, d?.album) + m?.album.orEmpty(),
-                        intro = intro(artistText, d?.artistIntro.orEmpty(), lang),
+                        intro = intro(context, artist, artistText, d?.artistIntro.orEmpty(), lang),
                     )
                 }
             }
@@ -455,14 +484,17 @@ object TrackInfo {
      * Who the artist is: the article's opening sentence when it defines them ("Nirvana — американская
      * рок-группа…"), else Wikidata's basics (when and where they began, genres).
      */
-    private fun intro(article: Text?, basics: List<String>, lang: String): List<String> {
+    private fun intro(context: Context, artist: String?, article: Text?, basics: List<String>, lang: String): List<String> {
         val lead = article?.takeIf { it.lang == lang }?.facts?.firstOrNull()?.let { brief(listOf(it)).firstOrNull() }
         val defines = lead != null && if (lang == "ru") {
             lead.indexOf(" — ").let { it in 1..MAX_INTRO_NAME } || lead.contains(" является ")
         } else {
             Regex("""\b(is|was|are|were)\b""").containsMatchIn(lead.take(MAX_INTRO_NAME + 20))
         }
-        return if (defines) listOf(lead!!) else basics
+        if (defines) return listOf(lead!!)
+        // Wikidata's basics say nothing of whom they are about: the name goes first.
+        if (basics.isEmpty() || artist == null) return emptyList()
+        return listOf(localized(context, lang).getString(R.string.info_intro_basics, artist)) + basics
     }
 
     /**
@@ -712,13 +744,18 @@ object TrackInfo {
     private const val SHORT_FACT_CHARS = 150
     private const val MAX_WORDS = 15
     private val BRACKETS = Regex("\\s*[(\\[][^()\\[\\]]*[)\\]]")
+    private val STRESS = Regex("[\\u0300\\u0301]")
+    private val FIRST_PERSON = Regex(
+        "(?<!\\p{L})(я|мы|нас|нам|нами|мне|меня|мной|мой|моя|моё|мои|наш|наша|наше|наши|i|we|us|my|our|me)(?!\\p{L})",
+        RegexOption.IGNORE_CASE,
+    )
     private const val FACTS_FOR_MODEL = 5
     private const val MAX_TOLD = 5
     private const val INTRO_SENTENCES = 2
 
     /** Fewer facts than this, all told: say there is nothing more rather than go round again. */
     private const val FEW_FACTS = 3
-    private const val MAX_INTRO_NAME = 60
+    private const val MAX_INTRO_NAME = 90
     private const val MAX_COMMAS = 4
 
     /** How sentences that lean on the one before begin (lowercased). */
@@ -726,6 +763,8 @@ object TrackInfo {
         "он ", "она ", "они ", "оно ", "его ", "её ", "ее ", "их ", "ему ", "ей ", "им ", "это ", "этот ", "эта ", "эти ", "этом ",
         "там ", "тогда ", "также ", "тоже ", "кроме того", "однако", "позже", "позднее", "впоследствии", "после этого", "затем ",
         "вскоре", "в том же", "в следующем", "в этом ", "при этом", "поэтому", "но ", "и ", "а ", "так ", "здесь ",
+        "с одной стороны", "с другой стороны", "во-первых", "во-вторых", "впрочем", "тем не менее", "в результате",
+        "в итоге", "благодаря этому", "из-за этого", "на этом", "вместе с тем", "помимо этого",
         "he ", "she ", "they ", "it ", "his ", "her ", "their ", "this ", "these ", "that ", "those ", "also ", "however",
         "later", "then ", "soon ", "the following", "in the same", "afterwards", "after that", "but ", "and ", "so ", "there ",
     )

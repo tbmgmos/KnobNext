@@ -26,7 +26,18 @@ object Wikidata {
      * [deadline] (wall clock, ms): no request starts after it, so a slow Wikidata never holds up the
      * facts the other sources found.
      */
-    fun gather(context: Context, lang: String, song: Page?, album: Page?, artist: Page?, deadline: Long): Found {
+    fun gather(
+        context: Context,
+        lang: String,
+        song: Page?,
+        album: Page?,
+        artist: Page?,
+        deadline: Long,
+        /** What the articles already say: a fact found there is not said twice. */
+        said: String = "",
+        /** The player names the album: "the song is on the album …" would only repeat it. */
+        albumKnown: Boolean = false,
+    ): Found {
         fun late() = System.currentTimeMillis() > deadline
         val none = Found(null, null, null)
         val ids = listOf(song, album, artist).map { page -> page?.takeIf { !late() }?.let(::itemOf) }
@@ -37,7 +48,9 @@ object Wikidata {
         val wanted = items.values.flatMap { claims -> PROPERTIES.flatMap { p -> itemValues(claims, p) } }.distinct()
         val names = labels(wanted.take(MAX_IDS), lang)
         val res = TrackInfo.localized(context, lang)
-        fun facts(id: String?, build: Facts.() -> Unit): Facts? = id?.let { items[it] }?.let { Facts(res, it, names, lang).apply(build) }
+        val known = said.lowercase(Locale.ROOT)
+        fun facts(id: String?, build: Facts.() -> Unit): Facts? =
+            id?.let { items[it] }?.let { Facts(res, it, names, lang, known, albumKnown).apply(build) }
         fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
         val artistFacts = facts(ids[2]) { artist() }
         return Found(
@@ -49,7 +62,15 @@ object Wikidata {
     }
 
     /** One item's claims turned into sentences. */
-    private class Facts(val res: Context, val claims: JSONObject, val names: Map<String, String>, val lang: String) {
+    private class Facts(
+        val res: Context,
+        val claims: JSONObject,
+        val names: Map<String, String>,
+        val lang: String,
+        /** The articles' text, lowercased. */
+        val said: String,
+        val albumKnown: Boolean,
+    ) {
         val out = ArrayList<String>()
 
         /** The first [introEnd] sentences of an artist say who they are. */
@@ -59,11 +80,15 @@ object Wikidata {
 
         fun list(property: String, string: Int, max: Int = MAX_NAMES, quote: Boolean = false) {
             val list = names(property, max)
-            if (list.isNotEmpty()) out += res.getString(string, list.joinToString(", ") { if (quote) quoted(it) else it })
+            // Every name already in the articles: they said it, and better.
+            if (list.isEmpty() || list.all { said.contains(it.lowercase(Locale.ROOT)) }) return
+            out += res.getString(string, list.joinToString(", ") { if (quote) quoted(it) else it })
         }
 
         fun date(property: String, string: Int) {
-            timeValue(claims, property)?.let { out += res.getString(string, it.words(lang)) }
+            val time = timeValue(claims, property) ?: return
+            if (said.contains(time.core(lang))) return
+            out += res.getString(string, time.words(lang))
         }
 
         fun quoted(name: String) = if (lang == "ru") "«$name»" else "\"$name\""
@@ -73,7 +98,7 @@ object Wikidata {
             list("P86", R.string.src_wd_composer)
             list("P676", R.string.src_wd_lyrics)
             list("P162", R.string.src_wd_song_producer)
-            list("P361", R.string.src_wd_part_of, max = 1, quote = true)
+            if (!albumKnown) list("P361", R.string.src_wd_part_of, max = 1, quote = true)
             list("P166", R.string.src_wd_awards)
         }
 
@@ -154,6 +179,10 @@ object Wikidata {
         }
 
     private class Time(val year: Int, val month: Int, val day: Int) {
+        /** What an article would say for this date, lowercased: "10 марта 2017", "march 10, 2017", or the year. */
+        fun core(lang: String): String =
+            if (month == 0 || day == 0) year.toString() else words(lang).removeSuffix(" года").removePrefix("on ").lowercase(Locale.ROOT)
+
         /** "15 марта 1987 года" / "on March 15, 1987"; just the year when that is all that is known. */
         fun words(lang: String): String {
             if (month == 0 || day == 0) return if (lang == "ru") "в $year году" else "in $year"

@@ -42,6 +42,14 @@ class StoryLiveTest {
                 }
             }
         }
+        // History off: nothing is remembered, so every story starts with the introduction again.
+        Prefs(context).infoHistory = false
+        println("\n===== История выключена: Nirvana дважды")
+        repeat(2) { i ->
+            val story = TrackInfo.story(context, tracks[0], InfoLength.SHORT, "ru", InfoSource.WIKI) { println("   · $it") }
+            println("#${i + 1}: ${story ?: "(ничего)"}")
+        }
+        Prefs(context).infoHistory = true
         println("\n===== Знакомства")
         Journal.entries(context).forEach { e ->
             println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, рассказано ${e.progress}%, неизвестен=${e.unknown}")

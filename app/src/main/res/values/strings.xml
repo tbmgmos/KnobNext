@@ -163,13 +163,14 @@
     <string name="info_note_artist">Из истории исполнителя: %1$s</string>
     <string name="info_all_told">Про %1$s я рассказал всё, что знаю.</string>
     <string name="info_remind">Напомню: %1$s</string>
+    <string name="info_intro_basics">Знакомьтесь — %1$s.</string>
     <string name="src_formed">Группа образована в %1$s году.</string>
     <string name="src_style">Стиль — %1$s.</string>
     <string name="src_album_date">Альбом вышел %1$s.</string>
     <string name="src_label">Альбом выпущен на лейбле %1$s.</string>
     <string name="src_genres">Жанры: %1$s.</string>
-    <string name="src_band_from">Группа родом отсюда: %1$s.</string>
-    <string name="src_artist_from">Исполнитель родом отсюда: %1$s.</string>
+    <string name="src_band_from">Родина группы — %1$s.</string>
+    <string name="src_artist_from">Родина исполнителя — %1$s.</string>
     <plurals name="src_members">
         <item quantity="one">В группе %1$d участник.</item>
         <item quantity="few">В группе %1$d участника.</item>
