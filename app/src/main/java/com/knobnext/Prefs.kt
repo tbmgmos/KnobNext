@@ -143,6 +143,8 @@ data class Settings(
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
     val keysOnPause: Boolean,
+    val infoHistory: Boolean,
+    val journalVersion: Int,
     val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
@@ -282,6 +284,19 @@ class Prefs(context: Context) {
      * For how long after a gesture paused the music a gesture assigned to play/pause can resume it,
      * in minutes; 0 turns this off. See KnobService.resumeWindowOpen.
      */
+    /**
+     * KnobNext remembers its stories: who it has introduced (the introduction is said once) and the
+     * history of acquaintances. Off: nothing is written, and every story starts with the introduction.
+     */
+    var infoHistory: Boolean
+        get() = sp.getBoolean("info_history", true)
+        set(v) = sp.edit().putBoolean("info_history", v).apply()
+
+    /** Bumped on every change of the history of acquaintances, so the screen reads it again. */
+    var journalVersion: Int
+        get() = sp.getInt("journal_version", 0)
+        set(v) = sp.edit().putInt("journal_version", v).apply()
+
     var resumeMinutes: Int
         get() = sp.getInt("resume_minutes", 30)
         set(v) = sp.edit().putInt("resume_minutes", v).apply()
@@ -677,6 +692,8 @@ class Prefs(context: Context) {
         infoLanguage = infoLanguage,
         infoSource = infoSource,
         keysOnPause = keysOnPause,
+        infoHistory = infoHistory,
+        journalVersion = journalVersion,
         smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },

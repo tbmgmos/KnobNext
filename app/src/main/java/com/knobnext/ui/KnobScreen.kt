@@ -102,6 +102,8 @@ private enum class Page(val title: Int) {
     SEQUENCES(R.string.section_double),
     MOTION(R.string.section_motion),
     HEADSET(R.string.section_headset),
+    ACQUAINT(R.string.acq_title),
+    ARTIST(R.string.acq_artist_title),
     PLAYERS(R.string.players_title),
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
@@ -121,6 +123,7 @@ private enum class Page(val title: Int) {
 private val Page.parent: Page
     get() = when (this) {
         Page.PROFILE -> Page.PLAYERS
+        Page.ARTIST -> Page.ACQUAINT
         Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH,
         Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
         Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
@@ -139,6 +142,7 @@ private class PageContext(
     val editIn: (Gesture, String?) -> Unit,
     val open: (Page) -> Unit,
     val openProfile: (String) -> Unit,
+    val openArtist: (String) -> Unit = {},
 ) {
     val edit: (Gesture) -> Unit = { editIn(it, null) }
 }
@@ -192,6 +196,7 @@ fun KnobScreen(
 
     var page by rememberSaveable { mutableStateOf(Page.HOME) }
     var profilePkg by rememberSaveable { mutableStateOf<String?>(null) }
+    var artistKey by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = page != Page.HOME) { page = page.parent }
     val ctx = PageContext(
         s, prefs, setup, actions, versionName, updatesSupported,
@@ -200,6 +205,10 @@ fun KnobScreen(
         openProfile = {
             profilePkg = it
             page = Page.PROFILE
+        },
+        openArtist = {
+            artistKey = it
+            page = Page.ARTIST
         },
     )
 
@@ -260,6 +269,8 @@ fun KnobScreen(
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
                     Page.HEADSET -> headsetPage(ctx, learn ?: HeadsetLearnState())
+                    Page.ACQUAINT -> acquaintPage(ctx)
+                    Page.ARTIST -> artistKey?.let { key -> item { ArtistCard(ctx, key) } } ?: acquaintPage(ctx)
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
@@ -404,6 +415,12 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                     2, MaterialShapes.Cookie9Sided, KnobIcons.Settings, R.string.settings_title,
                     stringResource(R.string.tile_settings),
                 ) { ctx.open(Page.SETTINGS) }
+                val context = LocalContext.current
+                val known = remember(s.journalVersion) { com.knobnext.Journal.entries(context).size }
+                PageTile(
+                    3, MaterialShapes.Cookie4Sided, KnobIcons.Info, R.string.acq_title,
+                    if (s.infoHistory) stringResource(R.string.acq_tile, known) else stringResource(R.string.acq_tile_off),
+                ) { ctx.open(Page.ACQUAINT) }
             }
         }
     }
@@ -1574,7 +1591,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
     item {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle(stringResource(R.string.info_title))
-            Group(4) {
+            Group(5) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(
                         shape(0), stringResource(R.string.info_source),
@@ -1625,12 +1642,114 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoPause = it },
                         )
                     }
+                    SwitchRow(
+                        shape(4), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
+                        subtitle = stringResource(R.string.acq_history_hint),
+                    )
                 }
             }
             Hint(stringResource(R.string.info_hint))
         }
     }
 }
+
+// ---------------------------------------------------------------- Acquaintances
+
+private fun LazyListScope.acquaintPage(ctx: PageContext) {
+    if (!ctx.s.infoHistory) {
+        item {
+            Group(1) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.acq_history), false, { ctx.prefs.infoHistory = it },
+                    subtitle = stringResource(R.string.acq_history_off_hint),
+                )
+            }
+        }
+    }
+    item { AcquaintList(ctx) }
+}
+
+private fun acquaintSummary(context: android.content.Context, e: com.knobnext.Journal.Entry): String {
+    if (e.unknown && e.notes.isEmpty()) return context.getString(R.string.acq_unknown)
+    val date = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(e.lastAt))
+    return listOfNotNull(
+        context.getString(R.string.acq_notes, e.notes.size),
+        e.progress?.let { context.getString(R.string.acq_progress, it) },
+        date,
+    ).joinToString(" · ")
+}
+
+/** The artists KnobNext told about, the most asked about on top. */
+@Composable
+private fun AcquaintList(ctx: PageContext) {
+    val context = LocalContext.current
+    val entries = remember(ctx.s.journalVersion) { com.knobnext.Journal.entries(context) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (entries.isEmpty()) {
+            Hint(stringResource(R.string.acq_empty))
+            return@Column
+        }
+        val top = entries.filter { it.asked >= 2 }.sortedByDescending { it.asked }.take(TOP_ARTISTS)
+        if (top.isNotEmpty()) {
+            SectionTitle(stringResource(R.string.acq_top))
+            Group(top.size) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    top.forEachIndexed { i, e ->
+                        ListRow(shape(i), e.name, subtitle = stringResource(R.string.acq_asked, e.asked), onClick = { ctx.openArtist(e.key) })
+                    }
+                }
+            }
+        }
+        SectionTitle(stringResource(R.string.acq_all))
+        Group(entries.size) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                entries.forEachIndexed { i, e ->
+                    ListRow(shape(i), e.name, subtitle = acquaintSummary(context, e), onClick = { ctx.openArtist(e.key) })
+                }
+            }
+        }
+        TextButton(onClick = { com.knobnext.Journal.clear(context) }) { Text(stringResource(R.string.acq_clear)) }
+    }
+}
+
+/** One artist: the introduction and the notes told, in the order they were told. */
+@Composable
+private fun ArtistCard(ctx: PageContext, key: String) {
+    val context = LocalContext.current
+    val e = remember(ctx.s.journalVersion, key) { com.knobnext.Journal.entry(context, key) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (e == null) {
+            Hint(stringResource(R.string.acq_missing))
+            return@Column
+        }
+        SectionTitle(e.name)
+        Hint(acquaintSummary(context, e))
+        if (e.notes.isEmpty()) {
+            Hint(stringResource(R.string.acq_unknown_hint))
+        } else {
+            Group(e.notes.size) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    e.notes.forEachIndexed { i, n ->
+                        val date = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(n.at))
+                        ListRow(
+                            shape(i), n.text,
+                            subtitle = listOfNotNull(stringResource(R.string.acq_intro).takeIf { n.intro }, n.track, date).joinToString(" · "),
+                        )
+                    }
+                }
+            }
+        }
+        TextButton(
+            onClick = {
+                com.knobnext.TrackInfo.forgetArtist(context, e.name)
+                com.knobnext.Journal.forget(context, key)
+                ctx.open(Page.ACQUAINT)
+            },
+        ) { Text(stringResource(R.string.acq_restart)) }
+    }
+}
+
+private const val TOP_ARTISTS = 3
 
 private fun LazyListScope.pauseSettings(ctx: PageContext) {
     val s = ctx.s
