@@ -1185,8 +1185,12 @@ class KnobService : AccessibilityService() {
         val resumable = enabled && !playing && resumeWindowOpen()
 
         val player = prefs.lastPlayer
+        // While a track story holds the music paused, the gesture that tells it must still be heard,
+        // or the story could not be stopped the way it was started.
         fun wanted(on: Boolean, vararg gestures: Gesture) =
-            on && (playing || resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
+            on && (playing ||
+                storyHold && gestures.any { prefs.action(it, player) == Action.TRACK_INFO } ||
+                resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
 
         headset.update()
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
