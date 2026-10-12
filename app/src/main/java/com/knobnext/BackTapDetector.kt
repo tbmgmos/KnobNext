@@ -148,11 +148,11 @@ class BackTapDetector(
         lastSampleAt = now
         if (dt > 0) sampleMs += (dt - sampleMs) * 0.05f
         TapStats.rateHz = (1000f / sampleMs.coerceAtLeast(1f)).toInt()
-        TapStats.noisePercent = (noise / (limit * QUIET_RATIO) * 100).toInt()
+        TapStats.noisePercent = (noise / (limit * SHAKE_RATIO) * 100).toInt()
 
-        // Constant vibration keeps the detector shut a little after it calms down, so the lull between
-        // two bumps is not taken for quiet. (Not in the middle of a tap sequence: its own ringing counts.)
-        if (noise >= limit * QUIET_RATIO && taps == 0 && pendingAt == 0L) busyUntil = now + VIBRATION_HOLD_MS
+        // Strong constant vibration (a bumpy ride) keeps the detector shut a little after it calms down,
+        // so the lull between two bumps is not taken for quiet. (Not in the middle of a tap sequence.)
+        if (noise >= limit * SHAKE_RATIO && taps == 0 && pendingAt == 0L) busyUntil = now + VIBRATION_HOLD_MS
 
         if (dz < -limit) lastNegativeAt = now
         val spike = now - lastPeakAt > REFRACTORY_MS &&
@@ -162,7 +162,9 @@ class BackTapDetector(
             now - lastNegativeAt > FRONT_TAP_RINGING_MS
         if (spike) {
             lastPeakAt = now
-            if (noise < limit * QUIET_RATIO && now >= busyUntil) {
+            // A tap only has to stand out from the shaking around it. A fixed limit on the shaking shut the
+            // detector whenever the phone was held or carried, often for good stretches at a time.
+            if (noise < limit * SHAKE_RATIO && dz > noise * STAND_OUT && now >= busyUntil) {
                 pendingAt = now
                 pendingAbove = 0f
             } else {
@@ -189,8 +191,9 @@ class BackTapDetector(
             }
         }
 
-        // Background motion level; spikes are clipped so the taps themselves barely raise it.
-        noise += (minOf(magnitude, limit * QUIET_RATIO * 2) - noise) * NOISE_SMOOTHING
+        // Background motion level. A tap's own ringing is left out, or it would hide the next tap.
+        val ringing = pendingAt != 0L || now - lastPeakAt < RING_MS
+        if (!ringing) noise += (minOf(magnitude, limit) - noise) * NOISE_SMOOTHING
     }
 
     private fun countTap(at: Long) {
@@ -212,7 +215,12 @@ class BackTapDetector(
         const val SMOOTHING = 0.08f
         const val NOISE_SMOOTHING = 0.02f
         const val SIDEWAYS_RATIO = 1.3f
-        const val QUIET_RATIO = 0.3f
+        /** Background shaking, as a share of the tap threshold, past which nothing counts as a tap. */
+        const val SHAKE_RATIO = 0.6f
+
+        /** How many times stronger than the background shaking a tap has to be. */
+        const val STAND_OUT = 5f
+        const val RING_MS = 120L
         const val REFRACTORY_MS = 90L
         const val FRONT_TAP_RINGING_MS = 40L
         const val TAP_GAP_MS = 500L
