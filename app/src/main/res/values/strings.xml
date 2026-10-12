@@ -145,14 +145,14 @@
     <string name="acq_tile">Исполнителей: %1$d</string>
     <string name="acq_tile_off">История выключена</string>
     <string name="acq_history">Вести историю</string>
-    <string name="acq_history_hint">KnobNext запоминает, о ком рассказывал: визитка звучит один раз, а в «Истории» собираются рассказанные заметки. Хранится только на телефоне. Выключено — ничего не записывается, и каждый рассказ начинается с визитки.</string>
+    <string name="acq_history_hint">KnobNext запоминает, о ком рассказывал: визитка звучит один раз, а в «Истории» собираются рассказанные заметки. Хранится только на телефоне и не попадает в облачную копию Google. Выключено — ничего не записывается, и каждый рассказ начинается с визитки.</string>
     <string name="acq_history_off_hint">Сейчас ничего не записывается, и каждый рассказ начинается с визитки.</string>
     <string name="acq_empty">Здесь появятся исполнители, о которых KnobNext рассказывал.</string>
     <string name="acq_top">Чаще всего спрашивали</string>
     <string name="acq_all">Все исполнители</string>
     <string name="acq_clear">Очистить историю</string>
     <string name="acq_notes">Заметок: %1$d</string>
-    <string name="acq_progress">история рассказана на %1$d%%</string>
+    <string name="acq_albums">альбомов: %1$d</string>
     <string name="acq_asked">Спрашивали %1$d раз</string>
     <string name="acq_unknown">Пока ничего не известно</string>
     <string name="acq_unknown_hint">Об этом исполнителе пока ничего не нашлось. Сведения берутся из открытых баз — Википедии, Wikidata и MusicBrainz, — и любой музыкант может добавить туда информацию о себе.</string>
@@ -176,7 +176,7 @@
     <string name="acq_link_new">Ещё не встречались</string>
     <string name="acq_own">Своя заметка</string>
     <string name="acq_own_placeholder">Например: концерт в 2024-м, посоветовал друг</string>
-    <string name="acq_own_hint">Только для вас: не озвучивается и не покидает телефон</string>
+    <string name="acq_own_hint">Только для вас: не озвучивается, никуда не отправляется и не попадает в облачную копию</string>
     <string name="info_note_song">О песне: %1$s</string>
     <string name="info_note_album">Об альбоме %1$s: %2$s</string>
     <string name="info_note_album_unnamed">Об альбоме: %1$s</string>

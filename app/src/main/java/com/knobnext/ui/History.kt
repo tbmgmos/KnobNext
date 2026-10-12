@@ -116,7 +116,7 @@ private fun summary(context: Context, e: Journal.Entry): String {
     if (e.unknown && e.notes.isEmpty()) return context.getString(R.string.acq_unknown)
     return listOfNotNull(
         context.getString(R.string.acq_notes, e.notes.size),
-        e.progress?.let { context.getString(R.string.acq_progress, it) },
+        e.albums.takeIf { it > 0 }?.let { context.getString(R.string.acq_albums, it) },
         day(e.lastAt),
     ).joinToString(" · ")
 }

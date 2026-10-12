@@ -24,6 +24,8 @@ class StoryLiveTest {
         TrackInfo.Track("Хочешь?", "Земфира", "Прости меня моя любовь", null),
         TrackInfo.Track("Creep", "Radiohead", "Pablo Honey", null),
         TrackInfo.Track("Тает лёд", "Грибы", null, null),
+        // The same band in Latin letters: one record in the history, no second introduction.
+        TrackInfo.Track("Звезда по имени Солнце", "Kino", null, null),
         TrackInfo.Track("Nonexistent Song 4711", "Nobody Knows This Band 4711", null, null),
     )
 
@@ -58,7 +60,7 @@ class StoryLiveTest {
         Prefs(context).infoHistory = true
         println("\n===== Знакомства")
         Journal.entries(context).forEach { e ->
-            println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, рассказано ${e.progress}%, неизвестен=${e.unknown}, последний трек ${e.lastTrack} / ${e.lastAlbum}")
+            println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, альбомов ${e.albums}, неизвестен=${e.unknown}, последний трек ${e.lastTrack} / ${e.lastAlbum}")
             e.via?.let { println("   через $it") }
             e.notes.forEach { n -> println("   [${n.topic ?: "-"}] ${n.album ?: "-"} · ${n.track}: ${n.text.take(80)}") }
         }

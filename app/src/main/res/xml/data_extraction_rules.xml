@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The history of track stories (and the own notes in it) stays on the phone: never in the cloud
+     backup. Moving to a new phone directly, by cable or nearby, still takes it along. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="trackinfo" />
+        <exclude domain="sharedpref" path="trackinfo_rotation.xml" />
+    </cloud-backup>
+</data-extraction-rules>

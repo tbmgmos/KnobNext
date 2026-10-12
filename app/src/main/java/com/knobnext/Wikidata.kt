@@ -31,6 +31,9 @@ object Wikidata {
         val artistIntro: List<String> = emptyList(),
         val circle: List<String> = emptyList(),
         val related: List<String> = emptyList(),
+        val relatedIds: List<String> = emptyList(),
+        /** The artist's item. */
+        val artistId: String? = null,
     )
 
     /** A Wikipedia article: its language and title. */
@@ -84,6 +87,8 @@ object Wikidata {
             artistIntro = artistFacts?.let { it.out.take(it.introEnd) }.orEmpty(),
             circle = circle?.out.orEmpty(),
             related = circle?.related.orEmpty(),
+            relatedIds = circle?.relatedIds.orEmpty(),
+            artistId = ids[2],
         )
     }
 
@@ -101,19 +106,22 @@ object Wikidata {
     ) {
         val out = ArrayList<String>()
         val related = ArrayList<String>()
+        val relatedIds = ArrayList<String>()
 
         init {
             for ((member, c) in members) {
                 val name = names[member] ?: continue
-                val bands = itemValues(c, "P463").filter { it != id }.mapNotNull { names[it] }.distinct().take(MAX_NAMES)
+                val bands = itemValues(c, "P463").filter { it != id && names[it] != null }.distinct().take(MAX_NAMES)
                 if (bands.isEmpty()) continue
-                out += res.getString(R.string.src_wd_circle_bands, name, bands.joinToString(", "))
-                related += bands
+                out += res.getString(R.string.src_wd_circle_bands, name, bands.joinToString(", ") { names.getValue(it) })
+                related += bands.map { names.getValue(it) }
+                relatedIds += bands
             }
-            val influences = itemValues(claims, "P737").mapNotNull { names[it] }.take(MAX_NAMES)
+            val influences = itemValues(claims, "P737").filter { names[it] != null }.take(MAX_NAMES)
             if (influences.isNotEmpty()) {
-                out += res.getString(R.string.src_wd_circle_influences, influences.joinToString(", "))
-                related += influences
+                out += res.getString(R.string.src_wd_circle_influences, influences.joinToString(", ") { names.getValue(it) })
+                related += influences.map { names.getValue(it) }
+                relatedIds += influences
             }
         }
     }

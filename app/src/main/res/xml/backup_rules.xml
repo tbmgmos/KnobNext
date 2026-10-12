@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: the history of track stories stays out of the backup. -->
+<full-backup-content>
+    <exclude domain="file" path="trackinfo" />
+    <exclude domain="sharedpref" path="trackinfo_rotation.xml" />
+</full-backup-content>

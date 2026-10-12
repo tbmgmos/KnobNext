@@ -30,26 +30,28 @@ object Journal {
         /** How many times a story was asked about this artist. */
         val asked: Int,
         val notes: List<Note>,
-        /** How much of the artist's story has been told, in percent; null when unknown. */
-        val progress: Int?,
         /** Nothing at all was found about them. */
         val unknown: Boolean,
         /** Unknown until a recheck found something: worth asking about again. */
         val foundNow: Boolean,
         /** When nothing was last found about them (an unknown artist is looked for again now and then). */
         val checkedAt: Long,
-        /** The last track asked about, for "tell more" and the recheck. */
+        /** The last track asked about, for the recheck. */
         val lastTrack: String?,
         val lastAlbum: String?,
-        /** The person's own note: never said aloud, never leaves the phone. */
+        /** The person's own note: never said aloud, never sent anywhere, not in the cloud backup. */
         val own: String,
         /** The artists around them that stories named (members' other bands, influences). */
         val links: List<String>,
         /** The artist whose story named this one before the listener asked about them. */
         val via: String?,
-    )
+    ) {
+        /** The albums the notes are about. */
+        val albums get() = notes.mapNotNull { it.album?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT) }.distinct().size
+    }
 
-    fun key(artist: String) = artist.trim().lowercase(Locale.ROOT)
+    /** One artist however the player writes them: "Nirvana feat. …", "NIRVANA" and "Nirvana" are one. */
+    fun key(artist: String) = Speech.cleanArtist(artist).trim().lowercase(Locale.ROOT).replace('ё', 'е')
 
     /**
      * A story told about [artist] ([text] null: nothing was found, unless [found]: then it was only a
@@ -64,24 +66,32 @@ object Journal {
         album: String?,
         text: String?,
         topic: Topic?,
-        progress: Int?,
         found: Boolean = text != null,
-        /** The artists around them the facts name. */
+        /** The artist's Wikidata item: "Kino" and "Кино" are one artist. */
+        id: String? = null,
+        /** The artists around them the facts name, and their Wikidata items. */
         related: List<String> = emptyList(),
+        relatedIds: List<String> = emptyList(),
     ) {
         val root = read(context)
         val artists = root.optJSONObject("artists") ?: JSONObject().also { root.put("artists", it) }
-        val k = key(artist)
+        // Known under another spelling: the same Wikidata item.
+        val k = key(artist).takeIf { artists.has(it) } ?: id?.let { byId(artists, it) } ?: key(artist)
         val now = System.currentTimeMillis()
-        val e = artists.optJSONObject(k) ?: JSONObject().put("name", artist).put("first", now).also { fresh ->
+        val e = artists.optJSONObject(k) ?: JSONObject().put("name", Speech.cleanArtist(artist)).put("first", now).also { fresh ->
             // Met through someone already in the history: a story about them named this artist first.
-            artists.keys().asSequence().firstOrNull { other -> links(artists.getJSONObject(other)).any { key(it) == k } }
-                ?.let { fresh.put("via", artists.getJSONObject(it).optString("name")) }
+            artists.keys().asSequence().firstOrNull { other ->
+                val o = artists.getJSONObject(other)
+                links(o).any { key(it) == k } || id != null && strings(o, "linkIds").contains(id)
+            }?.let { fresh.put("via", artists.getJSONObject(it).optString("name")) }
             artists.put(k, fresh)
         }
+        id?.let { e.put("id", it) }
         if (related.isNotEmpty()) {
-            val all = (links(e) + related).distinctBy { key(it) }.filter { key(it) != k }.take(MAX_LINKS)
-            e.put("links", JSONArray(all))
+            e.put("links", JSONArray((links(e) + related).distinctBy { key(it) }.filter { key(it) != k }.take(MAX_LINKS)))
+        }
+        if (relatedIds.isNotEmpty()) {
+            e.put("linkIds", JSONArray((strings(e, "linkIds") + relatedIds).distinct().filter { it != id }.take(MAX_LINKS)))
         }
         e.put("last", now)
         e.put("asked", e.optInt("asked") + 1)
@@ -105,7 +115,6 @@ object Journal {
             )
             while (notes.length() > MAX_NOTES) notes.remove(0)
         }
-        progress?.let { e.put("progress", it) }
         // The artists not asked about for the longest go first when there are too many.
         if (artists.length() > MAX_ARTISTS) {
             artists.keys().asSequence().toList()
@@ -126,6 +135,16 @@ object Journal {
     @Synchronized
     fun entry(context: Context, key: String): Entry? =
         read(context).optJSONObject("artists")?.optJSONObject(key)?.let { entry(key, it) }
+
+    /** Whether a story was already told about the artist behind this Wikidata item, under any spelling. */
+    @Synchronized
+    fun knows(context: Context, id: String): Boolean {
+        val artists = read(context).optJSONObject("artists") ?: return false
+        return byId(artists, id)?.let { (artists.getJSONObject(it).optJSONArray("notes")?.length() ?: 0) > 0 } == true
+    }
+
+    private fun byId(artists: JSONObject, id: String): String? =
+        artists.keys().asSequence().firstOrNull { artists.getJSONObject(it).optString("id") == id }
 
     /** The unknown artists not looked for in a while, the longest ago first. */
     fun dueForRecheck(context: Context): List<Entry> {
@@ -227,7 +246,6 @@ object Journal {
             lastAt = o.optLong("last"),
             asked = o.optInt("asked"),
             notes = notes,
-            progress = if (o.has("progress")) o.optInt("progress") else null,
             unknown = o.optBoolean("unknown"),
             foundNow = o.optBoolean("foundNow"),
             checkedAt = o.optLong("checked", o.optLong("last")),
@@ -239,8 +257,10 @@ object Journal {
         )
     }
 
-    private fun links(o: JSONObject): List<String> =
-        o.optJSONArray("links")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
+    private fun links(o: JSONObject): List<String> = strings(o, "links")
+
+    private fun strings(o: JSONObject, name: String): List<String> =
+        o.optJSONArray(name)?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
 
     private fun file(context: Context) = File(File(context.filesDir, "trackinfo").apply { mkdirs() }, "journal.json")
 

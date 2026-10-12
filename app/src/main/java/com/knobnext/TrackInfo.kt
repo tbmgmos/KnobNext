@@ -69,8 +69,11 @@ object TrackInfo {
         val intro: List<String> = emptyList(),
         /** The artists around this one (members' other bands, influences), a sentence each. */
         val circle: List<String> = emptyList(),
-        /** Their names, for the history. */
+        /** Their names and Wikidata items, for the history. */
         val related: List<String> = emptyList(),
+        val relatedIds: List<String> = emptyList(),
+        /** The artist's Wikidata item: one artist, however the player spells them. */
+        val artistId: String? = null,
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
     }
@@ -119,18 +122,19 @@ object TrackInfo {
         val remember = Prefs(context).infoHistory
         val history = History(context, track.artist.takeIf { remember })
         // Never told about this artist in KnobNext: the listener is introduced to them first.
-        val firstMeet = track.artist != null && history.told().isEmpty()
+        var firstMeet = track.artist != null && history.told().isEmpty()
         // Nothing was known about them before: when something is now, that is news in itself.
         val wasUnknown = remember && track.artist != null && Journal.entry(context, Journal.key(track.artist))?.unknown == true
-        var progress: Int? = null
         var album: String? = track.album
-        var related: List<String> = emptyList()
+        var found: Facts? = null
+        // The note as the history keeps it: without "About the song:", the card has its own headings.
+        var bare: String? = null
         // What the story ends up being about, for the history.
         var told: Plan? = null
         // How long each way took goes to the log: the story is meant to follow the title without a pause.
-        fun ready(found: String, how: String): String {
+        fun ready(story: String, how: String): String {
             note(context.getString(R.string.log_info_ready, (System.currentTimeMillis() - started) / 1000.0, how))
-            history.add(found)
+            history.add(story)
             if (remember && track.artist != null) {
                 val topic = when {
                     told?.intro?.isNotEmpty() == true || told == null && firstMeet -> Journal.Topic.INTRO
@@ -143,14 +147,14 @@ object TrackInfo {
                     }
                 }
                 // A reminder, or "that is all I know", is nothing new for the history.
-                val news = found.takeUnless { told?.repeat == true || told?.exhausted == true }
+                val news = (bare ?: story).takeUnless { told?.repeat == true || told?.exhausted == true }
                 Journal.record(
-                    context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic, progress,
-                    found = true, related = related,
+                    context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic,
+                    found = true, id = found?.artistId, related = found?.related.orEmpty(), relatedIds = found?.relatedIds.orEmpty(),
                 )
             }
-            if (!wasUnknown) return found
-            return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + found
+            if (!wasUnknown) return story
+            return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + story
         }
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
@@ -165,13 +169,14 @@ object TrackInfo {
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
             if (remember && track.artist != null) {
-                Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), track.album, null, null, null)
+                Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), track.album, null, null)
             }
             return@coroutineScope null
         }
-        progress = artistProgress(context, track, facts, lang)
         album = facts.album
-        related = facts.related
+        found = facts
+        // Known under another spelling ("Kino" after "Кино"): no second introduction.
+        if (firstMeet && remember && facts.artistId != null && Journal.knows(context, facts.artistId)) firstMeet = false
         val keep = { plan: Plan -> told = plan }
         if (source != InfoSource.WIKI) {
             // Gemini already said no (or can't run from the background): only the downloaded model is left.
@@ -180,7 +185,7 @@ object TrackInfo {
                 ?.let { return@coroutineScope ready(it, brain?.name ?: context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
         }
-        plainStory(context, track, facts, length, lang, firstMeet, keep)?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
+        plainStory(context, track, facts, length, lang, firstMeet, keep) { bare = it }?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
     }
 
     // ---- Gemini on its own ----
@@ -276,13 +281,17 @@ object TrackInfo {
         lang: String,
         firstMeet: Boolean,
         keep: (Plan) -> Unit,
+        /** The same story without the headings said aloud ("About the song:"), for the history. */
+        keepBare: (String) -> Unit,
     ): String? {
         val plan = plan(context, track, facts, length, lang, firstMeet, perFact = 0).also(keep)
         val res = localized(context, lang)
         if (plan.exhausted && plan.intro.isEmpty()) {
             return track.artist?.let { res.getString(R.string.info_all_told, Speech.cleanArtist(it)) }
         }
-        val note = plan.facts.takeIf { it.isNotEmpty() }?.joinToString(" ")?.let { if (plan.repeat) res.getString(R.string.info_remind, it) else it }?.let { body ->
+        val said = plan.facts.takeIf { it.isNotEmpty() }?.joinToString(" ")
+        keepBare((plan.intro + listOfNotNull(said)).joinToString(" "))
+        val note = said?.let { if (plan.repeat) res.getString(R.string.info_remind, it) else it }?.let { body ->
             when (plan.topic) {
                 Topic.SONG -> res.getString(R.string.info_note_song, body)
                 Topic.ALBUM -> facts.album?.let { res.getString(R.string.info_note_album, quote(Speech.cleanTitle(it), lang), body) }
@@ -344,7 +353,8 @@ object TrackInfo {
         val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
         fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
         val artist = artistFacts(facts, lang)
-        val artistKey = "artist:${track.artist}"
+        val who = track.artist?.let(Journal::key)
+        val artistKey = "artist:$who"
         // The artists around this one come in once the listener knows them a little, or their story is told.
         val widen = artist.size - rotation.left(artistKey, artist.size) >= CIRCLE_AFTER || rotation.left(artistKey, artist.size) == 0
         val topics = listOf(
@@ -353,7 +363,7 @@ object TrackInfo {
             Triple(Topic.ALBUM, "album:${facts.album}", clean(merged(facts.albumText, lang)).filterNot { BAND_STORY.containsMatchIn(it) }),
             // The artist's story in its own order: the articles tell it from the beginning.
             Triple(Topic.ARTIST, artistKey, artist),
-            Triple(Topic.CIRCLE, "circle:${track.artist}", if (widen) facts.circle else emptyList()),
+            Triple(Topic.CIRCLE, "circle:$who", if (widen) facts.circle else emptyList()),
         )
         val sentences = when {
             perFact > 0 -> perFact
@@ -367,12 +377,12 @@ object TrackInfo {
         // the artist's story; each new track begins with its song again.
         val fresh = any.filter { (_, key, list) -> rotation.left(key, list.size) > 0 }
         if (fresh.isNotEmpty()) {
-            val turn = fresh[rotation.bump("turn:${track.artist}/${track.title}") % fresh.size]
+            val turn = fresh[rotation.bump("turn:$who/${track.title}") % fresh.size]
             return Plan(intro, turn.first, rotation.next(turn.second, turn.third, sentences))
         }
         // All told. Too little to go round again: say so. Otherwise remind, the oldest first, each subject in turn.
         if (any.sumOf { it.third.size } < FEW_FACTS) return Plan(intro, null, emptyList(), exhausted = true)
-        val turn = any[rotation.bump("repeat:${track.artist}") % any.size]
+        val turn = any[rotation.bump("repeat:$who") % any.size]
         return Plan(intro, turn.first, rotation.next(turn.second, turn.third, sentences), repeat = true)
     }
 
@@ -380,16 +390,12 @@ object TrackInfo {
     private fun artistFacts(facts: Facts, lang: String?): List<String> =
         brief(facts.artist.filter { lang == null || it.lang == lang }.flatMap { it.facts }).filter { standsAlone(it) }
 
-    /** How much of the artist's story has been told, in percent. */
-    private fun artistProgress(context: Context, track: Track, facts: Facts, lang: String): Int? {
-        val size = artistFacts(facts, lang).size.takeIf { it > 0 } ?: return null
-        return ((size - Rotation(context).left("artist:${track.artist}", size)) * 100 / size).coerceIn(0, 100)
-    }
-
     /** Forgets that the artist was introduced and how far their story got: the next story starts afresh. */
     fun forgetArtist(context: Context, artist: String) {
-        File(dir(context), "told-" + sha1(artist.lowercase(Locale.ROOT))).delete()
-        Rotation(context).forget("artist:$artist")
+        val who = Journal.key(artist)
+        File(dir(context), "told-" + sha1(who)).delete()
+        Rotation(context).forget("artist:$who")
+        Rotation(context).forget("circle:$who")
     }
 
     /** Forgets every artist: whom KnobNext introduced and how far each story got. */
@@ -534,6 +540,8 @@ object TrackInfo {
                         intro = intro(context, artist, artistText, d?.artistIntro.orEmpty(), lang),
                         circle = d?.circle.orEmpty(),
                         related = d?.related.orEmpty(),
+                        relatedIds = d?.relatedIds.orEmpty(),
+                        artistId = d?.artistId,
                     )
                 }
             }
@@ -730,7 +738,7 @@ object TrackInfo {
 
     /** The last stories about an artist, so the model is asked for something new. */
     private class History(context: Context, artist: String?) {
-        private val file = artist?.let { File(dir(context), "told-" + sha1(it.lowercase(Locale.ROOT))) }
+        private val file = artist?.let { File(dir(context), "told-" + sha1(Journal.key(it))) }
 
         fun told(): List<String> = file?.takeIf { it.exists() }?.readLines()?.filter { it.isNotBlank() }.orEmpty()
 
@@ -753,6 +761,8 @@ object TrackInfo {
         o.put("intro", JSONArray(f.intro))
         o.put("circle", JSONArray(f.circle))
         o.put("related", JSONArray(f.related))
+        o.put("relatedIds", JSONArray(f.relatedIds))
+        f.artistId?.let { o.put("artistId", it) }
         return o
     }
 
@@ -768,7 +778,7 @@ object TrackInfo {
         fun strings(name: String) = o.optJSONArray(name)?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
         return Facts(
             text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"),
-            strings("intro"), strings("circle"), strings("related"),
+            strings("intro"), strings("circle"), strings("related"), strings("relatedIds"), o.optString("artistId").ifBlank { null },
         )
     }
 
@@ -867,8 +877,8 @@ object TrackInfo {
     private const val MIN_SCORE = 90
     private const val MAX_CACHED = 300
 
-    /** The cached facts' shape: a new one when the facts gain a field (now: the artists around). */
-    private const val FACTS_PREFIX = "facts5-"
+    /** The cached facts' shape: a new one when the facts gain a field (now: the artist's Wikidata item). */
+    private const val FACTS_PREFIX = "facts6-"
 
     /** Notes about the artist before the artists around them come in. */
     private const val CIRCLE_AFTER = 3
