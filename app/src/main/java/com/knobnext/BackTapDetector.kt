@@ -30,9 +30,9 @@ class BackTapDetector(
     private val threshold: () -> Float,
     /** Whether a third tap could still mean something; if not, two taps fire without waiting. */
     private val wantsTriple: () -> Boolean,
-    private val onTaps: (count: Int) -> Unit,
     /** A tap-like spike was ignored, and why; called on the sensor thread, as often as it happens. */
-    private val onRejected: (Rejected) -> Unit = {},
+    private val onRejected: (Rejected) -> Unit,
+    private val onTaps: (count: Int) -> Unit,
 ) : SensorEventListener {
     enum class Rejected { VIBRATION, BUMP }
 
