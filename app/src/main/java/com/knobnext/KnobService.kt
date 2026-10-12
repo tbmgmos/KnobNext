@@ -332,6 +332,7 @@ class KnobService : AccessibilityService() {
             when (why) {
                 TapStats.Verdict.VIBRATION -> R.string.log_tap_vibration
                 TapStats.Verdict.BUMP -> R.string.log_tap_bump
+                TapStats.Verdict.TURN -> R.string.log_tap_turn
                 TapStats.Verdict.SINGLE -> R.string.log_tap_single
                 TapStats.Verdict.RESTARTED -> R.string.log_tap_restarted
                 else -> return

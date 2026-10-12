@@ -472,11 +472,13 @@
     <string name="log_tap_single">постукивание: засчитано только одно касание, второе не распознано</string>
     <string name="tap_stats_title">Что видит датчик</string>
     <string name="tap_stats_off">Датчик сейчас выключен: он работает, только пока играет музыка.</string>
-    <string name="tap_stats_sensor">Датчик: %1$d Гц · тряска: %2$d%% от порога</string>
+    <string name="tap_stats_sensor">Датчик: %1$d Гц · тряска: %2$d%% от порога · вращение: %3$.1f рад/с</string>
     <string name="tap_stats_silent">Датчик молчит уже %1$d с</string>
-    <string name="tap_stats_counts">Засчитано: %1$d. Не засчитано — тряска: %2$d, толчок: %3$d, одно касание: %4$d, карман: %5$d, ничего не играет: %6$d. Перезапусков датчика: %7$d</string>
+    <string name="tap_stats_counts">Засчитано: %1$d. Не засчитано — тряска: %2$d, поворот: %3$d, толчок: %4$d, одно касание: %5$d, карман: %6$d, ничего не играет: %7$d. Перезапусков датчика: %8$d</string>
     <string name="tap_stats_last">Последнее: %1$s, %2$d с назад</string>
     <string name="tap_stats_hint">Если постукивание перестанет работать, откройте эту страницу: счётчики покажут, что ему мешает.</string>
+    <string name="tap_verdict_turn">не засчитано, телефон поворачивают или резко дёрнули</string>
+    <string name="log_tap_turn">постукивание не засчитано: телефон поворачивают или дёрнули</string>
     <string name="tap_verdict_taps">засчитано</string>
     <string name="tap_verdict_vibration">не засчитано, телефон трясётся</string>
     <string name="tap_verdict_bump">не засчитано, похоже на толчок</string>

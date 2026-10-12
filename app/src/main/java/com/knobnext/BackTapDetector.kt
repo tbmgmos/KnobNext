@@ -19,6 +19,7 @@ import kotlin.math.sqrt
  * A tap on the back pushes the phone towards the user: a short spike along +Z (the axis pointing out
  * of the screen). A tap on the screen pushes it away, so its first spike is along −Z and is ignored.
  * Taps are only counted when the phone was otherwise still, which filters out walking and handling.
+ * The gyroscope helps tell a tap from a jolt or a turn of the phone: a tap hardly rotates it.
  * Riding (a scooter, a bike, a bumpy road) is told apart from tapping in three ways: constant vibration
  * keeps the detector shut for a moment after it calms down; a tap is a sharp pulse, while a bump keeps
  * the phone shaking for tens of milliseconds, so wide pulses are dropped; and a sensor that has gone
@@ -37,6 +38,7 @@ class BackTapDetector(
 
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val accelerometer: Sensor? = sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val gyroscope: Sensor? = sensors?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
     private val thread = HandlerThread("back-tap").apply { start() }
     private val sensorHandler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
@@ -57,6 +59,10 @@ class BackTapDetector(
     private var busyUntil = 0L
     private var pendingAt = 0L
     private var pendingAbove = 0f
+
+    /** Rotation speed, rad/s: smoothed (the phone is being turned or carried) and the latest sharp peak. */
+    private var rotation = 0f
+    private var jolt = 0f
 
     /** When the sensor last reported, on the elapsed-realtime clock. */
     @Volatile private var lastEventAt = 0L
@@ -83,8 +89,15 @@ class BackTapDetector(
     fun restart() {
         if (!running) return
         sensors?.unregisterListener(this)
+        sensors?.unregisterListener(gyro)
         reset()
-        sensors?.registerListener(this, accelerometer ?: return, if (fast) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME, sensorHandler)
+        register(accelerometer ?: return)
+    }
+
+    private fun register(sensor: Sensor) {
+        val rate = if (fast) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME
+        sensors?.registerListener(this, sensor, rate, sensorHandler)
+        gyroscope?.let { sensors?.registerListener(gyro, it, rate, sensorHandler) }
     }
 
     private fun reset() {
@@ -92,6 +105,8 @@ class BackTapDetector(
         taps = 0
         pendingAt = 0L
         busyUntil = 0L
+        rotation = 0f
+        jolt = 0f
         lastEventAt = SystemClock.elapsedRealtime()
         sensorHandler.removeCallbacks(finish)
     }
@@ -103,13 +118,15 @@ class BackTapDetector(
     fun start(fastRate: Boolean = true) {
         val sensor = accelerometer ?: return
         if (running && fast == fastRate) return
-        if (running) sensors?.unregisterListener(this)
+        if (running) {
+            sensors?.unregisterListener(this)
+            sensors?.unregisterListener(gyro)
+        }
         running = true
         TapStats.running = true
         fast = fastRate
         reset()
-        val rate = if (fastRate) SensorManager.SENSOR_DELAY_FASTEST else SensorManager.SENSOR_DELAY_GAME
-        sensors.registerListener(this, sensor, rate, sensorHandler)
+        register(sensor)
     }
 
     fun stop() {
@@ -117,12 +134,26 @@ class BackTapDetector(
         running = false
         TapStats.running = false
         sensors?.unregisterListener(this)
+        sensors?.unregisterListener(gyro)
         sensorHandler.removeCallbacks(finish)
     }
 
     fun release() {
         stop()
         thread.quitSafely()
+    }
+
+    /** The gyroscope: how fast the phone turns, as background (smoothed) and as a sharp peak. */
+    private val gyro = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val speed = sqrt(event.values[0] * event.values[0] + event.values[1] * event.values[1] + event.values[2] * event.values[2])
+            rotation += (speed - rotation) * ROTATION_SMOOTHING
+            // Holds a peak for a few samples, so the accelerometer's spike can see the gyroscope's.
+            jolt = max(speed, jolt * JOLT_DECAY)
+            TapStats.rotationTenths = (rotation * 10).toInt()
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -153,6 +184,9 @@ class BackTapDetector(
         // Strong constant vibration (a bumpy ride) keeps the detector shut a little after it calms down,
         // so the lull between two bumps is not taken for quiet. (Not in the middle of a tap sequence.)
         if (noise >= limit * SHAKE_RATIO && taps == 0 && pendingAt == 0L) busyUntil = now + VIBRATION_HOLD_MS
+        // The phone is being turned about or swung (in a hand, a pocket on the move): not at rest for a tap.
+        val turning = gyroscope != null && rotation > TURNING_RAD_S
+        if (turning && taps == 0 && pendingAt == 0L) busyUntil = max(busyUntil, now + TURN_HOLD_MS)
 
         if (dz < -limit) lastNegativeAt = now
         val spike = now - lastPeakAt > REFRACTORY_MS &&
@@ -164,12 +198,15 @@ class BackTapDetector(
             lastPeakAt = now
             // A tap only has to stand out from the shaking around it. A fixed limit on the shaking shut the
             // detector whenever the phone was held or carried, often for good stretches at a time.
-            if (noise < limit * SHAKE_RATIO && dz > noise * STAND_OUT && now >= busyUntil) {
+            // A tap hardly turns the phone; a knock hard enough to is a jolt, not a tap.
+            val knocked = gyroscope != null && jolt > JOLT_RAD_S
+            if (noise < limit * SHAKE_RATIO && dz > noise * STAND_OUT && now >= busyUntil && !knocked) {
                 pendingAt = now
                 pendingAbove = 0f
             } else {
-                TapStats.note(TapStats.Verdict.VIBRATION)
-                onRejected(TapStats.Verdict.VIBRATION)
+                val why = if (knocked || turning) TapStats.Verdict.TURN else TapStats.Verdict.VIBRATION
+                TapStats.note(why)
+                onRejected(why)
             }
         }
 
@@ -221,6 +258,14 @@ class BackTapDetector(
         /** How many times stronger than the background shaking a tap has to be. */
         const val STAND_OUT = 5f
         const val RING_MS = 120L
+
+        // Gyroscope. A tap on the back turns a phone in a hand by a fraction of a rad/s; these only
+        // catch real turning and real jolts, and the monitor shows the level so they can be tuned.
+        const val ROTATION_SMOOTHING = 0.02f
+        const val TURNING_RAD_S = 1.5f
+        const val JOLT_RAD_S = 6f
+        const val JOLT_DECAY = 0.85f
+        const val TURN_HOLD_MS = 600L
         const val REFRACTORY_MS = 90L
         const val FRONT_TAP_RINGING_MS = 40L
         const val TAP_GAP_MS = 500L
@@ -240,13 +285,16 @@ class BackTapDetector(
  * stop working, this tells why (shaking, a bump, a single knock, the pocket check, a silent sensor).
  */
 object TapStats {
-    enum class Verdict { TAPS, VIBRATION, BUMP, SINGLE, POCKET, NOT_PLAYING, RESTARTED }
+    enum class Verdict { TAPS, VIBRATION, BUMP, SINGLE, POCKET, NOT_PLAYING, RESTARTED, TURN }
 
     @Volatile var running = false
     @Volatile var rateHz = 0
 
     /** Background shaking, as a share of the level that shuts the detector. */
     @Volatile var noisePercent = 0
+
+    /** How fast the phone turns, in tenths of rad/s; the gyroscope's background level. */
+    @Volatile var rotationTenths = 0
 
     /** When the sensor last reported, on the elapsed-realtime clock. */
     @Volatile var lastEventAt = 0L
