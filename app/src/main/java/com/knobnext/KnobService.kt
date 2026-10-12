@@ -845,6 +845,10 @@ class KnobService : AccessibilityService() {
 
     /** The headset's voice button, passed to KnobNext. */
     private fun onHeadsetHold(): Boolean {
+        if (HeadsetLive.learning) {
+            HeadsetLive.report(Gesture.HS_ASSIST, 0)
+            return true
+        }
         val testing = GestureTest.active
         if (!testing && (!prefs.enabled || !prefs.headsetHold || prefs.action(Gesture.HS_ASSIST, prefs.lastPlayer) == Action.NONE)) return false
         log(getString(R.string.log_headset_assist))

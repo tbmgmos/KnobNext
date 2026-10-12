@@ -48,7 +48,7 @@ class HeadsetButtons(
         holdFired = true
         presses = 0
         handler.removeCallbacks(resolve)
-        onGesture(Gesture.HS_PLAY_PAUSE_HOLD, lastKey)
+        emit(Gesture.HS_PLAY_PAUSE_HOLD, lastKey)
     }
 
     /** Keeps the session in step with the headphones: there while they are connected, gone otherwise. */
@@ -83,6 +83,7 @@ class HeadsetButtons(
         session = s
         pushed = null
         push()
+        HeadsetLive.setDevice(device.ifBlank { "?" })
         log(context.getString(R.string.log_headset_on, device.ifBlank { "?" }))
     }
 
@@ -96,6 +97,7 @@ class HeadsetButtons(
             it.release()
         }
         session = null
+        HeadsetLive.setDevice(null)
         log(context.getString(R.string.log_headset_off))
     }
 
@@ -184,7 +186,13 @@ class HeadsetButtons(
         return true
     }
 
-    private fun mapped(g: Gesture) = prefs.action(g, prefs.lastPlayer) != Action.NONE
+    /** While the page shows presses, every kind is told apart, assigned or not. */
+    private fun mapped(g: Gesture) = HeadsetLive.learning || prefs.action(g, prefs.lastPlayer) != Action.NONE
+
+    /** The press is acted on, or, while the headphones page is open, only shown there. */
+    private fun emit(gesture: Gesture, key: Int) {
+        if (HeadsetLive.learning) HeadsetLive.report(gesture, key) else onGesture(gesture, key)
+    }
 
     /** A key with one meaning: acts when pressed; held down, only seeking repeats. */
     private fun single(event: KeyEvent, gesture: Gesture) {
@@ -196,7 +204,7 @@ class HeadsetButtons(
             if (!seek || now - lastRepeatAt < REPEAT_MS) return
             lastRepeatAt = now
         }
-        onGesture(gesture, event.keyCode)
+        emit(gesture, event.keyCode)
     }
 
     private fun playButton(event: KeyEvent) {
@@ -230,7 +238,7 @@ class HeadsetButtons(
             n == 2 -> if (mapped(Gesture.HS_PLAY_PAUSE_DOUBLE)) Gesture.HS_PLAY_PAUSE_DOUBLE else Gesture.HS_NEXT
             else -> if (mapped(Gesture.HS_PLAY_PAUSE_TRIPLE)) Gesture.HS_PLAY_PAUSE_TRIPLE else Gesture.HS_PREVIOUS
         }
-        onGesture(gesture, lastKey)
+        emit(gesture, lastKey)
     }
 
     /** A key KnobNext has no gesture for: the player gets it as it came. */

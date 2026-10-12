@@ -243,6 +243,8 @@ fun KnobScreen(
         ) { current ->
             // Composed only while the check page is shown: that is what keeps the service in check mode.
             val check = if (current == Page.TEST) rememberGestureCheck() else null
+            // Likewise: while the headphones page is shown, presses on them only show there.
+            val learn = if (current == Page.HEADSET) rememberHeadsetLearn() else null
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -257,7 +259,7 @@ fun KnobScreen(
                     Page.KEYS -> keysPage(ctx)
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
-                    Page.HEADSET -> headsetPage(ctx)
+                    Page.HEADSET -> headsetPage(ctx, learn ?: HeadsetLearnState())
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
@@ -865,9 +867,10 @@ private fun LazyListScope.sequencesPage(ctx: PageContext) {
 
 // ---------------------------------------------------------------- Motion
 
-private fun LazyListScope.headsetPage(ctx: PageContext) {
+private fun LazyListScope.headsetPage(ctx: PageContext, learn: HeadsetLearnState) {
     val s = ctx.s
     val prefs = ctx.prefs
+    item { Hint(stringResource(R.string.headset_intro)) }
     item {
         Group(1) {
             SwitchRow(
@@ -877,37 +880,100 @@ private fun LazyListScope.headsetPage(ctx: PageContext) {
             )
         }
     }
+    if (!s.headsetButtons) return
+    item { HeadsetLiveCard(learn) }
     item {
-        AnimatedVisibility(s.headsetButtons) {
-            val rows = listOf(
+        HeadsetRows(
+            ctx, learn, R.string.headset_commands,
+            listOf(
                 Gesture.HS_PLAY_PAUSE to MaterialShapes.Circle,
                 Gesture.HS_NEXT to MaterialShapes.Pill,
                 Gesture.HS_PREVIOUS to MaterialShapes.Arch,
                 Gesture.HS_FORWARD to MaterialShapes.Triangle,
                 Gesture.HS_REWIND to MaterialShapes.Diamond,
+            ),
+        )
+    }
+    item {
+        HeadsetRows(
+            ctx, learn, R.string.headset_counted,
+            listOf(
                 Gesture.HS_PLAY_PAUSE_DOUBLE to MaterialShapes.Puffy,
                 Gesture.HS_PLAY_PAUSE_TRIPLE to MaterialShapes.Flower,
                 Gesture.HS_PLAY_PAUSE_HOLD to MaterialShapes.Sunny,
-            )
-            GestureGroupCard(ctx, rows, accent = false)
-        }
+            ),
+        )
     }
+    item { Hint(stringResource(R.string.headset_counted_hint)) }
     item {
-        AnimatedVisibility(s.headsetButtons) {
+        Column {
+            SectionTitle(stringResource(R.string.headset_hold))
             Group(if (s.headsetHold) 2 else 1) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     SwitchRow(
-                        shape(0), stringResource(R.string.headset_hold), s.headsetHold, { prefs.headsetHold = it },
+                        shape(0), stringResource(R.string.headset_hold_switch), s.headsetHold, { prefs.headsetHold = it },
                         subtitle = stringResource(R.string.headset_hold_hint), enabled = s.enabled,
                     )
                     AnimatedVisibility(s.headsetHold) {
-                        GestureRow(1, Gesture.HS_ASSIST, s, MaterialShapes.SoftBoom, accent = true, onEdit = ctx.edit)
+                        GestureRow(
+                            1, Gesture.HS_ASSIST, s, MaterialShapes.SoftBoom, accent = true,
+                            highlighted = learn.fresh == Gesture.HS_ASSIST, onEdit = ctx.edit,
+                        )
                     }
                 }
             }
         }
     }
     item { Hint(stringResource(R.string.headset_hint)) }
+}
+
+/** Which headphones are caught, and what the last press on them was. */
+@Composable
+private fun HeadsetLiveCard(learn: HeadsetLearnState) {
+    val last = learn.last
+    val title: String
+    val subtitle: String
+    when {
+        learn.device == null -> {
+            title = stringResource(R.string.headset_live_none)
+            subtitle = stringResource(R.string.headset_live_none_hint)
+        }
+        last == null -> {
+            title = stringResource(R.string.headset_live_try)
+            subtitle = stringResource(R.string.headset_live_try_hint, learn.device.orEmpty())
+        }
+        else -> {
+            title = stringResource(R.string.headset_live_got, stringResource(gestureLabel(last.gesture)))
+            subtitle = if (last.key == 0) {
+                stringResource(R.string.headset_live_got_hint_voice)
+            } else {
+                stringResource(R.string.headset_live_got_hint, android.view.KeyEvent.keyCodeToString(last.key).removePrefix("KEYCODE_"))
+            }
+        }
+    }
+    Group(1) {
+        ListRow(
+            shape = shape(0),
+            title = title,
+            subtitle = subtitle,
+            highlighted = learn.fresh != null,
+            leading = { Badge(MaterialShapes.Cookie9Sided, KnobIcons.TouchApp) },
+        )
+    }
+}
+
+@Composable
+private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: Int, rows: List<Pair<Gesture, RoundedPolygon>>) {
+    Column {
+        SectionTitle(stringResource(title))
+        Group(rows.size) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                rows.forEachIndexed { i, (g, polygon) ->
+                    GestureRow(i, g, ctx.s, polygon, accent = false, highlighted = learn.fresh == g, onEdit = ctx.edit)
+                }
+            }
+        }
+    }
 }
 
 private fun LazyListScope.motionPage(ctx: PageContext) {
@@ -1790,6 +1856,7 @@ private fun GroupScope.GestureRow(
     accent: Boolean,
     enabled: Boolean = true,
     actions: Map<Gesture, Action> = s.actions,
+    highlighted: Boolean = false,
     onEdit: (Gesture) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -1799,6 +1866,7 @@ private fun GroupScope.GestureRow(
         title = stringResource(gestureLabel(gesture)),
         subtitle = stringResource(actionLabel(action)),
         enabled = enabled && s.enabled,
+        highlighted = highlighted,
         onClick = { onEdit(gesture) },
         leading = {
             ShapeBadge(
