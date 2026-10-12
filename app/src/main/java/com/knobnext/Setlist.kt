@@ -20,7 +20,7 @@ object Setlist {
 
     /** [mbid]: the artist's MusicBrainz id, which is how setlist.fm knows them. */
     fun gather(context: Context, lang: String, mbid: String, title: String): Found? {
-        val key = BuildConfig.SETLISTFM_KEY.takeIf { it.isNotBlank() } ?: return null
+        val key = Prefs(context).setlistKeyInUse.takeIf { it.isNotBlank() } ?: return null
         val list = get("$API/artist/$mbid/setlists?p=1", key)?.optJSONArray("setlist") ?: return null
         val res = TrackInfo.localized(context, lang)
         val today = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
@@ -52,6 +52,9 @@ object Setlist {
             artist = artistFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
         )
     }
+
+    /** Whether setlist.fm takes [key]: a known artist's concerts must come back (Radiohead's MusicBrainz id). */
+    fun works(key: String): Boolean = get("$API/artist/a74b1b7f-71a5-4011-9441-d0b5e4122711/setlists?p=1", key.trim())?.has("setlist") == true
 
     /** A concert: its day (UTC midnight), where ("venue, city"), its tour, the songs played. */
     private class Show(val date: Long, val place: String, val tour: String?, val songs: List<String>) {

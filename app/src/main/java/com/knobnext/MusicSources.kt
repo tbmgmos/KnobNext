@@ -52,7 +52,7 @@ object MusicSources {
         val audioDbTrack = async { runCatching { audioDbTrack(artist, title, lang) }.getOrNull() }
         val deezer = async { runCatching { deezer(res, artist, title, lang) }.getOrNull() }
         val brainz = async { runCatching { brainzArtist(res, artist, lang) }.getOrNull() }
-        val lastFm = async { runCatching { lastFm(res, artist, title, album, lang) }.getOrNull() }
+        val lastFm = async { runCatching { lastFm(res, Prefs(context).lastFmKeyInUse, artist, title, album, lang) }.getOrNull() }
         val d = deezer.await()
         // The album's description needs its name: the player's, else the one Deezer found.
         val albumName = album ?: d?.albumName
@@ -174,8 +174,12 @@ object MusicSources {
 
     // ---- Last.fm ----
 
-    private fun lastFm(res: Context, artist: String, title: String, album: String?, lang: String): LastFm? {
-        val key = BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() } ?: return null
+    /** Whether Last.fm takes [key]: a known artist must come back. */
+    fun lastFmWorks(key: String): Boolean =
+        TrackInfo.getJson("$LASTFM?method=artist.getinfo&artist=Radiohead&format=json&api_key=${enc(key.trim())}")?.optJSONObject("artist") != null
+
+    private fun lastFm(res: Context, appKey: String, artist: String, title: String, album: String?, lang: String): LastFm? {
+        val key = appKey.takeIf { it.isNotBlank() } ?: return null
         fun call(method: String, params: String) =
             TrackInfo.getJson("$LASTFM?method=$method&api_key=$key&format=json&autocorrect=1&lang=$lang$params")
         val a = call("artist.getinfo", "&artist=${enc(artist)}")?.optJSONObject("artist") ?: return null

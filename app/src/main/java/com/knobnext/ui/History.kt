@@ -365,6 +365,71 @@ private fun fetchCover(context: Context, key: String, album: String?): Bitmap? {
     return bitmap
 }
 
+/**
+ * The person's own keys for Last.fm and setlist.fm: each gets one free for a non-commercial app, and
+ * with it the story has their facts. A key is checked against the service when asked.
+ */
+@Composable
+fun SourceKeys(prefs: Prefs) {
+    val context = LocalContext.current
+    SectionTitle(stringResource(R.string.keys_title))
+    Hint(stringResource(R.string.keys_hint))
+    KeyField(
+        context, stringResource(R.string.keys_lastfm), prefs.lastFmKey, { prefs.lastFmKey = it },
+        getUrl = "https://www.last.fm/api/account/create",
+        check = { com.knobnext.MusicSources.lastFmWorks(it) },
+    )
+    KeyField(
+        context, stringResource(R.string.keys_setlist), prefs.setlistKey, { prefs.setlistKey = it },
+        getUrl = "https://www.setlist.fm/settings/api",
+        check = { com.knobnext.Setlist.works(it) },
+    )
+}
+
+@Composable
+private fun KeyField(context: Context, label: String, stored: String, save: (String) -> Unit, getUrl: String, check: (String) -> Boolean) {
+    var text by remember { mutableStateOf(stored) }
+    // null: not checked; true / false: what the service said.
+    var works by remember { mutableStateOf<Boolean?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    LaunchedEffect(text) {
+        works = null
+        if (text.isBlank()) {
+            save("")
+            return@LaunchedEffect
+        }
+        delay(SAVE_DELAY_MS)
+        save(text)
+        checking = true
+        works = withContext(Dispatchers.IO) { runCatching { check(text) }.getOrDefault(false) }
+        checking = false
+    }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it.trim().take(MAX_KEY_CHARS) },
+            label = { Text(label) },
+            singleLine = true,
+            supportingText = {
+                Text(
+                    stringResource(
+                        when {
+                            text.isBlank() -> R.string.keys_empty
+                            checking -> R.string.keys_checking
+                            works == true -> R.string.keys_works
+                            works == false -> R.string.keys_fails
+                            else -> R.string.keys_checking
+                        },
+                    ),
+                    color = if (works == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = { open(context, getUrl) }) { Text(stringResource(R.string.keys_get)) }
+    }
+}
+
 private val coverTried: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
 
 private const val TOP_ARTISTS = 3
@@ -375,3 +440,4 @@ private const val ALBUM_COVER_DP = 32
 private const val SAVE_DELAY_MS = 600L
 private const val MAX_OWN_CHARS = 500
 private const val COVER_TIMEOUT_MS = 6_000
+private const val MAX_KEY_CHARS = 64

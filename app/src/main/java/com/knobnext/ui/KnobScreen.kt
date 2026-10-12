@@ -1649,6 +1649,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.info_hint))
+            SourceKeys(prefs)
         }
     }
 }

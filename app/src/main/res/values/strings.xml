@@ -198,6 +198,15 @@
     <string name="acq_page_bandcamp">Bandcamp</string>
     <string name="acq_page_soundcloud">SoundCloud</string>
     <string name="acq_sources">Сведения: Википедия, Wikidata, MusicBrainz, Last.fm, setlist.fm, TheAudioDB и Deezer. Тексты Википедии и Last.fm — по лицензии CC BY-SA, обложки — Cover Art Archive.</string>
+    <string name="keys_title">Ключи источников</string>
+    <string name="keys_hint">Last.fm добавляет к рассказу биографии исполнителей, о ком нет статьи в Википедии, а setlist.fm — концерты. Обоим нужен ключ: его бесплатно выдают на сайте после регистрации. Ключ хранится только на телефоне.</string>
+    <string name="keys_lastfm">Ключ Last.fm (API key)</string>
+    <string name="keys_setlist">Ключ setlist.fm</string>
+    <string name="keys_get">Получить ключ</string>
+    <string name="keys_empty">Не задан — без этого источника</string>
+    <string name="keys_checking">Проверяю…</string>
+    <string name="keys_works">Ключ работает</string>
+    <string name="keys_fails">Ключ не подошёл или нет интернета</string>
     <string name="acq_own">Своя заметка</string>
     <string name="acq_own_placeholder">Например: концерт в 2024-м, посоветовал друг</string>
     <string name="acq_own_hint">Только для вас: не озвучивается, никуда не отправляется и не попадает в облачную копию</string>

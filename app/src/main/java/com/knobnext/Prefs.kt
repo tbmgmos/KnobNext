@@ -292,6 +292,21 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("info_history", true)
         set(v) = sp.edit().putBoolean("info_history", v).apply()
 
+    /**
+     * The person's own Last.fm and setlist.fm keys, for the track story. Empty: the app's own key, if
+     * the build has one.
+     */
+    var lastFmKey: String
+        get() = sp.getString("lastfm_key", null).orEmpty()
+        set(v) = sp.edit().putString("lastfm_key", v.trim()).apply()
+
+    var setlistKey: String
+        get() = sp.getString("setlist_key", null).orEmpty()
+        set(v) = sp.edit().putString("setlist_key", v.trim()).apply()
+
+    val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
+    val setlistKeyInUse: String get() = setlistKey.ifBlank { BuildConfig.SETLISTFM_KEY }
+
     /** Bumped on every change of the history of acquaintances, so the screen reads it again. */
     var journalVersion: Int
         get() = sp.getInt("journal_version", 0)
