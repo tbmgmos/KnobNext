@@ -805,6 +805,8 @@ class KnobService : AccessibilityService() {
 
     private fun onScreen(on: Boolean) {
         if (!on) onScreenOff()
+        // Taps that run only with the screen off start and stop with it, not at the next check.
+        if (prefs.backTap && prefs.backTapScreenOff) handler.post { updateSensors() }
         val now = SystemClock.elapsedRealtime()
         if (on) screenOnAt = now
         // Turned on or off by us (pocket mode, locking): not the power button.
@@ -1193,7 +1195,7 @@ class KnobService : AccessibilityService() {
                 resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
 
         headset.update()
-        val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
+        val tap = wanted(prefs.backTap && (!prefs.backTapScreenOff || screenDark()), Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
         // The background service is what keeps sensor readings coming with the screen off. If it is not

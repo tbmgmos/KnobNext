@@ -127,6 +127,7 @@ data class Settings(
     val sleepExtend: Boolean,
     val announceAllTracks: Boolean,
     val backTapEco: Boolean,
+    val backTapScreenOff: Boolean,
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
     val headsetButtons: Boolean,
@@ -384,6 +385,11 @@ class Prefs(context: Context) {
     var backTapEco: Boolean
         get() = sp.getBoolean("back_tap_eco", false)
         set(v) = sp.edit().putBoolean("back_tap_eco", v).apply()
+
+    /** Back taps only with the screen off: with it on, Pixel's own Quick Tap does the job. */
+    var backTapScreenOff: Boolean
+        get() = sp.getBoolean("back_tap_screen_off", false)
+        set(v) = sp.edit().putBoolean("back_tap_screen_off", v).apply()
 
     /** While music plays, the power button turns on pocket mode first; a second press turns the screen off. */
     var pocketAuto: Boolean
@@ -653,6 +659,7 @@ class Prefs(context: Context) {
         sleepExtend = sleepExtend,
         announceAllTracks = announceAllTracks,
         backTapEco = backTapEco,
+        backTapScreenOff = backTapScreenOff,
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
         headsetButtons = headsetButtons,

@@ -1030,7 +1030,7 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
     val prefs = ctx.prefs
     item { PixelTapCard(ctx) }
     item {
-        Group(if (s.backTap) 6 else 1) {
+        Group(if (s.backTap) 7 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -1057,8 +1057,12 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                             shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
                             subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
                         )
+                        SwitchRow(
+                            shape(5), stringResource(R.string.back_tap_screen_off), s.backTapScreenOff, { prefs.backTapScreenOff = it },
+                            subtitle = stringResource(R.string.back_tap_screen_off_hint), enabled = s.enabled,
+                        )
                         ListRow(
-                            shape = shape(5),
+                            shape = shape(6),
                             title = stringResource(R.string.tap_stats_title),
                             subtitle = rememberTapSummary() + "\n" + stringResource(R.string.tap_stats_hint),
                         )
