@@ -27,6 +27,7 @@
     <string name="info_all_told">I have told all I know about %1$s.</string>
     <string name="info_remind">As a reminder: %1$s</string>
     <string name="info_intro_basics">Meet %1$s.</string>
+    <string name="info_found_now">At last there is something about %1$s.</string>
     <string name="src_formed">The band was formed in %1$s.</string>
     <string name="src_style">Their style: %1$s.</string>
     <string name="src_album_date">The album came out on %1$s.</string>

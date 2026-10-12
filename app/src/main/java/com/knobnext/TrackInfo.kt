@@ -108,6 +108,8 @@ object TrackInfo {
         length: InfoLength,
         lang: String,
         source: InfoSource,
+        /** "Tell more" from the history: the artist's story first, the song and album only after it. */
+        aboutArtist: Boolean = false,
         note: (String) -> Unit,
     ): String? = coroutineScope {
         val started = System.currentTimeMillis()
@@ -116,19 +118,38 @@ object TrackInfo {
         val history = History(context, track.artist.takeIf { remember })
         // Never told about this artist in KnobNext: the listener is introduced to them first.
         val firstMeet = track.artist != null && history.told().isEmpty()
+        // Nothing was known about them before: when something is now, that is news in itself.
+        val wasUnknown = remember && track.artist != null && Journal.entry(context, Journal.key(track.artist))?.unknown == true
         var progress: Int? = null
+        var album: String? = track.album
+        // What the story ends up being about, for the history.
+        var told: Plan? = null
         // How long each way took goes to the log: the story is meant to follow the title without a pause.
-        fun ready(story: String, how: String): String {
+        fun ready(found: String, how: String): String {
             note(context.getString(R.string.log_info_ready, (System.currentTimeMillis() - started) / 1000.0, how))
-            history.add(story)
+            history.add(found)
             if (remember && track.artist != null) {
-                Journal.record(context, track.artist, Speech.cleanTitle(track.title), story, firstMeet, progress)
+                val topic = when {
+                    told?.intro?.isNotEmpty() == true || told == null && firstMeet -> Journal.Topic.INTRO
+                    else -> when (told?.topic) {
+                        Topic.SONG -> Journal.Topic.SONG
+                        Topic.ALBUM -> Journal.Topic.ALBUM
+                        Topic.ARTIST -> Journal.Topic.ARTIST
+                        null -> null
+                    }
+                }
+                // A reminder, or "that is all I know", is nothing new for the history.
+                val news = found.takeUnless { told?.repeat == true || told?.exhausted == true }
+                Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic, progress, found = true)
             }
-            return story
+            if (!wasUnknown) return found
+            return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + found
         }
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
-        if (source == InfoSource.GEMINI) {
+        // Gemini on its own tells what it likes; asked for the artist's story, it retells the facts instead.
+        val way = if (aboutArtist && source == InfoSource.GEMINI) InfoSource.COMBINED else source
+        if (way == InfoSource.GEMINI) {
             fromGemini(track, length, lang, history.told(), firstMeet)?.let {
                 factsAhead.cancel()
                 return@coroutineScope ready(it, "Gemini Nano")
@@ -139,19 +160,21 @@ object TrackInfo {
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
             if (remember && track.artist != null) {
-                Journal.record(context, track.artist, Speech.cleanTitle(track.title), null, false, null)
+                Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), track.album, null, null, null)
             }
             return@coroutineScope null
         }
         progress = artistProgress(context, track, facts, lang)
-        if (source != InfoSource.WIKI) {
+        album = facts.album
+        val keep = { plan: Plan -> told = plan }
+        if (way != InfoSource.WIKI) {
             // Gemini already said no (or can't run from the background): only the downloaded model is left.
-            val brain = if (source == InfoSource.GEMINI) Brains.background(context) else null
-            retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = source == InfoSource.GEMINI, firstMeet)
+            val brain = if (way == InfoSource.GEMINI) Brains.background(context) else null
+            retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = way == InfoSource.GEMINI, firstMeet, aboutArtist, keep)
                 ?.let { return@coroutineScope ready(it, brain?.name ?: context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
         }
-        plainStory(context, track, facts, length, lang, firstMeet)?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
+        plainStory(context, track, facts, length, lang, firstMeet, aboutArtist, keep)?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
     }
 
     // ---- Gemini on its own ----
@@ -192,10 +215,12 @@ object TrackInfo {
         brain: Brain?,
         onlyBackground: Boolean,
         firstMeet: Boolean,
+        aboutArtist: Boolean,
+        keep: (Plan) -> Unit,
     ): String? {
         if (onlyBackground && brain == null) return null
         // The same choice as without a model: the introduction, then one subject's untold facts.
-        val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL)
+        val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL, aboutArtist).also(keep)
         if (plan.intro.isEmpty() && plan.facts.isEmpty()) return null
         // Everything told: the model would only make something up. The plain story says so.
         if (plan.exhausted) return null
@@ -237,8 +262,17 @@ object TrackInfo {
     }
 
     /** Without a model: the introduction or one note, read as it is, in the story's language only. */
-    private fun plainStory(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String, firstMeet: Boolean): String? {
-        val plan = plan(context, track, facts, length, lang, firstMeet, perFact = 0)
+    private fun plainStory(
+        context: Context,
+        track: Track,
+        facts: Facts,
+        length: InfoLength,
+        lang: String,
+        firstMeet: Boolean,
+        aboutArtist: Boolean,
+        keep: (Plan) -> Unit,
+    ): String? {
+        val plan = plan(context, track, facts, length, lang, firstMeet, perFact = 0, aboutArtist).also(keep)
         val res = localized(context, lang)
         if (plan.exhausted && plan.intro.isEmpty()) {
             return track.artist?.let { res.getString(R.string.info_all_told, Speech.cleanArtist(it)) }
@@ -290,8 +324,18 @@ object TrackInfo {
      * One subject per telling, the first that still has facts not told: the song, else its album, else
      * the artist's story; when all have been told, the first that has any. [lang] null: facts in any
      * language (a model translates them); [perFact] > 0: that many facts for a model to choose from.
+     * [aboutArtist]: the artist's story goes first while it has untold facts.
      */
-    private fun plan(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String?, firstMeet: Boolean, perFact: Int): Plan {
+    private fun plan(
+        context: Context,
+        track: Track,
+        facts: Facts,
+        length: InfoLength,
+        lang: String?,
+        firstMeet: Boolean,
+        perFact: Int,
+        aboutArtist: Boolean = false,
+    ): Plan {
         val rotation = Rotation(context)
         val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
         fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
@@ -312,6 +356,9 @@ object TrackInfo {
         // Subjects with untold facts take turns for the same track: the song first, then the album, then
         // the artist's story; each new track begins with its song again.
         val fresh = any.filter { (_, key, list) -> rotation.left(key, list.size) > 0 }
+        fresh.firstOrNull { aboutArtist && it.first == Topic.ARTIST }?.let { artist ->
+            return Plan(intro, Topic.ARTIST, rotation.next(artist.second, artist.third, sentences))
+        }
         if (fresh.isNotEmpty()) {
             val turn = fresh[rotation.bump("turn:${track.artist}/${track.title}") % fresh.size]
             return Plan(intro, turn.first, rotation.next(turn.second, turn.third, sentences))

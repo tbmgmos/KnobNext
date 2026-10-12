@@ -42,6 +42,12 @@ class StoryLiveTest {
                 }
             }
         }
+        // "Tell more" from the history: the artist's story first.
+        println("\n===== Рассказать ещё: Кино")
+        repeat(2) { i ->
+            val story = TrackInfo.story(context, tracks[1], InfoLength.NORMAL, "ru", InfoSource.WIKI, aboutArtist = true) { println("   · $it") }
+            println("#${i + 1}: ${story ?: "(ничего)"}")
+        }
         // History off: nothing is remembered, so every story starts with the introduction again.
         Prefs(context).infoHistory = false
         println("\n===== История выключена: Nirvana дважды")
@@ -52,7 +58,8 @@ class StoryLiveTest {
         Prefs(context).infoHistory = true
         println("\n===== Знакомства")
         Journal.entries(context).forEach { e ->
-            println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, рассказано ${e.progress}%, неизвестен=${e.unknown}")
+            println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, рассказано ${e.progress}%, неизвестен=${e.unknown}, последний трек ${e.lastTrack} / ${e.lastAlbum}")
+            e.notes.forEach { n -> println("   [${n.topic ?: "-"}] ${n.album ?: "-"} · ${n.track}: ${n.text.take(80)}") }
         }
         assertTrue("Nothing was told about any artist: the sources could not be reached", told > 0)
     }
