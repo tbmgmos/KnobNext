@@ -32,13 +32,16 @@ class Media(private val context: Context) {
         return enabled.split(':').any { ComponentName.unflattenFromString(it) == listenerComponent }
     }
 
+    /** Drops KnobNext's own session from a list the system gave: it only mirrors the real player. */
+    fun players(list: List<MediaController>): List<MediaController> = list.filter { it.packageName != context.packageName }
+
     /** Every player's session; KnobNext's own (the one that catches headphone buttons) is not a player. */
     fun controllers(): List<MediaController> =
         if (!hasAccess()) {
             emptyList()
         } else {
             try {
-                sessions.getActiveSessions(listenerComponent).filter { it.packageName != context.packageName }
+                players(sessions.getActiveSessions(listenerComponent))
             } catch (_: SecurityException) {
                 emptyList()
             }

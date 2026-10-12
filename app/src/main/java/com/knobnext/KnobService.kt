@@ -417,6 +417,8 @@ class KnobService : AccessibilityService() {
         backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::onTapRejected) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
+        // Build 22241d6 could take KnobNext's own session for the player and remember it as one.
+        prefs.forgetPlayer(packageName)
         headset = HeadsetButtons(this, handler, prefs, media, { handler.post { log(it) } }, ::onHeadsetKey)
         HeadsetHold.handler = ::onHeadsetHold
         flip = FlipDetector(this, ::onFlip)

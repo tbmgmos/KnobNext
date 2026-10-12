@@ -34,6 +34,7 @@ class HeadsetButtons(
     private var session: MediaSession? = null
     private var mirrored: MediaController? = null
     private var holdApplied: Boolean? = null
+    private var pushed: String? = null
 
     val active: Boolean get() = session != null
 
@@ -63,6 +64,8 @@ class HeadsetButtons(
 
     /** The player that plays now; its state and track are copied to the session. */
     fun mirror(controller: MediaController?) {
+        // Never itself: copying its own state would report a change, which would be copied again.
+        if (controller?.packageName == context.packageName) return
         mirrored = controller
         push()
     }
@@ -78,6 +81,7 @@ class HeadsetButtons(
         s.setCallback(callback, handler)
         s.isActive = true
         session = s
+        pushed = null
         push()
         log(context.getString(R.string.log_headset_on, device.ifBlank { "?" }))
     }
@@ -99,17 +103,36 @@ class HeadsetButtons(
         val s = session ?: return
         val player = mirrored
         val state = player?.playbackState
-        val builder = if (state != null) PlaybackState.Builder(state) else PlaybackState.Builder().setState(PlaybackState.STATE_PAUSED, 0, 0f)
-        // Whatever the player can do, the headphones are allowed to ask: the press is passed on.
-        s.setPlaybackState(builder.setActions((state?.actions ?: 0L) or ACTIONS).build())
         val meta = player?.metadata
+        // Only what changed: every update goes through the system to all who watch the session.
+        val key = listOf(
+            state?.state, state?.position, state?.lastPositionUpdateTime, state?.playbackSpeed, state?.actions,
+            meta?.getString(MediaMetadata.METADATA_KEY_TITLE), meta?.getString(MediaMetadata.METADATA_KEY_ARTIST),
+            meta?.getString(MediaMetadata.METADATA_KEY_ALBUM),
+        ).joinToString("\u0000")
+        if (key == pushed) return
+        pushed = key
+        // Plain values only: the player's extras and custom actions may hold its own classes, which this
+        // app can't unpack when they are sent on.
+        val builder = PlaybackState.Builder()
+        if (state != null) {
+            builder.setState(state.state, state.position, state.playbackSpeed, state.lastPositionUpdateTime)
+            builder.setBufferedPosition(state.bufferedPosition)
+        } else {
+            builder.setState(PlaybackState.STATE_PAUSED, 0, 0f)
+        }
+        // Whatever the player can do, the headphones are allowed to ask: the press is passed on.
+        builder.setActions((state?.actions ?: 0L) or ACTIONS)
         // Text only: pictures would be copied through the system for nothing.
-        s.setMetadata(
-            MediaMetadata.Builder().apply {
-                for (key in TEXT_KEYS) meta?.getString(key)?.let { putString(key, it) }
-                meta?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 }?.let { putLong(MediaMetadata.METADATA_KEY_DURATION, it) }
-            }.build(),
-        )
+        val copy = MediaMetadata.Builder().apply {
+            for (k in TEXT_KEYS) meta?.getString(k)?.let { putString(k, it) }
+            meta?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 }?.let { putLong(MediaMetadata.METADATA_KEY_DURATION, it) }
+        }.build()
+        // A failed copy only means the headphones show less; it must not take the service down.
+        runCatching {
+            s.setPlaybackState(builder.build())
+            s.setMetadata(copy)
+        }.onFailure { log(context.getString(R.string.log_headset_error, it.javaClass.simpleName)) }
     }
 
     private val callback = object : MediaSession.Callback() {
@@ -254,12 +277,19 @@ object HeadsetHold {
     /** Set by the service while it runs: true when the press was used. */
     @Volatile var handler: (() -> Boolean)? = null
 
+    /**
+     * Only when the state really changes: every change is announced to the whole system, and the services
+     * of the app (player access among them) are bound again because of it.
+     */
     fun enable(context: Context, on: Boolean) {
-        val state = if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        val pm = context.packageManager
+        val component = ComponentName(context, HeadsetHoldActivity::class.java)
         try {
-            context.packageManager.setComponentEnabledSetting(
-                ComponentName(context, HeadsetHoldActivity::class.java), state, PackageManager.DONT_KILL_APP,
-            )
+            // "Default" is what the manifest says: off.
+            val isOn = pm.getComponentEnabledSetting(component) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            if (isOn == on) return
+            val state = if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+            pm.setComponentEnabledSetting(component, state, PackageManager.DONT_KILL_APP)
         } catch (_: Exception) {
         }
     }

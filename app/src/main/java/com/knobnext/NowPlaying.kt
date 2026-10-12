@@ -41,8 +41,10 @@ class NowPlayingTracker(
     private val watched = mutableMapOf<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
     private var started = false
 
+    // The system's list includes KnobNext's own session (the one that catches headphone buttons). Taken
+    // for the player, it would mirror itself, and every copy would report a change that triggers the next.
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
-        refresh(list.orEmpty())
+        refresh(media.players(list.orEmpty()))
     }
 
     private val refreshSoon = Runnable { refresh(media.controllers()) }

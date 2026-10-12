@@ -431,6 +431,7 @@
     <string name="log_headset_key">наушники: пришла кнопка %1$s</string>
     <string name="log_headset_same">наушники: %1$s пропущена, плеер уже в этом состоянии</string>
     <string name="log_headset_assist">наушники: кнопка ассистента</string>
+    <string name="log_headset_error">наушники: не удалось передать состояние плеера (%1$s)</string>
     <string name="log_tap_vibration">постукивание не засчитано: телефон трясётся</string>
     <string name="log_tap_bump">постукивание не засчитано: похоже на толчок, а не на касание</string>
     <string name="log_tap_restarted">датчик постукивания молчал, включён заново</string>

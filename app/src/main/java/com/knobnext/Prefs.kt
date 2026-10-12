@@ -491,6 +491,15 @@ class Prefs(context: Context) {
         if (packageName !in seen) sp.edit().putStringSet("seen_players", seen + packageName).apply()
     }
 
+    /** Takes [packageName] out of everything that remembers players (KnobNext's own session was once taken for one). */
+    fun forgetPlayer(packageName: String) {
+        val edit = sp.edit()
+        seenPlayers.takeIf { packageName in it }?.let { edit.putStringSet("seen_players", it - packageName) }
+        if (lastPlayer == packageName) edit.remove("last_player")
+        if (pausedPlayer == packageName) edit.remove("paused_player")
+        edit.apply()
+    }
+
     fun action(g: Gesture): Action {
         sp.getString(g.key, null)?.let { stored ->
             return Action.entries.firstOrNull { it.name == stored } ?: Action.NONE
