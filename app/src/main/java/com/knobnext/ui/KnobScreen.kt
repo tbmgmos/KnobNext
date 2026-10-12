@@ -1004,9 +1004,31 @@ private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: Strin
     }
 }
 
+/** Pixel's own Quick Tap, caught as the "play/pause media" key it sends (experimental). */
+@Composable
+private fun PixelTapCard(ctx: PageContext) {
+    val s = ctx.s
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Group(if (s.pixelTap) 2 else 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pixel_tap_title), s.pixelTap, { ctx.prefs.pixelTap = it },
+                    subtitle = stringResource(R.string.pixel_tap_subtitle), enabled = s.enabled,
+                    leading = { Badge(MaterialShapes.Cookie12Sided, KnobIcons.TouchApp, primary = true) },
+                )
+                AnimatedVisibility(s.pixelTap) {
+                    GestureRow(1, Gesture.PIXEL_TAP, s, MaterialShapes.Cookie12Sided, accent = true, onEdit = ctx.edit)
+                }
+            }
+        }
+        AnimatedVisibility(s.pixelTap) { Hint(stringResource(R.string.pixel_tap_hint)) }
+    }
+}
+
 private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
+    item { PixelTapCard(ctx) }
     item {
         Group(if (s.backTap) 6 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1321,6 +1343,7 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
     }
     val motion = buildList {
         if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
+        if (s.pixelTap) add(Gesture.PIXEL_TAP)
         if (s.twist) add(Gesture.TWIST)
         if (s.wave) add(Gesture.WAVE)
     }

@@ -96,6 +96,11 @@
     <string name="gesture_tap_hold_up">Нажать и удерживать «+»</string>
     <string name="gesture_tap_hold_down">Нажать и удерживать «−»</string>
     <string name="gesture_back_tap_2">Два постукивания</string>
+    <string name="gesture_pixel_tap">Быстрое касание Pixel</string>
+    <string name="pixel_tap_title">Быстрое касание Pixel</string>
+    <string name="pixel_tap_subtitle">Экспериментально: двойное касание по корпусу распознаёт сам Pixel</string>
+    <string name="pixel_tap_hint">Откройте Настройки → Система → Жесты → Быстрое касание, включите его и выберите действие «Воспроизведение / пауза медиа». Pixel пришлёт эту кнопку, KnobNext поймает её и выполнит действие выше, ничего не сворачивая. Работает, только пока не подключены наушники: кнопку от Pixel и от наушников не отличить, и при наушниках она уходит им. Если после касания ничего не происходит, в журнале диагностики нет строки «пришла кнопка»: система не отдала её KnobNext.</string>
+    <string name="log_pixel_tap_on">быстрое касание Pixel: жду кнопку «Воспроизведение / пауза»</string>
     <string name="gesture_back_tap_3">Три постукивания</string>
     <string name="gesture_long_hold_up">Удерживать «+» долго</string>
     <string name="gesture_long_hold_down">Удерживать «−» долго</string>

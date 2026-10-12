@@ -56,6 +56,10 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
     WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
 
+    // Pixel's own Quick Tap (a double tap on the back), set to "play/pause media": KnobNext catches that
+    // key and runs this instead. Off until turned on and assigned.
+    PIXEL_TAP("action_pixel_tap", GestureGroup.MOTION, Action.NONE),
+
     // Buttons of headphones and speakers. What they send is up to the device: a tap, two or three taps
     // usually arrive as play/pause, next and previous. Each is the same as before until reassigned.
     HS_PLAY_PAUSE("action_hs_play_pause", GestureGroup.HEADSET, Action.PLAY_PAUSE),
@@ -126,6 +130,7 @@ data class Settings(
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
     val headsetButtons: Boolean,
+    val pixelTap: Boolean,
     val headsetHold: Boolean,
     /** The headphones connected last, and the gestures their commands were named after there. */
     val headsetDevice: String?,
@@ -386,6 +391,14 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
 
     /** Holding power with nothing to do opens Gemini (or the Google assistant), as it would without us. */
+    /**
+     * Experimental: Pixel's Quick Tap, set to "play/pause media", sends that key; without headphones
+     * connected KnobNext takes it as the "Pixel Quick Tap" gesture.
+     */
+    var pixelTap: Boolean
+        get() = sp.getBoolean("pixel_tap", false)
+        set(v) = sp.edit().putBoolean("pixel_tap", v).apply()
+
     /** Buttons of Bluetooth and wired headphones go through KnobNext, so they can be reassigned. */
     var headsetButtons: Boolean
         get() = sp.getBoolean("headset_buttons", false)
@@ -643,6 +656,7 @@ class Prefs(context: Context) {
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
         headsetButtons = headsetButtons,
+        pixelTap = pixelTap,
         headsetHold = headsetHold,
         headsetDevice = lastHeadset,
         headsetMotions = lastHeadset?.let { device ->
