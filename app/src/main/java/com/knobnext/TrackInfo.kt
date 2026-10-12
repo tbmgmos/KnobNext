@@ -651,6 +651,10 @@ object TrackInfo {
         )
         // Nothing to say even now: not kept, so the next look is a fresh one.
         if (!merged.empty) runCatching { file.writeText(writeFacts(merged).toString()) }
+        // The story was told before these came: the history's card gets the cover and pages now.
+        if (Prefs(context).infoHistory && (b.coverUrl != null || b.pages.isNotEmpty())) {
+            Journal.learned(context, artist, base.artistId, base.album ?: track.album, b.coverUrl, b.pages)
+        }
         return merged
     }
 

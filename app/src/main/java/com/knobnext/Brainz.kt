@@ -130,6 +130,20 @@ object Brainz {
         )
     }
 
+    /**
+     * The cover of [album] by [artist] in the Cover Art Archive, found by the album's name: for the
+     * history, when the player showed none and no story has found one yet.
+     */
+    suspend fun coverOf(artist: String, album: String): String? {
+        val name = Speech.cleanTitle(album)
+        val q = "releasegroup:\"${clean(name)}\" AND artist:\"${clean(Speech.cleanArtist(artist))}\""
+        val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: return null
+        return (0 until groups.length()).mapNotNull { groups.optJSONObject(it) }
+            .firstOrNull { it.optInt("score") >= MIN_SCORE && sameName(it.optString("title"), name) }
+            ?.optString("id")?.takeIf { it.isNotBlank() }
+            ?.let { "https://coverartarchive.org/release-group/$it/front-250" }
+    }
+
     private class Recording(val id: String, val artistId: String?, val releaseGroup: String?)
 
     /** The recording, its artist, and the album it is on: the player's album when it names one. */

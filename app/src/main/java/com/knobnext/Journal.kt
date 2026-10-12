@@ -151,6 +151,25 @@ object Journal {
     fun entry(context: Context, key: String): Entry? =
         read(context).optJSONObject("artists")?.optJSONObject(key)?.let { entry(key, it) }
 
+    /**
+     * What the slower sources found after the story was told (the album's cover, the artist's pages):
+     * kept for an artist already in the history, so the card has them without another story.
+     */
+    @Synchronized
+    fun learned(context: Context, artist: String, id: String?, album: String?, coverUrl: String?, pages: Map<String, String>) {
+        val root = read(context)
+        val artists = root.optJSONObject("artists") ?: return
+        // Under another spelling ("Kino" for «Кино»): the same Wikidata item.
+        val k = key(artist).takeIf { artists.has(it) } ?: id?.let { byId(artists, it) } ?: return
+        val e = artists.getJSONObject(k)
+        if (pages.isNotEmpty()) e.put("pages", JSONObject(map(e, "pages") + pages))
+        if (coverUrl != null) {
+            val covers = e.optJSONObject("coverUrls") ?: JSONObject().also { e.put("coverUrls", it) }
+            covers.put(albumKey(album), coverUrl)
+        }
+        write(context, root)
+    }
+
     /** Whether a story was already told about the artist behind this Wikidata item, under any spelling. */
     @Synchronized
     fun knows(context: Context, id: String): Boolean {

@@ -36,6 +36,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.knobnext.Brainz
 import com.knobnext.Journal
 import com.knobnext.Prefs
 import com.knobnext.R
@@ -340,16 +341,18 @@ private fun Cover(context: Context, key: String, album: String?, version: Int, s
  * The player had no cover: the one MusicBrainz knows (Cover Art Archive), fetched once and kept like
  * the player's. [album] null: the album heard last, or any.
  */
-private fun fetchCover(context: Context, key: String, album: String?): Bitmap? {
+private suspend fun fetchCover(context: Context, key: String, album: String?): Bitmap? {
     // Once per run: a saved cover redraws every card, and a failed one would be fetched again each time.
     if (!coverTried.add(key + "\u0000" + album)) return null
     val entry = Journal.entry(context, key) ?: return null
-    val (which, url) = if (album != null) {
-        album to (entry.coverUrls[Journal.albumKey(album)] ?: return null)
-    } else {
-        val last = entry.coverUrls[Journal.albumKey(entry.lastAlbum)]
-        if (last != null) entry.lastAlbum to last else entry.coverUrls.entries.firstOrNull()?.let { it.key.ifEmpty { null } to it.value } ?: return null
-    }
+    // The album: the one asked for, else the one heard last, else any the notes are about.
+    val which = album ?: entry.lastAlbum ?: entry.notes.lastOrNull { it.album != null }?.album
+    val url = which?.let { entry.coverUrls[Journal.albumKey(it)] }
+        // No story has found it yet (or it was told before covers were looked for): ask MusicBrainz.
+        ?: which?.let { a -> runCatching { Brainz.coverOf(entry.name, a) }.getOrNull() }
+            ?.also { Journal.learned(context, entry.name, entry.id, which, it, emptyMap()) }
+        ?: entry.coverUrls.entries.firstOrNull()?.value
+        ?: return null
     val bitmap = runCatching {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
