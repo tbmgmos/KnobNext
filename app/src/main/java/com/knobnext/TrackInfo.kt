@@ -315,32 +315,43 @@ object TrackInfo {
 
     /** Everything found about the track, fetched all at once and kept on the phone. */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
-        val file = File(dir(context), "facts2-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
+        val file = File(dir(context), "facts3-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { return readFacts(JSONObject(file.readText())) }
         }
+        val started = System.currentTimeMillis()
         val fetched = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
                 coroutineScope {
                     val title = Speech.cleanTitle(track.title)
                     val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() }
                     val more = async { runCatching { MusicSources.gather(context, title, artist, track.album, lang) }.getOrNull() }
-                    val song = async { article(lang) { l -> findSong(l, title, artist) } }
-                    val about = async { artist?.let { a -> article(lang) { l -> findArtist(l, a) } } }
+                    val song = async { findArticle(lang) { l -> findSong(l, title, artist) } }
+                    val about = async { artist?.let { a -> findArticle(lang) { l -> findArtist(l, a) } } }
                     val brainz = async { if (artist != null && (track.album == null || track.year == null)) musicBrainz(title, artist) else null }
                     // The album's article: right away when the player names the album, else once MusicBrainz has.
                     val albumText = async {
                         val name = track.album ?: brainz.await()?.first
-                        name?.let { a -> article(lang) { l -> findAlbum(l, a, artist) } }
+                        name?.let { a -> findArticle(lang) { l -> findAlbum(l, a, artist) } }
+                    }
+                    // Wikidata, for the very items behind the articles found.
+                    val data = async {
+                        runCatching {
+                            Wikidata.gather(
+                                context, lang, song.await()?.page, albumText.await()?.page, about.await()?.page,
+                                deadline = started + WIKIDATA_DEADLINE_MS,
+                            )
+                        }.getOrNull()
                     }
                     val b = brainz.await()
                     val m = more.await()
+                    val d = data.await()
                     Facts(
-                        song = listOfNotNull(song.await()) + m?.song.orEmpty(),
-                        artist = listOfNotNull(about.await()) + m?.artist.orEmpty(),
+                        song = listOfNotNull(song.await()?.text, d?.song) + m?.song.orEmpty(),
+                        artist = listOfNotNull(about.await()?.text, d?.artist) + m?.artist.orEmpty(),
                         album = track.album ?: b?.first ?: m?.albumName,
                         year = track.year ?: b?.second ?: m?.year,
-                        albumText = listOfNotNull(albumText.await()) + m?.album.orEmpty(),
+                        albumText = listOfNotNull(albumText.await()?.text, d?.album) + m?.album.orEmpty(),
                     )
                 }
             }
@@ -358,13 +369,18 @@ object TrackInfo {
      * An article in [lang]; found only in another language, it is followed to its [lang] version, and
      * kept foreign (for a model to translate) only when there is no such version.
      */
-    private fun article(lang: String, find: (String) -> String?): Text? {
-        find(lang)?.let { page -> return text(lang, page)?.let { Text(it, lang) } }
+    private fun findArticle(lang: String, find: (String) -> String?): Article? {
+        find(lang)?.let { page -> return Article(text(lang, page)?.let { Text(it, lang) }, Wikidata.Page(lang, page)) }
         val other = if (lang == "ru") "en" else "ru"
         val page = find(other) ?: return null
-        translation(other, page, lang)?.let { translated -> text(lang, translated)?.let { return Text(it, lang) } }
-        return text(other, page)?.let { Text(it, other) }
+        translation(other, page, lang)?.let { translated ->
+            text(lang, translated)?.let { return Article(Text(it, lang), Wikidata.Page(lang, translated)) }
+        }
+        return Article(text(other, page)?.let { Text(it, other) }, Wikidata.Page(other, page))
     }
+
+    /** An article found: its facts, and where it is (for the Wikidata item behind it). */
+    private class Article(val text: Text?, val page: Wikidata.Page)
 
     /** The song's own article, when Wikipedia has one that is about a song by this artist. */
     private fun findSong(lang: String, title: String, artist: String?): String? =
@@ -568,6 +584,9 @@ object TrackInfo {
     private const val SEARCH_RESULTS = 2
     private const val REQUEST_TIMEOUT_MS = 3_500
     private const val FETCH_TIMEOUT_MS = 8_000L
+
+    // The last Wikidata request starts by then, each can take up to REQUEST_TIMEOUT_MS: within FETCH_TIMEOUT_MS.
+    private const val WIKIDATA_DEADLINE_MS = 4_000L
     // Past this, the story is no longer "right after the title": the facts are read as they are.
     private const val MODEL_TIMEOUT_MS = 10_000L
     private const val FACTS_FRESH_MS = 30L * 24 * 60 * 60 * 1000

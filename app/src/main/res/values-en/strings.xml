@@ -3,6 +3,23 @@
 <resources>
     <string name="info_album">album “%1$s”</string>
     <string name="info_year">%1$s</string>
+    <string name="src_wd_song_out">The song came out %1$s.</string>
+    <string name="src_wd_album_out">The album came out %1$s.</string>
+    <string name="src_wd_composer">Music by %1$s.</string>
+    <string name="src_wd_lyrics">Lyrics by %1$s.</string>
+    <string name="src_wd_song_producer">The song was produced by %1$s.</string>
+    <string name="src_wd_album_producer">The album was produced by %1$s.</string>
+    <string name="src_wd_part_of">The song is on the album %1$s.</string>
+    <string name="src_wd_studio">The album was recorded at %1$s.</string>
+    <string name="src_wd_album_label">The album was released on %1$s.</string>
+    <string name="src_wd_labels">Labels: %1$s.</string>
+    <string name="src_wd_awards">Awards: %1$s.</string>
+    <string name="src_wd_previous">The album before it: %1$s.</string>
+    <string name="src_wd_next">The album after it: %1$s.</string>
+    <string name="src_wd_born_m">He was born %1$s.</string>
+    <string name="src_wd_born_f">She was born %1$s.</string>
+    <string name="src_wd_member_of">Member of %1$s.</string>
+    <string name="src_wd_members">The band: %1$s.</string>
     <string name="src_formed">The band was formed in %1$s.</string>
     <string name="src_style">Their style: %1$s.</string>
     <string name="src_album_date">The album came out on %1$s.</string>
