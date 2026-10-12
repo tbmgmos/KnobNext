@@ -446,6 +446,8 @@
     <string name="log_headset_error">наушники: не удалось передать состояние плеера (%1$s)</string>
     <string name="log_tap_vibration">постукивание не засчитано: телефон трясётся</string>
     <string name="log_tap_bump">постукивание не засчитано: похоже на толчок, а не на касание</string>
+    <string name="log_background_restart">фоновая работа была остановлена, запускаю снова</string>
+    <string name="tap_stats_no_background">Фоновая работа сейчас не запущена: при выключенном экране Android может перестать присылать показания датчика.</string>
     <string name="log_tap_single">постукивание: засчитано только одно касание, второе не распознано</string>
     <string name="tap_stats_title">Что видит датчик</string>
     <string name="tap_stats_off">Датчик сейчас выключен: он работает, только пока играет музыка.</string>

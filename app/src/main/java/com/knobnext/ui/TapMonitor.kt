@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.knobnext.R
+import com.knobnext.ScreenOffService
 import com.knobnext.TapStats
 import kotlinx.coroutines.delay
 
@@ -37,7 +38,8 @@ fun tapSummary(context: Context): String {
         val ago = ((now - TapStats.lastAt) / 1000).toInt()
         context.getString(R.string.tap_stats_last, context.getString(verdictLabel(v)), ago)
     }
-    return listOfNotNull(sensor, counts, last).joinToString("\n")
+    val background = if (ScreenOffService.running) null else context.getString(R.string.tap_stats_no_background)
+    return listOfNotNull(background, sensor, counts, last).joinToString("\n")
 }
 
 fun verdictLabel(v: TapStats.Verdict) = when (v) {

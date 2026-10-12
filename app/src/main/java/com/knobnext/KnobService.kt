@@ -321,6 +321,7 @@ class KnobService : AccessibilityService() {
     private var trackPlayer: String? = null
 
     private val tapNoteAt = java.util.concurrent.ConcurrentHashMap<TapStats.Verdict, Long>()
+    private var backgroundRetryAt = 0L
 
     /** Says in the log why a tap was not taken, each reason at most once in a while (any thread). */
     private fun noteTap(why: TapStats.Verdict) {
@@ -452,13 +453,18 @@ class KnobService : AccessibilityService() {
         PocketScreen.toggle = { handler.post { togglePocket() } }
         PowerHold.handler = ::onPowerHold
         VoiceListener.trigger = { handler.post { startVoice() } }
-        ScreenOffService.sync(this)
+        // Bound by the system as an accessibility service, the app may start it from the background.
+        ScreenOffService.sync(this, inForeground = true)
         Setup.returnToAppIfRequested(this)
     }
 
     override fun onDestroy() {
         if (::prefs.isInitialized) log(getString(R.string.log_service_stopped))
-        ScreenOffService.stop(this)
+        // Only when it is no longer wanted (the accessibility service turned off, gestures off). The
+        // system also restarts this service on its own; stopping the background service then left the
+        // sensors without it until the app was next opened, and Android stops sending sensor readings
+        // to an app about a minute after it goes to the background: taps stopped working.
+        if (!ScreenOffService.shouldRun(this)) ScreenOffService.stop(this)
         GestureTest.onChange = null
         SleepTimer.fader = null
         PocketScreen.toggle = null
@@ -1185,6 +1191,14 @@ class KnobService : AccessibilityService() {
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
+        // The background service is what keeps sensor readings coming with the screen off. If it is not
+        // running though it should, start it again (not more often than every so often, and say so).
+        val sensorsOn = tap || turn || flip.running || wave.running
+        if (sensorsOn && !ScreenOffService.running && now - backgroundRetryAt > BACKGROUND_RETRY_MS && ScreenOffService.shouldRun(this)) {
+            backgroundRetryAt = now
+            log(getString(R.string.log_background_restart))
+            ScreenOffService.sync(this, inForeground = true)
+        }
         if (tap) {
             backTap.start(fastRate = !(prefs.backTapEco && screenDark()))
             // Sound plays, so the CPU is awake and the sensor should be reporting; if not, it needs registering again.
@@ -1579,6 +1593,7 @@ class KnobService : AccessibilityService() {
         const val BOTH_HOLD_MS = 700L
         const val MOTION_CHECK_MS = 2_000L
         const val TAP_NOTE_MS = 10_000L
+        const val BACKGROUND_RETRY_MS = 30_000L
         const val FLIP_RESUME_WINDOW_MS = 30 * 60 * 1000L
         const val WAKE_LOCK_MAX_MS = 60 * 60 * 1000L
         const val PAUSE_SETTLE_MS = 3_000L
