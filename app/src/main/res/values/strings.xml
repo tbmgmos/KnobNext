@@ -162,6 +162,9 @@
     <string name="info_language_system">Как в системе</string>
     <string name="log_info_gemini_failed">рассказ: Gemini Nano не ответил (%1$s) — беру факты из Википедии</string>
     <string name="log_info_no_facts">рассказ: в Википедии ничего не нашлось (или нет интернета)</string>
+    <string name="log_info_ready">рассказ готов за %1$.1f с (%2$s)</string>
+    <string name="log_info_way_plain">факты как есть</string>
+    <string name="log_info_way_model">модель</string>
     <string name="log_info_plain">рассказ: модели нет или она не ответила — читаю факты как есть</string>
     <string name="info_length">Длина рассказа</string>
     <string name="info_length_short">Коротко</string>

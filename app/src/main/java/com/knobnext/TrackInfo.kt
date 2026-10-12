@@ -95,25 +95,36 @@ object TrackInfo {
         lang: String,
         source: InfoSource,
         note: (String) -> Unit,
-    ): String? {
+    ): String? = coroutineScope {
+        val started = System.currentTimeMillis()
+        // How long each way took goes to the log: the story is meant to follow the title without a pause.
+        fun ready(story: String, how: String): String {
+            note(context.getString(R.string.log_info_ready, (System.currentTimeMillis() - started) / 1000.0, how))
+            return story
+        }
         val history = History(context, track.artist)
+        // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
+        val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
         if (source == InfoSource.GEMINI) {
-            fromGemini(track, length, lang, history.told())?.let { return history.add(it) }
+            fromGemini(track, length, lang, history.told())?.let {
+                factsAhead.cancel()
+                return@coroutineScope ready(history.add(it), "Gemini Nano")
+            }
             note(context.getString(R.string.log_info_gemini_failed, NanoBrain.lastError ?: "-"))
         }
-        val facts = facts(context, track, lang)
+        val facts = factsAhead.await()
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
-            return null
+            return@coroutineScope null
         }
         if (source != InfoSource.WIKI) {
             // Gemini already said no (or can't run from the background): only the downloaded model is left.
             val brain = if (source == InfoSource.GEMINI) Brains.background(context) else null
             retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = source == InfoSource.GEMINI)
-                ?.let { return history.add(it) }
+                ?.let { return@coroutineScope ready(history.add(it), brain?.name ?: context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
         }
-        return plainStory(context, track, facts, length, lang)?.let(history::add)
+        plainStory(context, track, facts, length, lang)?.let { ready(history.add(it), context.getString(R.string.log_info_way_plain)) }
     }
 
     // ---- Gemini on its own ----
@@ -244,10 +255,18 @@ object TrackInfo {
         year?.let { appendLine("Year: $it") }
     }
 
+    /**
+     * What was told before, so the facts change: only the last few stories, each by its first sentence.
+     * Whole stories made the prompt grow with every listen, and the model took seconds longer to read
+     * it before answering: the pause after the title grew.
+     */
     private fun StringBuilder.appendTold(told: List<String>, lang: String) {
         if (told.isEmpty()) return
         appendLine(if (lang == "ru") "Это уже рассказывали — расскажи другие факты:" else "Already told — tell other facts:")
-        told.forEach { appendLine("- ${it.take(MAX_TOLD_CHARS)}") }
+        told.takeLast(TOLD_IN_PROMPT).forEach { story ->
+            val gist = sentences(story).firstOrNull() ?: story
+            appendLine("- ${gist.take(MAX_TOLD_CHARS)}")
+        }
     }
 
     /** What the model is asked to cover. */
@@ -549,7 +568,8 @@ object TrackInfo {
     private const val SEARCH_RESULTS = 2
     private const val REQUEST_TIMEOUT_MS = 3_500
     private const val FETCH_TIMEOUT_MS = 8_000L
-    private const val MODEL_TIMEOUT_MS = 20_000L
+    // Past this, the story is no longer "right after the title": the facts are read as they are.
+    private const val MODEL_TIMEOUT_MS = 10_000L
     private const val FACTS_FRESH_MS = 30L * 24 * 60 * 60 * 1000
     private const val MAX_ARTICLE_CHARS = 20_000
     private const val MIN_LINE_CHARS = 40
@@ -560,7 +580,8 @@ object TrackInfo {
     private val BRACKETS = Regex("\\s*[(\\[][^()\\[\\]]*[)\\]]")
     private const val FACTS_FOR_MODEL = 5
     private const val MAX_TOLD = 5
-    private const val MAX_TOLD_CHARS = 300
+    private const val MAX_TOLD_CHARS = 140
+    private const val TOLD_IN_PROMPT = 3
     private const val TOKENS_PER_SENTENCE = 50
     private const val EXTRA_TOKENS = 60
     private const val MIN_ANSWER_CHARS = 20
