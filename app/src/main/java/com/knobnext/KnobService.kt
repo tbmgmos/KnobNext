@@ -410,7 +410,7 @@ class KnobService : AccessibilityService() {
         prefs.migrate()
         log(getString(R.string.log_service_started))
         media = Media(this)
-        media.silencePlaying = { silence.playing }
+        media.silencePlaying = { silence.playing || ::headset.isInitialized && headset.silencePlaying }
         extras = Extras(this, media, prefs)
         haptics = Haptics(this)
         proximity = ProximityProbe(this)

@@ -60,8 +60,11 @@ class Media(private val context: Context) {
     /** Set by the service: true while it plays silence to keep the keys working on pause. */
     var silencePlaying: () -> Boolean = { false }
 
-    /** Music is audible, not counting that silence. */
-    fun musicActive(): Boolean = audio.isMusicActive && !silencePlaying()
+    /**
+     * Music is audible, not counting KnobNext's own silence. While that plays, the system can't tell
+     * the two apart, so the players' own state decides.
+     */
+    fun musicActive(): Boolean = if (!silencePlaying()) audio.isMusicActive else controllers().any { it.isPlaying() }
 
     fun isInCall(): Boolean = when (audio.mode) {
         AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE -> true
