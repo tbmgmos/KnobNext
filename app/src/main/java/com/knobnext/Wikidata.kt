@@ -1,6 +1,9 @@
 package com.knobnext
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.text.DateFormat
@@ -26,7 +29,7 @@ object Wikidata {
      * [deadline] (wall clock, ms): no request starts after it, so a slow Wikidata never holds up the
      * facts the other sources found.
      */
-    fun gather(
+    suspend fun gather(
         context: Context,
         lang: String,
         song: Page?,
@@ -40,7 +43,10 @@ object Wikidata {
     ): Found {
         fun late() = System.currentTimeMillis() > deadline
         val none = Found(null, null, null)
-        val ids = listOf(song, album, artist).map { page -> page?.takeIf { !late() }?.let(::itemOf) }
+        // The three items at once: one after another, they made the first story wait seconds longer.
+        val ids = coroutineScope {
+            listOf(song, album, artist).map { page -> async(Dispatchers.IO) { page?.takeIf { !late() }?.let(::itemOf) } }.map { it.await() }
+        }
         if (late()) return none
         val items = ids.filterNotNull().takeIf { it.isNotEmpty() }?.let(::claims).orEmpty()
         if (items.isEmpty() || late()) return none

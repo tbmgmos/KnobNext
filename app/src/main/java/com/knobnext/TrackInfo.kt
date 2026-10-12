@@ -569,7 +569,9 @@ object TrackInfo {
             val l = line.trim()
             if (STOP_SECTIONS.any { l.equals(it, ignoreCase = true) }) break
             if (l.length < MIN_LINE_CHARS) continue
-            sentences(l).filterTo(facts) { it.length in MIN_FACT_CHARS..MAX_FACT_CHARS }
+            // Asides go before the line is cut into sentences: "(род. 26 августа 1976, Уфа)" would cut the
+            // definition at "род.", and a transcription in brackets makes it look too long.
+            sentences(speakable(l)).filterTo(facts) { it.length in MIN_FACT_CHARS..MAX_FACT_CHARS }
         }
         return facts
     }
