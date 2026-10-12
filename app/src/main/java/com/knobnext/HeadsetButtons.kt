@@ -84,6 +84,7 @@ class HeadsetButtons(
         pushed = null
         push()
         HeadsetLive.setDevice(device.ifBlank { "?" })
+        if (device.isNotBlank() && prefs.lastHeadset != device) prefs.lastHeadset = device
         log(context.getString(R.string.log_headset_on, device.ifBlank { "?" }))
     }
 

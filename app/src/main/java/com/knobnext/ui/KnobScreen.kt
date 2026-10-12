@@ -881,10 +881,12 @@ private fun LazyListScope.headsetPage(ctx: PageContext, learn: HeadsetLearnState
         }
     }
     if (!s.headsetButtons) return
-    item { HeadsetLiveCard(learn) }
+    item { HeadsetLiveCard(ctx, learn) }
     item {
         HeadsetRows(
-            ctx, learn, R.string.headset_commands,
+            ctx, learn,
+            (learn.device ?: s.headsetDevice)?.let { stringResource(R.string.headset_gestures_of, it) }
+                ?: stringResource(R.string.headset_commands),
             listOf(
                 Gesture.HS_PLAY_PAUSE to MaterialShapes.Circle,
                 Gesture.HS_NEXT to MaterialShapes.Pill,
@@ -896,7 +898,7 @@ private fun LazyListScope.headsetPage(ctx: PageContext, learn: HeadsetLearnState
     }
     item {
         HeadsetRows(
-            ctx, learn, R.string.headset_counted,
+            ctx, learn, stringResource(R.string.headset_counted),
             listOf(
                 Gesture.HS_PLAY_PAUSE_DOUBLE to MaterialShapes.Puffy,
                 Gesture.HS_PLAY_PAUSE_TRIPLE to MaterialShapes.Flower,
@@ -927,10 +929,12 @@ private fun LazyListScope.headsetPage(ctx: PageContext, learn: HeadsetLearnState
     item { Hint(stringResource(R.string.headset_hint)) }
 }
 
-/** Which headphones are caught, and what the last press on them was. */
+/** Which headphones are caught, what the last press on them was, and which gesture that was. */
 @Composable
-private fun HeadsetLiveCard(learn: HeadsetLearnState) {
+private fun HeadsetLiveCard(ctx: PageContext, learn: HeadsetLearnState) {
     val last = learn.last
+    val device = learn.device?.takeIf { it != "?" }
+    val motion = last?.let { ctx.s.headsetMotions[it.gesture] }?.takeIf { device != null && device == ctx.s.headsetDevice }
     val title: String
     val subtitle: String
     when {
@@ -943,7 +947,8 @@ private fun HeadsetLiveCard(learn: HeadsetLearnState) {
             subtitle = stringResource(R.string.headset_live_try_hint, learn.device.orEmpty())
         }
         else -> {
-            title = stringResource(R.string.headset_live_got, stringResource(gestureLabel(last.gesture)))
+            title = motion?.let { stringResource(R.string.headset_live_got_motion, stringResource(motionLabel(it)), stringResource(gestureLabel(last.gesture))) }
+                ?: stringResource(R.string.headset_live_got, stringResource(gestureLabel(last.gesture)))
             subtitle = if (last.key == 0) {
                 stringResource(R.string.headset_live_got_hint_voice)
             } else {
@@ -951,25 +956,48 @@ private fun HeadsetLiveCard(learn: HeadsetLearnState) {
             }
         }
     }
-    Group(1) {
-        ListRow(
-            shape = shape(0),
-            title = title,
-            subtitle = subtitle,
-            highlighted = learn.fresh != null,
-            leading = { Badge(MaterialShapes.Cookie9Sided, KnobIcons.TouchApp) },
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Group(1) {
+            ListRow(
+                shape = shape(0),
+                title = title,
+                subtitle = subtitle,
+                highlighted = learn.fresh != null,
+                leading = { Badge(MaterialShapes.Cookie9Sided, KnobIcons.TouchApp) },
+            )
+        }
+        if (last != null && device != null) {
+            MotionQuestion(device, motion) { ctx.prefs.setHeadsetMotion(device, last.gesture, it) }
+        }
     }
 }
 
+/**
+ * One line per command, named after the gesture that sends it on these headphones once that is known
+ * ("Double tap"); until then by the command, with the gesture that usually sends it.
+ */
 @Composable
-private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: Int, rows: List<Pair<Gesture, RoundedPolygon>>) {
+private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: String, rows: List<Pair<Gesture, RoundedPolygon>>) {
+    val s = ctx.s
+    val scheme = MaterialTheme.colorScheme
     Column {
-        SectionTitle(stringResource(title))
+        SectionTitle(title)
         Group(rows.size) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 rows.forEachIndexed { i, (g, polygon) ->
-                    GestureRow(i, g, ctx.s, polygon, accent = false, highlighted = learn.fresh == g, onEdit = ctx.edit)
+                    val action = s.actions[g] ?: Action.NONE
+                    val motion = s.headsetMotions[g]
+                    val command = stringResource(gestureLabel(g))
+                    ListRow(
+                        shape = shape(i),
+                        title = motion?.let { stringResource(motionLabel(it)) } ?: command,
+                        subtitle = stringResource(R.string.headset_row_action, stringResource(actionLabel(action))) + "\n" +
+                            (if (motion != null) command else stringResource(typicalMotion(g))),
+                        enabled = s.enabled,
+                        highlighted = learn.fresh == g,
+                        onClick = { ctx.edit(g) },
+                        leading = { ShapeBadge(polygon, actionIcon(action), scheme.secondaryContainer, scheme.onSecondaryContainer) },
+                    )
                 }
             }
         }

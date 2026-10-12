@@ -73,6 +73,12 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     HS_ASSIST("action_hs_assist", GestureGroup.HEADSET, Action.NONE),
 }
 
+/**
+ * What the finger does on the headphones. KnobNext only sees the command that arrives; which gesture
+ * sends it is set in the headphones' own app, so the person tells it once, per headphones.
+ */
+enum class HeadsetMotion { TAP, DOUBLE_TAP, TRIPLE_TAP, HOLD, DOUBLE_TAP_HOLD, SWIPE_FORWARD, SWIPE_BACK, BUTTON }
+
 /** How hard the back has to be tapped; values are high-pass acceleration thresholds in m/s². */
 enum class TapSensitivity(val threshold: Float) { LOW(5.0f), MEDIUM(3.5f), HIGH(2.4f) }
 
@@ -121,6 +127,9 @@ data class Settings(
     val powerHoldFallback: Boolean,
     val headsetButtons: Boolean,
     val headsetHold: Boolean,
+    /** The headphones connected last, and the gestures their commands were named after there. */
+    val headsetDevice: String?,
+    val headsetMotions: Map<Gesture, HeadsetMotion>,
     val smartVoice: Boolean,
     val blindGestures: Boolean,
     val infoLength: InfoLength,
@@ -387,6 +396,20 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("headset_hold", false)
         set(v) = sp.edit().putBoolean("headset_hold", v).apply()
 
+    /** The headphones whose buttons came through KnobNext last. */
+    var lastHeadset: String?
+        get() = sp.getString("last_headset", null)
+        set(v) = sp.edit().putString("last_headset", v).apply()
+
+    /** Which gesture on [device] sends the command behind [g], as the person said; null: not said. */
+    fun headsetMotion(device: String, g: Gesture): HeadsetMotion? =
+        sp.getString("hs_motion@$device@${g.key}", null)?.let { name -> HeadsetMotion.entries.firstOrNull { it.name == name } }
+
+    fun setHeadsetMotion(device: String, g: Gesture, m: HeadsetMotion?) {
+        val key = "hs_motion@$device@${g.key}"
+        if (m == null) sp.edit().remove(key).apply() else sp.edit().putString(key, m.name).apply()
+    }
+
     var powerHoldFallback: Boolean
         get() = sp.getBoolean("power_hold_fallback", true)
         set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
@@ -621,6 +644,11 @@ class Prefs(context: Context) {
         powerHoldFallback = powerHoldFallback,
         headsetButtons = headsetButtons,
         headsetHold = headsetHold,
+        headsetDevice = lastHeadset,
+        headsetMotions = lastHeadset?.let { device ->
+            Gesture.entries.filter { it.group == GestureGroup.HEADSET }
+                .mapNotNull { g -> headsetMotion(device, g)?.let { g to it } }.toMap()
+        }.orEmpty(),
         smartVoice = smartVoice,
         blindGestures = blindGestures,
         infoLength = infoLength,
