@@ -150,6 +150,16 @@ object MusicSources {
         )
     }
 
+    /** The album's cover at Deezer (no key): for the history, when the Cover Art Archive has none. */
+    fun deezerCover(artist: String, album: String): String? {
+        val name = Speech.cleanTitle(album)
+        val q = "artist:\"${Speech.cleanArtist(artist).replace("\"", "")}\" album:\"${name.replace("\"", "")}\""
+        val data = TrackInfo.getJson("https://api.deezer.com/search/album?limit=5&q=${enc(q)}")?.optJSONArray("data") ?: return null
+        return (0 until data.length()).mapNotNull { data.optJSONObject(it) }
+            .firstOrNull { sameName(it.optString("title"), name) && sameName(it.optJSONObject("artist")?.optString("name").orEmpty(), Speech.cleanArtist(artist)) }
+            ?.optString("cover_medium")?.takeIf { it.startsWith("https://") }
+    }
+
     // ---- MusicBrainz ----
 
     private fun brainzArtist(res: Context, artist: String, lang: String): List<String>? {

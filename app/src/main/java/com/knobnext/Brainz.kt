@@ -136,12 +136,17 @@ object Brainz {
      */
     suspend fun coverOf(artist: String, album: String): String? {
         val name = Speech.cleanTitle(album)
-        val q = "releasegroup:\"${clean(name)}\" AND artist:\"${clean(Speech.cleanArtist(artist))}\""
-        val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: return null
-        return (0 until groups.length()).mapNotNull { groups.optJSONObject(it) }
-            .firstOrNull { it.optInt("score") >= MIN_SCORE && sameName(it.optString("title"), name) }
-            ?.optString("id")?.takeIf { it.isNotBlank() }
-            ?.let { "https://coverartarchive.org/release-group/$it/front-250" }
+        val who = clean(Speech.cleanArtist(artist))
+        // The exact title first; then its words, for a title the player writes without its commas.
+        val words = name.replace(Regex("[^\\p{L}\\p{N} ]"), " ").trim().split(Regex("\\s+")).joinToString(" AND ")
+        for (q in listOf("releasegroup:\"${clean(name)}\" AND artist:\"$who\"", "releasegroup:($words) AND artist:\"$who\"")) {
+            val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: continue
+            (0 until groups.length()).mapNotNull { groups.optJSONObject(it) }
+                .firstOrNull { it.optInt("score") >= COVER_SCORE && sameName(it.optString("title"), name) }
+                ?.optString("id")?.takeIf { it.isNotBlank() }
+                ?.let { return "https://coverartarchive.org/release-group/$it/front-250" }
+        }
+        return null
     }
 
     private class Recording(val id: String, val artistId: String?, val releaseGroup: String?)
@@ -209,6 +214,9 @@ object Brainz {
 
     private const val API = "https://musicbrainz.org/ws/2"
     private const val MIN_SCORE = 90
+
+    /** A cover is checked by its title too, so a lower search score will do. */
+    private const val COVER_SCORE = 70
     private const val MAX_MEMBERS = 6
     private const val MAX_NAMES = 3
     private const val SPACING_MS = 1_100L

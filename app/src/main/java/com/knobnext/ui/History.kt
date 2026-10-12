@@ -349,7 +349,10 @@ private suspend fun fetchCover(context: Context, key: String, album: String?): B
     val which = album ?: entry.lastAlbum ?: entry.notes.lastOrNull { it.album != null }?.album
     val url = which?.let { entry.coverUrls[Journal.albumKey(it)] }
         // No story has found it yet (or it was told before covers were looked for): ask MusicBrainz.
-        ?: which?.let { a -> runCatching { Brainz.coverOf(entry.name, a) }.getOrNull() }
+        ?: which?.let { a ->
+            runCatching { Brainz.coverOf(entry.name, a) }.getOrNull()
+                ?: runCatching { com.knobnext.MusicSources.deezerCover(entry.name, a) }.getOrNull()
+        }
             ?.also { Journal.learned(context, entry.name, entry.id, which, it, emptyMap()) }
         ?: entry.coverUrls.entries.firstOrNull()?.value
         ?: return null

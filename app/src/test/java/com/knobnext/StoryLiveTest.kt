@@ -60,7 +60,7 @@ class StoryLiveTest {
         // Covers for the history: found by the album's name, then fetched (through the archive's redirects).
         println("\n===== Обложки")
         for ((artist, album) in listOf("Nirvana" to "Nevermind", "Кино" to "Группа крови", "Земфира" to "Прости меня моя любовь")) {
-            val url = Brainz.coverOf(artist, album)
+            val url = Brainz.coverOf(artist, album) ?: MusicSources.deezerCover(artist, album)
             val bytes = url?.let { u ->
                 runCatching {
                     val conn = java.net.URL(u).openConnection() as java.net.HttpURLConnection
