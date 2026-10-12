@@ -56,6 +56,9 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
     WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
 
+    // Pixel's own Quick Tap (double tap on the back) runs this through a shortcut. Off until assigned.
+    PIXEL_TAP("action_pixel_tap", GestureGroup.MOTION, Action.NONE),
+
     // Buttons of headphones and speakers. What they send is up to the device: a tap, two or three taps
     // usually arrive as play/pause, next and previous. Each is the same as before until reassigned.
     HS_PLAY_PAUSE("action_hs_play_pause", GestureGroup.HEADSET, Action.PLAY_PAUSE),

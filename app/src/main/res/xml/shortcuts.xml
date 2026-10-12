@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- For Pixel's Quick Tap ("Open app" → KnobNext → shortcut): no window, it runs the action. -->
+    <shortcut
+        android:shortcutId="quick_tap"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/quick_tap_short"
+        android:shortcutLongLabel="@string/quick_tap_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.knobnext"
+            android:targetClass="com.knobnext.QuickTapActivity" />
+    </shortcut>
+</shortcuts>

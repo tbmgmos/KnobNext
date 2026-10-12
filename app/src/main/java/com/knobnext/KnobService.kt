@@ -452,6 +452,7 @@ class KnobService : AccessibilityService() {
         SleepTimer.fader = { handler.post { fadeOutAndPause() } }
         PocketScreen.toggle = { handler.post { togglePocket() } }
         PowerHold.handler = ::onPowerHold
+        QuickTap.handler = { handler.post { fireGesture(Gesture.PIXEL_TAP, skipPocket = true) } }
         VoiceListener.trigger = { handler.post { startVoice() } }
         // Bound by the system as an accessibility service, the app may start it from the background.
         ScreenOffService.sync(this, inForeground = true)
@@ -470,6 +471,7 @@ class KnobService : AccessibilityService() {
         PocketScreen.toggle = null
         PowerHold.handler = null
         HeadsetHold.handler = null
+        QuickTap.handler = null
         VoiceListener.trigger = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
@@ -854,7 +856,7 @@ class KnobService : AccessibilityService() {
                 return
             }
         }
-        fireGesture(gesture, fromHeadset = true)
+        fireGesture(gesture, skipPocket = true)
     }
 
     /** The headset's voice button, passed to KnobNext. */
@@ -866,7 +868,7 @@ class KnobService : AccessibilityService() {
         val testing = GestureTest.active
         if (!testing && (!prefs.enabled || !prefs.headsetHold || prefs.action(Gesture.HS_ASSIST, prefs.lastPlayer) == Action.NONE)) return false
         log(getString(R.string.log_headset_assist))
-        return fireGesture(Gesture.HS_ASSIST, fromHeadset = true) || testing
+        return fireGesture(Gesture.HS_ASSIST, skipPocket = true) || testing
     }
 
     private fun powerDoubleAssigned() = prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) != Action.NONE
@@ -1311,7 +1313,7 @@ class KnobService : AccessibilityService() {
         /** Only check and announce the start: the caller performs the action itself (smooth seeking). */
         startOnly: Boolean = false,
         /** The press came from headphones, which are not in a pocket whatever the proximity sensor says. */
-        fromHeadset: Boolean = false,
+        skipPocket: Boolean = false,
     ): Boolean {
         val name = getString(gestureLabel(gesture))
         val target = media.resolve(prefs)
@@ -1335,7 +1337,7 @@ class KnobService : AccessibilityService() {
             log(getString(R.string.log_not_playing, name))
             return false
         }
-        if (!fromHeadset && pocketCovered()) {
+        if (!skipPocket && pocketCovered()) {
             if (tapGesture) TapStats.note(TapStats.Verdict.POCKET)
             // The presses were accidental: undo their volume change too.
             restoreVolumeTo?.let(::restoreVolume)

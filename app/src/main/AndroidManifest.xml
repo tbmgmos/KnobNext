@@ -54,7 +54,18 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
             </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Pixel's Quick Tap opens this through the shortcut; no window, it runs the action. -->
+        <activity
+            android:name=".QuickTapActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/quick_tap_short"
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <!-- Chosen as the digital assistant app, it gets the power-button hold: no window, it runs the
              action and closes (or opens the usual assistant when nothing plays). -->

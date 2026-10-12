@@ -1004,9 +1004,22 @@ private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: Strin
     }
 }
 
+/** Pixel's own Quick Tap, which the phone's sensor chip recognizes: it opens a shortcut that runs the action. */
+@Composable
+private fun PixelTapCard(ctx: PageContext) {
+    val s = ctx.s
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Group(1) {
+            GestureRow(0, Gesture.PIXEL_TAP, s, MaterialShapes.Cookie12Sided, accent = true, onEdit = ctx.edit)
+        }
+        Hint(stringResource(R.string.pixel_tap_hint))
+    }
+}
+
 private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
+    item { PixelTapCard(ctx) }
     item {
         Group(if (s.backTap) 6 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1321,6 +1334,7 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
     }
     val motion = buildList {
         if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
+        if ((s.actions[Gesture.PIXEL_TAP] ?: Action.NONE) != Action.NONE) add(Gesture.PIXEL_TAP)
         if (s.twist) add(Gesture.TWIST)
         if (s.wave) add(Gesture.WAVE)
     }
