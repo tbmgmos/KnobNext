@@ -397,9 +397,24 @@ object TrackInfo {
         return Plan(intro, turn.first, rotation.next(turn.second, turn.third, sentences), repeat = true)
     }
 
-    /** The artist's facts in the order the articles tell them, as one story. */
-    private fun artistFacts(facts: Facts, lang: String?): List<String> =
-        brief(facts.artist.filter { lang == null || it.lang == lang }.flatMap { it.facts }).filter { standsAlone(it) }
+    /**
+     * The artist's facts as one story: the article in its own order, and now and then a fact from the
+     * other sources (members, concerts, listeners), which would otherwise wait behind a long article
+     * and never be heard.
+     */
+    private fun artistFacts(facts: Facts, lang: String?): List<String> {
+        val texts = facts.artist.filter { lang == null || it.lang == lang }
+        val story = texts.firstOrNull()?.facts.orEmpty()
+        val others = merged(texts.drop(1))
+        val out = ArrayList<String>()
+        var next = 0
+        story.forEachIndexed { i, fact ->
+            out += fact
+            if ((i + 1) % WEAVE_EVERY == 0 && next < others.size) out += others[next++]
+        }
+        out += others.drop(next)
+        return brief(out).filter { standsAlone(it) }
+    }
 
     /** Forgets that the artist was introduced and how far their story got: the next story starts afresh. */
     fun forgetArtist(context: Context, artist: String, id: String?) {
@@ -582,7 +597,7 @@ object TrackInfo {
         return fetched
     }
 
-    // ---- MusicBrainz, in the background ----
+    // ---- MusicBrainz and setlist.fm, in the background ----
 
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val deepening = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -605,12 +620,14 @@ object TrackInfo {
         val b = runCatching { Brainz.gather(context, lang, track.title, artist, base.album ?: track.album, said) }.getOrNull()
             // Not found, or not reachable: tried again next time.
             ?: return null
+        // The artist on stage, now that their MusicBrainz id is known.
+        val live = runCatching { Setlist.gather(context, lang, b.artistMbid, track.title) }.getOrNull()
         val intro = base.intro.ifEmpty {
             if (b.basics.isEmpty()) emptyList() else listOf(localized(context, lang).getString(R.string.info_intro_basics, artist)) + b.basics
         }
         val merged = Facts(
-            song = base.song + listOfNotNull(b.song),
-            artist = base.artist + listOfNotNull(b.artist),
+            song = base.song + listOfNotNull(b.song, live?.song),
+            artist = base.artist + listOfNotNull(b.artist, live?.artist),
             album = base.album,
             year = base.year,
             albumText = base.albumText,
@@ -958,6 +975,9 @@ object TrackInfo {
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts7-"
+
+    /** In the artist's story, a fact from the other sources after this many of the article's. */
+    private const val WEAVE_EVERY = 3
 
     /** With nothing quick found, how long MusicBrainz is waited for (a few requests, one a second). */
     private const val DEEP_WAIT_MS = 5_000L

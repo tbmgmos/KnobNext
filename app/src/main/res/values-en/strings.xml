@@ -31,6 +31,11 @@
     <string name="src_mb_producer">The recording was produced by %1$s.</string>
     <string name="src_mb_engineer">The recording engineer: %1$s.</string>
     <string name="src_mb_studio">Recorded at %1$s.</string>
+    <string name="src_setlist_last">The last known concert: %1$s, %2$s.</string>
+    <string name="src_setlist_tour">The last concert was part of the %1$s tour.</string>
+    <string name="src_setlist_song_count">The song was played at %1$s of their last %2$s concerts.</string>
+    <string name="src_setlist_song_last">It was last played live on %1$s, %2$s.</string>
+    <string name="src_setlist_song_none">It was not played at their last %1$s concerts.</string>
     <string name="src_lastfm_listeners">Listeners on Last.fm: %1$s.</string>
     <string name="src_lastfm_song_listeners">This song\'s listeners on Last.fm: %1$s.</string>
     <string name="src_lastfm_similar">People who listen to them also like %1$s.</string>
