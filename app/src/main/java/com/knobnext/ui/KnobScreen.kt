@@ -101,6 +101,7 @@ private enum class Page(val title: Int) {
     KEYS(R.string.section_keys),
     SEQUENCES(R.string.section_double),
     MOTION(R.string.section_motion),
+    HEADSET(R.string.section_headset),
     PLAYERS(R.string.players_title),
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
@@ -256,6 +257,7 @@ fun KnobScreen(
                     Page.KEYS -> keysPage(ctx)
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
+                    Page.HEADSET -> headsetPage(ctx)
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
@@ -351,7 +353,7 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
     item {
         Column {
             SectionTitle(stringResource(R.string.gestures_title))
-            Group(3) {
+            Group(4) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     PageTile(
                         0, MaterialShapes.Sunny, KnobIcons.VolumeUp, R.string.section_keys,
@@ -373,6 +375,10 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                         2, MaterialShapes.SoftBurst, KnobIcons.TouchApp, R.string.section_motion,
                         if (motionOn == 0) stringResource(R.string.tile_off) else stringResource(R.string.tile_motion, motionOn),
                     ) { ctx.open(Page.MOTION) }
+                    PageTile(
+                        3, MaterialShapes.Cookie6Sided, KnobIcons.MusicNote, R.string.section_headset,
+                        if (s.headsetButtons) stringResource(R.string.tile_headset_on) else stringResource(R.string.tile_off),
+                    ) { ctx.open(Page.HEADSET) }
                 }
             }
         }
@@ -859,6 +865,51 @@ private fun LazyListScope.sequencesPage(ctx: PageContext) {
 
 // ---------------------------------------------------------------- Motion
 
+private fun LazyListScope.headsetPage(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item {
+        Group(1) {
+            SwitchRow(
+                shape(0), stringResource(R.string.headset_title), s.headsetButtons, { prefs.headsetButtons = it },
+                subtitle = stringResource(R.string.headset_subtitle), enabled = s.enabled,
+                leading = { Badge(MaterialShapes.Cookie6Sided, KnobIcons.MusicNote, primary = true) },
+            )
+        }
+    }
+    item {
+        AnimatedVisibility(s.headsetButtons) {
+            val rows = listOf(
+                Gesture.HS_PLAY_PAUSE to MaterialShapes.Circle,
+                Gesture.HS_NEXT to MaterialShapes.Pill,
+                Gesture.HS_PREVIOUS to MaterialShapes.Arch,
+                Gesture.HS_FORWARD to MaterialShapes.Triangle,
+                Gesture.HS_REWIND to MaterialShapes.Diamond,
+                Gesture.HS_PLAY_PAUSE_DOUBLE to MaterialShapes.Puffy,
+                Gesture.HS_PLAY_PAUSE_TRIPLE to MaterialShapes.Flower,
+                Gesture.HS_PLAY_PAUSE_HOLD to MaterialShapes.Sunny,
+            )
+            GestureGroupCard(ctx, rows, accent = false)
+        }
+    }
+    item {
+        AnimatedVisibility(s.headsetButtons) {
+            Group(if (s.headsetHold) 2 else 1) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SwitchRow(
+                        shape(0), stringResource(R.string.headset_hold), s.headsetHold, { prefs.headsetHold = it },
+                        subtitle = stringResource(R.string.headset_hold_hint), enabled = s.enabled,
+                    )
+                    AnimatedVisibility(s.headsetHold) {
+                        GestureRow(1, Gesture.HS_ASSIST, s, MaterialShapes.SoftBoom, accent = true, onEdit = ctx.edit)
+                    }
+                }
+            }
+        }
+    }
+    item { Hint(stringResource(R.string.headset_hint)) }
+}
+
 private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
@@ -1175,6 +1226,15 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
         if (s.wave) add(Gesture.WAVE)
     }
     if (motion.isNotEmpty()) item { CheckList(stringResource(R.string.section_motion), motion, actions, check) }
+    if (s.headsetButtons) {
+        item {
+            CheckList(
+                stringResource(R.string.section_headset),
+                Gesture.entries.filter { it.group == GestureGroup.HEADSET && (s.headsetHold || it != Gesture.HS_ASSIST) },
+                actions, check,
+            )
+        }
+    }
     item { Hint(stringResource(R.string.test_hint)) }
 }
 

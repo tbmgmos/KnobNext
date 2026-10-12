@@ -32,12 +32,13 @@ class Media(private val context: Context) {
         return enabled.split(':').any { ComponentName.unflattenFromString(it) == listenerComponent }
     }
 
+    /** Every player's session; KnobNext's own (the one that catches headphone buttons) is not a player. */
     fun controllers(): List<MediaController> =
         if (!hasAccess()) {
             emptyList()
         } else {
             try {
-                sessions.getActiveSessions(listenerComponent)
+                sessions.getActiveSessions(listenerComponent).filter { it.packageName != context.packageName }
             } catch (_: SecurityException) {
                 emptyList()
             }
@@ -64,8 +65,11 @@ class Media(private val context: Context) {
         else -> false
     }
 
-    fun headphonesConnected(): Boolean =
-        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADPHONE_TYPES }
+    fun headphonesConnected(): Boolean = externalOutput() != null
+
+    /** Headphones or a speaker the sound goes to besides the phone's own. */
+    fun externalOutput(): AudioDeviceInfo? =
+        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in HEADPHONE_TYPES }
 
     /** Decides whether gestures should be handled now and which player they go to. */
     fun resolve(prefs: Prefs): Target? {
@@ -141,12 +145,23 @@ class Media(private val context: Context) {
     }
 
     fun sendKey(code: Int) {
+        // The key comes back to KnobNext if its session is the one that catches media buttons.
+        sentCode = code
+        sentAt = SystemClock.elapsedRealtime()
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
         audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
     }
 
     companion object {
         const val SEEK_STEP_MS = 10_000L
+
+        @Volatile private var sentCode = 0
+        @Volatile private var sentAt = 0L
+
+        /** Whether this key is the one [sendKey] sent a moment ago, coming back. */
+        fun justSent(code: Int): Boolean = code == sentCode && SystemClock.elapsedRealtime() - sentAt < ECHO_MS
+
+        private const val ECHO_MS = 500L
 
         private val HEADPHONE_TYPES = setOf(
             AudioDeviceInfo.TYPE_WIRED_HEADSET,

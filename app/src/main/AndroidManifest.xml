@@ -72,6 +72,23 @@
             </intent-filter>
         </activity>
 
+        <!-- The headset's voice button. Off until the setting is on, so the system never offers it as a
+             second voice assistant to people who did not ask for it. -->
+        <activity
+            android:name=".HeadsetHoldActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/assist_label"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".KnobService"
             android:exported="true"

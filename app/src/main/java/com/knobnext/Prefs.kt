@@ -29,7 +29,7 @@ enum class ProfilePreset {
     SEEK,
 }
 
-enum class GestureGroup { KEYS, SEQUENCE, MOTION }
+enum class GestureGroup { KEYS, SEQUENCE, MOTION, HEADSET }
 
 enum class Gesture(val key: String, val group: GestureGroup, val default: Action) {
     HOLD_UP("action_hold_up", GestureGroup.KEYS, Action.NEXT),
@@ -55,6 +55,22 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     BACK_TAP_3("action_back_tap_3", GestureGroup.MOTION, Action.PREVIOUS),
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
     WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
+
+    // Buttons of headphones and speakers. What they send is up to the device: a tap, two or three taps
+    // usually arrive as play/pause, next and previous. Each is the same as before until reassigned.
+    HS_PLAY_PAUSE("action_hs_play_pause", GestureGroup.HEADSET, Action.PLAY_PAUSE),
+    HS_NEXT("action_hs_next", GestureGroup.HEADSET, Action.NEXT),
+    HS_PREVIOUS("action_hs_previous", GestureGroup.HEADSET, Action.PREVIOUS),
+    HS_FORWARD("action_hs_forward", GestureGroup.HEADSET, Action.SEEK_FORWARD),
+    HS_REWIND("action_hs_rewind", GestureGroup.HEADSET, Action.SEEK_BACK),
+
+    // For devices that send every tap as a plain play/pause: KnobNext counts the presses itself.
+    HS_PLAY_PAUSE_DOUBLE("action_hs_play_pause_double", GestureGroup.HEADSET, Action.NONE),
+    HS_PLAY_PAUSE_TRIPLE("action_hs_play_pause_triple", GestureGroup.HEADSET, Action.NONE),
+    HS_PLAY_PAUSE_HOLD("action_hs_play_pause_hold", GestureGroup.HEADSET, Action.NONE),
+
+    // The headset's "voice assistant" button; works once it is passed to KnobNext (a setting).
+    HS_ASSIST("action_hs_assist", GestureGroup.HEADSET, Action.NONE),
 }
 
 /** How hard the back has to be tapped; values are high-pass acceleration thresholds in m/s². */
@@ -103,6 +119,8 @@ data class Settings(
     val backTapEco: Boolean,
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
+    val headsetButtons: Boolean,
+    val headsetHold: Boolean,
     val smartVoice: Boolean,
     val blindGestures: Boolean,
     val infoLength: InfoLength,
@@ -359,6 +377,16 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
 
     /** Holding power with nothing to do opens Gemini (or the Google assistant), as it would without us. */
+    /** Buttons of Bluetooth and wired headphones go through KnobNext, so they can be reassigned. */
+    var headsetButtons: Boolean
+        get() = sp.getBoolean("headset_buttons", false)
+        set(v) = sp.edit().putBoolean("headset_buttons", v).apply()
+
+    /** The headset's assistant button opens KnobNext's action instead of the assistant. */
+    var headsetHold: Boolean
+        get() = sp.getBoolean("headset_hold", false)
+        set(v) = sp.edit().putBoolean("headset_hold", v).apply()
+
     var powerHoldFallback: Boolean
         get() = sp.getBoolean("power_hold_fallback", true)
         set(v) = sp.edit().putBoolean("power_hold_fallback", v).apply()
@@ -582,6 +610,8 @@ class Prefs(context: Context) {
         backTapEco = backTapEco,
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
+        headsetButtons = headsetButtons,
+        headsetHold = headsetHold,
         smartVoice = smartVoice,
         blindGestures = blindGestures,
         infoLength = infoLength,

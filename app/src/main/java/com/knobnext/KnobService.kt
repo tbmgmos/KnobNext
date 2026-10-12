@@ -292,6 +292,7 @@ class KnobService : AccessibilityService() {
     // ---- Motion gestures: sensors run only while music plays ----
 
     private lateinit var backTap: BackTapDetector
+    private lateinit var headset: HeadsetButtons
     private lateinit var flip: FlipDetector
     private lateinit var twist: TwistDetector
     private lateinit var wave: WaveDetector
@@ -416,6 +417,8 @@ class KnobService : AccessibilityService() {
         backTap = BackTapDetector(this, { tapThreshold }, { backTapTriple }, ::onTapRejected) { count ->
             fireGesture(if (count == 2) Gesture.BACK_TAP_2 else Gesture.BACK_TAP_3)
         }
+        headset = HeadsetButtons(this, handler, prefs, media, { handler.post { log(it) } }, ::onHeadsetKey)
+        HeadsetHold.handler = ::onHeadsetHold
         flip = FlipDetector(this, ::onFlip)
         twist = TwistDetector(this) { fireGesture(Gesture.TWIST) }
         wave = WaveDetector(this, { prefs.waveCount }, { fireGesture(Gesture.WAVE) })
@@ -450,6 +453,7 @@ class KnobService : AccessibilityService() {
         SleepTimer.fader = null
         PocketScreen.toggle = null
         PowerHold.handler = null
+        HeadsetHold.handler = null
         VoiceListener.trigger = null
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
@@ -460,6 +464,7 @@ class KnobService : AccessibilityService() {
             volumeWatcher.stop()
             trackWatcher?.stop()
             backTap.release()
+            headset.release()
             flip.stop()
             twist.stop()
             wave.stop()
@@ -823,6 +828,27 @@ class KnobService : AccessibilityService() {
         return fired || testing
     }
 
+    /** A button of the headphones: the play/pause key also arrives as separate "play" and "pause". */
+    private fun onHeadsetKey(gesture: Gesture, key: Int) {
+        if (gesture == Gesture.HS_PLAY_PAUSE) {
+            val playing = media.musicActive()
+            // The headphones can be behind: "pause" for what is already paused (taken out of the ear) is not a press.
+            if (key == KeyEvent.KEYCODE_MEDIA_PAUSE && !playing || key == KeyEvent.KEYCODE_MEDIA_PLAY && playing) {
+                log(getString(R.string.log_headset_same, KeyEvent.keyCodeToString(key)))
+                return
+            }
+        }
+        fireGesture(gesture, fromHeadset = true)
+    }
+
+    /** The headset's voice button, passed to KnobNext. */
+    private fun onHeadsetHold(): Boolean {
+        val testing = GestureTest.active
+        if (!testing && (!prefs.enabled || !prefs.headsetHold || prefs.action(Gesture.HS_ASSIST, prefs.lastPlayer) == Action.NONE)) return false
+        log(getString(R.string.log_headset_assist))
+        return fireGesture(Gesture.HS_ASSIST, fromHeadset = true) || testing
+    }
+
     private fun powerDoubleAssigned() = prefs.action(Gesture.POWER_DOUBLE, prefs.lastPlayer) != Action.NONE
 
     private fun onScreenOff() {
@@ -1141,6 +1167,7 @@ class KnobService : AccessibilityService() {
         fun wanted(on: Boolean, vararg gestures: Gesture) =
             on && (playing || resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
 
+        headset.update()
         val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
@@ -1197,6 +1224,7 @@ class KnobService : AccessibilityService() {
 
     /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
     private fun onTrack(now: NowPlaying?) {
+        headset.mirror(now?.controller)
         // Playing again, whichever way: the silence that kept the keys alive is no longer needed.
         if (now?.playing == true && silence.playing) stopSilence(R.string.log_silence_resumed)
         val pkg = now?.controller?.packageName
@@ -1253,6 +1281,8 @@ class KnobService : AccessibilityService() {
         restoreVolumeTo: Int? = null,
         /** Only check and announce the start: the caller performs the action itself (smooth seeking). */
         startOnly: Boolean = false,
+        /** The press came from headphones, which are not in a pocket whatever the proximity sensor says. */
+        fromHeadset: Boolean = false,
     ): Boolean {
         val name = getString(gestureLabel(gesture))
         val target = media.resolve(prefs)
@@ -1274,7 +1304,7 @@ class KnobService : AccessibilityService() {
             log(getString(R.string.log_not_playing, name))
             return false
         }
-        if (pocketCovered()) {
+        if (!fromHeadset && pocketCovered()) {
             // The presses were accidental: undo their volume change too.
             restoreVolumeTo?.let(::restoreVolume)
             log(getString(R.string.log_pocket, name))

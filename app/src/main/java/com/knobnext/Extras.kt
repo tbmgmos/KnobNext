@@ -557,9 +557,7 @@ class SleepReceiver : BroadcastReceiver() {
             return SleepTimer.pauseLater(context)
         }
         prefs.sleepUntil = 0L
-        val audio = context.getSystemService(AudioManager::class.java)
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
-        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
+        Media(context).sendKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
     }
 }
 

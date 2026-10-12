@@ -468,6 +468,15 @@ fun gestureLabel(g: Gesture) = when (g) {
     Gesture.DOUBLE_DOWN -> R.string.gesture_double_down
     Gesture.BACK_TAP_2 -> R.string.gesture_back_tap_2
     Gesture.BACK_TAP_3 -> R.string.gesture_back_tap_3
+    Gesture.HS_PLAY_PAUSE -> R.string.gesture_hs_play_pause
+    Gesture.HS_NEXT -> R.string.gesture_hs_next
+    Gesture.HS_PREVIOUS -> R.string.gesture_hs_previous
+    Gesture.HS_FORWARD -> R.string.gesture_hs_forward
+    Gesture.HS_REWIND -> R.string.gesture_hs_rewind
+    Gesture.HS_PLAY_PAUSE_DOUBLE -> R.string.gesture_hs_play_pause_double
+    Gesture.HS_PLAY_PAUSE_TRIPLE -> R.string.gesture_hs_play_pause_triple
+    Gesture.HS_PLAY_PAUSE_HOLD -> R.string.gesture_hs_play_pause_hold
+    Gesture.HS_ASSIST -> R.string.gesture_hs_assist
 }
 
 private class SetupStep(
