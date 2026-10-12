@@ -58,6 +58,19 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests {
+            // The track story test runs the real code with the app's strings.
+            isIncludeAndroidResources = true
+            all {
+                it.testLogging {
+                    showStandardStreams = true
+                    events("passed", "failed", "skipped")
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -74,4 +87,7 @@ dependencies {
     "githubImplementation"("com.google.mediapipe:tasks-genai:0.10.27")
     "githubImplementation"("com.alphacephei:vosk-android:0.3.47")
     "githubImplementation"("net.java.dev.jna:jna:5.13.0@aar")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

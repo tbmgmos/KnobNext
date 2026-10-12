@@ -1,0 +1,38 @@
+name: Story check
+
+# The track story against the real sources, printed telling after telling (see StoryLiveTest).
+# Separate from the APK build: the network or a source being down must not block a build.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'app/src/main/java/com/knobnext/TrackInfo.kt'
+      - 'app/src/main/java/com/knobnext/MusicSources.kt'
+      - 'app/src/main/java/com/knobnext/Wikidata.kt'
+      - 'app/src/main/java/com/knobnext/Journal.kt'
+      - 'app/src/main/res/values/strings.xml'
+      - 'app/src/test/**'
+      - 'app/build.gradle.kts'
+      - '.github/workflows/story-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tell stories
+        env:
+          LIVE_STORIES: '1'
+        run: ./gradlew testGithubDebugUnitTest --no-daemon --tests com.knobnext.StoryLiveTest
