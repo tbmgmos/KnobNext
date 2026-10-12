@@ -22,12 +22,13 @@ fun tapSummary(context: Context): String {
     val sensor = if (silentSec >= 2) {
         context.getString(R.string.tap_stats_silent, silentSec)
     } else {
-        context.getString(R.string.tap_stats_sensor, TapStats.rateHz, TapStats.noisePercent)
+        context.getString(R.string.tap_stats_sensor, TapStats.rateHz, TapStats.noisePercent, TapStats.rotationTenths / 10.0)
     }
     val counts = context.getString(
         R.string.tap_stats_counts,
         TapStats.count(TapStats.Verdict.TAPS),
         TapStats.count(TapStats.Verdict.VIBRATION),
+        TapStats.count(TapStats.Verdict.TURN),
         TapStats.count(TapStats.Verdict.BUMP),
         TapStats.count(TapStats.Verdict.SINGLE),
         TapStats.count(TapStats.Verdict.POCKET),
@@ -50,6 +51,7 @@ fun verdictLabel(v: TapStats.Verdict) = when (v) {
     TapStats.Verdict.POCKET -> R.string.tap_verdict_pocket
     TapStats.Verdict.NOT_PLAYING -> R.string.tap_verdict_not_playing
     TapStats.Verdict.RESTARTED -> R.string.tap_verdict_restarted
+    TapStats.Verdict.TURN -> R.string.tap_verdict_turn
 }
 
 /** [tapSummary], refreshed twice a second while shown. */

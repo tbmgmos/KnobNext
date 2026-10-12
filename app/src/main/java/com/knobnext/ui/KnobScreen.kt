@@ -102,6 +102,8 @@ private enum class Page(val title: Int) {
     SEQUENCES(R.string.section_double),
     MOTION(R.string.section_motion),
     HEADSET(R.string.section_headset),
+    ACQUAINT(R.string.acq_title),
+    ARTIST(R.string.acq_artist_title),
     PLAYERS(R.string.players_title),
     PROFILE(R.string.profile_title),
     SETTINGS(R.string.settings_title),
@@ -121,6 +123,7 @@ private enum class Page(val title: Int) {
 private val Page.parent: Page
     get() = when (this) {
         Page.PROFILE -> Page.PLAYERS
+        Page.ARTIST -> Page.ACQUAINT
         Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH,
         Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
         Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
@@ -139,6 +142,7 @@ private class PageContext(
     val editIn: (Gesture, String?) -> Unit,
     val open: (Page) -> Unit,
     val openProfile: (String) -> Unit,
+    val openArtist: (String) -> Unit = {},
 ) {
     val edit: (Gesture) -> Unit = { editIn(it, null) }
 }
@@ -192,6 +196,7 @@ fun KnobScreen(
 
     var page by rememberSaveable { mutableStateOf(Page.HOME) }
     var profilePkg by rememberSaveable { mutableStateOf<String?>(null) }
+    var artistKey by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = page != Page.HOME) { page = page.parent }
     val ctx = PageContext(
         s, prefs, setup, actions, versionName, updatesSupported,
@@ -200,6 +205,10 @@ fun KnobScreen(
         openProfile = {
             profilePkg = it
             page = Page.PROFILE
+        },
+        openArtist = {
+            artistKey = it
+            page = Page.ARTIST
         },
     )
 
@@ -260,6 +269,8 @@ fun KnobScreen(
                     Page.SEQUENCES -> sequencesPage(ctx)
                     Page.MOTION -> motionPage(ctx)
                     Page.HEADSET -> headsetPage(ctx, learn ?: HeadsetLearnState())
+                    Page.ACQUAINT -> acquaintPage(ctx)
+                    Page.ARTIST -> artistKey?.let { key -> item { ArtistCard(key, ctx.s.journalVersion, ctx.openArtist) { ctx.open(Page.ACQUAINT) } } } ?: acquaintPage(ctx)
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
@@ -404,6 +415,12 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                     2, MaterialShapes.Cookie9Sided, KnobIcons.Settings, R.string.settings_title,
                     stringResource(R.string.tile_settings),
                 ) { ctx.open(Page.SETTINGS) }
+                val context = LocalContext.current
+                val known = remember(s.journalVersion) { com.knobnext.Journal.entries(context).size }
+                PageTile(
+                    3, MaterialShapes.Cookie4Sided, KnobIcons.Info, R.string.acq_title,
+                    if (s.infoHistory) stringResource(R.string.acq_tile, known) else stringResource(R.string.acq_tile_off),
+                ) { ctx.open(Page.ACQUAINT) }
             }
         }
     }
@@ -1004,11 +1021,33 @@ private fun HeadsetRows(ctx: PageContext, learn: HeadsetLearnState, title: Strin
     }
 }
 
+/** Pixel's own Quick Tap, caught as the "play/pause media" key it sends (experimental). */
+@Composable
+private fun PixelTapCard(ctx: PageContext) {
+    val s = ctx.s
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Group(if (s.pixelTap) 2 else 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.pixel_tap_title), s.pixelTap, { ctx.prefs.pixelTap = it },
+                    subtitle = stringResource(R.string.pixel_tap_subtitle), enabled = s.enabled,
+                    leading = { Badge(MaterialShapes.Cookie12Sided, KnobIcons.TouchApp, primary = true) },
+                )
+                AnimatedVisibility(s.pixelTap) {
+                    GestureRow(1, Gesture.PIXEL_TAP, s, MaterialShapes.Cookie12Sided, accent = true, onEdit = ctx.edit)
+                }
+            }
+        }
+        AnimatedVisibility(s.pixelTap) { Hint(stringResource(R.string.pixel_tap_hint)) }
+    }
+}
+
 private fun LazyListScope.motionPage(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
+    item { PixelTapCard(ctx) }
     item {
-        Group(if (s.backTap) 6 else 1) {
+        Group(if (s.backTap) 7 else 1) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.back_tap_title), s.backTap, { prefs.backTap = it },
@@ -1035,8 +1074,12 @@ private fun LazyListScope.motionPage(ctx: PageContext) {
                             shape(4), stringResource(R.string.back_tap_eco), s.backTapEco, { prefs.backTapEco = it },
                             subtitle = stringResource(R.string.back_tap_eco_hint), enabled = s.enabled,
                         )
+                        SwitchRow(
+                            shape(5), stringResource(R.string.back_tap_screen_off), s.backTapScreenOff, { prefs.backTapScreenOff = it },
+                            subtitle = stringResource(R.string.back_tap_screen_off_hint), enabled = s.enabled,
+                        )
                         ListRow(
-                            shape = shape(5),
+                            shape = shape(6),
                             title = stringResource(R.string.tap_stats_title),
                             subtitle = rememberTapSummary() + "\n" + stringResource(R.string.tap_stats_hint),
                         )
@@ -1321,6 +1364,7 @@ private fun LazyListScope.testPage(ctx: PageContext, check: CheckState) {
     }
     val motion = buildList {
         if (s.backTap) addAll(listOf(Gesture.BACK_TAP_2, Gesture.BACK_TAP_3))
+        if (s.pixelTap) add(Gesture.PIXEL_TAP)
         if (s.twist) add(Gesture.TWIST)
         if (s.wave) add(Gesture.WAVE)
     }
@@ -1547,7 +1591,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
     item {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle(stringResource(R.string.info_title))
-            Group(4) {
+            Group(5) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(
                         shape(0), stringResource(R.string.info_source),
@@ -1598,12 +1642,34 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoPause = it },
                         )
                     }
+                    SwitchRow(
+                        shape(4), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
+                        subtitle = stringResource(R.string.acq_history_hint),
+                    )
                 }
             }
             Hint(stringResource(R.string.info_hint))
+            SourceKeys(prefs)
         }
     }
 }
+
+// ---------------------------------------------------------------- Acquaintances
+
+private fun LazyListScope.acquaintPage(ctx: PageContext) {
+    if (!ctx.s.infoHistory) {
+        item {
+            Group(1) {
+                SwitchRow(
+                    shape(0), stringResource(R.string.acq_history), false, { ctx.prefs.infoHistory = it },
+                    subtitle = stringResource(R.string.acq_history_off_hint),
+                )
+            }
+        }
+    }
+    item { HistoryList(ctx.s.journalVersion, ctx.openArtist) }
+}
+
 
 private fun LazyListScope.pauseSettings(ctx: PageContext) {
     val s = ctx.s
@@ -1957,7 +2023,7 @@ private fun MoreGestures(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Hint(text: String) {
+internal fun Hint(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodySmall,

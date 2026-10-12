@@ -16,6 +16,10 @@ android {
         targetSdk = 36
         versionCode = providers.gradleProperty("versionCode").orNull?.toInt() ?: 3
         versionName = providers.gradleProperty("versionName").orNull ?: "3.0.0-local"
+        // Last.fm's key for this app (a GitHub secret in CI): without it the story simply has no Last.fm facts.
+        buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("LASTFM_API_KEY") ?: "").trim() + "\"")
+        // setlist.fm's, the same way: without it, no concert facts.
+        buildConfigField("String", "SETLISTFM_KEY", "\"" + (System.getenv("SETLISTFM_API_KEY") ?: "").trim() + "\"")
     }
 
     // github: checks GitHub Releases for updates (needs INTERNET). rustore: the store delivers updates,
@@ -52,11 +56,25 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests {
+            // The track story test runs the real code with the app's strings.
+            isIncludeAndroidResources = true
+            all {
+                it.testLogging {
+                    showStandardStreams = true
+                    events("passed", "failed", "skipped")
+                }
+            }
+        }
     }
 }
 
@@ -74,4 +92,7 @@ dependencies {
     "githubImplementation"("com.google.mediapipe:tasks-genai:0.10.27")
     "githubImplementation"("com.alphacephei:vosk-android:0.3.47")
     "githubImplementation"("net.java.dev.jna:jna:5.13.0@aar")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

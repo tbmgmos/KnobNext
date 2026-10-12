@@ -56,6 +56,10 @@ enum class Gesture(val key: String, val group: GestureGroup, val default: Action
     TWIST("action_twist", GestureGroup.MOTION, Action.NEXT),
     WAVE("action_wave", GestureGroup.MOTION, Action.NEXT),
 
+    // Pixel's own Quick Tap (a double tap on the back), set to "play/pause media": KnobNext catches that
+    // key and runs this instead. Off until turned on and assigned.
+    PIXEL_TAP("action_pixel_tap", GestureGroup.MOTION, Action.NONE),
+
     // Buttons of headphones and speakers. What they send is up to the device: a tap, two or three taps
     // usually arrive as play/pause, next and previous. Each is the same as before until reassigned.
     HS_PLAY_PAUSE("action_hs_play_pause", GestureGroup.HEADSET, Action.PLAY_PAUSE),
@@ -123,9 +127,11 @@ data class Settings(
     val sleepExtend: Boolean,
     val announceAllTracks: Boolean,
     val backTapEco: Boolean,
+    val backTapScreenOff: Boolean,
     val pocketAuto: Boolean,
     val powerHoldFallback: Boolean,
     val headsetButtons: Boolean,
+    val pixelTap: Boolean,
     val headsetHold: Boolean,
     /** The headphones connected last, and the gestures their commands were named after there. */
     val headsetDevice: String?,
@@ -137,6 +143,8 @@ data class Settings(
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
     val keysOnPause: Boolean,
+    val infoHistory: Boolean,
+    val journalVersion: Int,
     val smartTitles: Boolean,
     val dismissedSuggestions: Set<String>,
     /** Apps with their own seek step → seconds. */
@@ -276,6 +284,34 @@ class Prefs(context: Context) {
      * For how long after a gesture paused the music a gesture assigned to play/pause can resume it,
      * in minutes; 0 turns this off. See KnobService.resumeWindowOpen.
      */
+    /**
+     * KnobNext remembers its stories: who it has introduced (the introduction is said once) and the
+     * history of acquaintances. Off: nothing is written, and every story starts with the introduction.
+     */
+    var infoHistory: Boolean
+        get() = sp.getBoolean("info_history", true)
+        set(v) = sp.edit().putBoolean("info_history", v).apply()
+
+    /**
+     * The person's own Last.fm and setlist.fm keys, for the track story. Empty: the app's own key, if
+     * the build has one.
+     */
+    var lastFmKey: String
+        get() = sp.getString("lastfm_key", null).orEmpty()
+        set(v) = sp.edit().putString("lastfm_key", v.trim()).apply()
+
+    var setlistKey: String
+        get() = sp.getString("setlist_key", null).orEmpty()
+        set(v) = sp.edit().putString("setlist_key", v.trim()).apply()
+
+    val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
+    val setlistKeyInUse: String get() = setlistKey.ifBlank { BuildConfig.SETLISTFM_KEY }
+
+    /** Bumped on every change of the history of acquaintances, so the screen reads it again. */
+    var journalVersion: Int
+        get() = sp.getInt("journal_version", 0)
+        set(v) = sp.edit().putInt("journal_version", v).apply()
+
     var resumeMinutes: Int
         get() = sp.getInt("resume_minutes", 30)
         set(v) = sp.edit().putInt("resume_minutes", v).apply()
@@ -380,12 +416,25 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("back_tap_eco", false)
         set(v) = sp.edit().putBoolean("back_tap_eco", v).apply()
 
+    /** Back taps only with the screen off: with it on, Pixel's own Quick Tap does the job. */
+    var backTapScreenOff: Boolean
+        get() = sp.getBoolean("back_tap_screen_off", false)
+        set(v) = sp.edit().putBoolean("back_tap_screen_off", v).apply()
+
     /** While music plays, the power button turns on pocket mode first; a second press turns the screen off. */
     var pocketAuto: Boolean
         get() = sp.getBoolean("pocket_auto", false)
         set(v) = sp.edit().putBoolean("pocket_auto", v).apply()
 
     /** Holding power with nothing to do opens Gemini (or the Google assistant), as it would without us. */
+    /**
+     * Experimental: Pixel's Quick Tap, set to "play/pause media", sends that key; without headphones
+     * connected KnobNext takes it as the "Pixel Quick Tap" gesture.
+     */
+    var pixelTap: Boolean
+        get() = sp.getBoolean("pixel_tap", false)
+        set(v) = sp.edit().putBoolean("pixel_tap", v).apply()
+
     /** Buttons of Bluetooth and wired headphones go through KnobNext, so they can be reassigned. */
     var headsetButtons: Boolean
         get() = sp.getBoolean("headset_buttons", false)
@@ -640,9 +689,11 @@ class Prefs(context: Context) {
         sleepExtend = sleepExtend,
         announceAllTracks = announceAllTracks,
         backTapEco = backTapEco,
+        backTapScreenOff = backTapScreenOff,
         pocketAuto = pocketAuto,
         powerHoldFallback = powerHoldFallback,
         headsetButtons = headsetButtons,
+        pixelTap = pixelTap,
         headsetHold = headsetHold,
         headsetDevice = lastHeadset,
         headsetMotions = lastHeadset?.let { device ->
@@ -656,6 +707,8 @@ class Prefs(context: Context) {
         infoLanguage = infoLanguage,
         infoSource = infoSource,
         keysOnPause = keysOnPause,
+        infoHistory = infoHistory,
+        journalVersion = journalVersion,
         smartTitles = smartTitles,
         dismissedSuggestions = dismissedSuggestions,
         profileSeekSteps = profileApps.associateWith { sp.getInt("seek_step_sec@$it", 0) }.filterValues { it > 0 },

@@ -403,6 +403,11 @@ class Extras(private val context: Context, private val media: Media, private val
         // The opening line at once, from the player's own data; the story follows when it is ready.
         pauseMusic()
         speaker.say(TrackInfo.header(context, track, lang))
+        // The player's cover, for the history: it works for any artist, however unknown.
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        if (prefs.infoHistory && track.artist != null && art != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) { Journal.saveCover(context, track.artist, track.album, art) }
+        }
         infoJob = scope.launch {
             val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
             if (told == null) {

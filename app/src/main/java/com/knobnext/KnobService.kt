@@ -332,6 +332,7 @@ class KnobService : AccessibilityService() {
             when (why) {
                 TapStats.Verdict.VIBRATION -> R.string.log_tap_vibration
                 TapStats.Verdict.BUMP -> R.string.log_tap_bump
+                TapStats.Verdict.TURN -> R.string.log_tap_turn
                 TapStats.Verdict.SINGLE -> R.string.log_tap_single
                 TapStats.Verdict.RESTARTED -> R.string.log_tap_restarted
                 else -> return
@@ -409,7 +410,7 @@ class KnobService : AccessibilityService() {
         prefs.migrate()
         log(getString(R.string.log_service_started))
         media = Media(this)
-        media.silencePlaying = { silence.playing }
+        media.silencePlaying = { silence.playing || ::headset.isInitialized && headset.silencePlaying }
         extras = Extras(this, media, prefs)
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
@@ -804,6 +805,8 @@ class KnobService : AccessibilityService() {
 
     private fun onScreen(on: Boolean) {
         if (!on) onScreenOff()
+        // Taps that run only with the screen off start and stop with it, not at the next check.
+        if (prefs.backTap && prefs.backTapScreenOff) handler.post { updateSensors() }
         val now = SystemClock.elapsedRealtime()
         if (on) screenOnAt = now
         // Turned on or off by us (pocket mode, locking): not the power button.
@@ -1184,11 +1187,15 @@ class KnobService : AccessibilityService() {
         val resumable = enabled && !playing && resumeWindowOpen()
 
         val player = prefs.lastPlayer
+        // While a track story holds the music paused, the gesture that tells it must still be heard,
+        // or the story could not be stopped the way it was started.
         fun wanted(on: Boolean, vararg gestures: Gesture) =
-            on && (playing || resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
+            on && (playing ||
+                storyHold && gestures.any { prefs.action(it, player) == Action.TRACK_INFO } ||
+                resumable && gestures.any { prefs.action(it, player).worksWhenIdle })
 
         headset.update()
-        val tap = wanted(prefs.backTap, Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
+        val tap = wanted(prefs.backTap && (!prefs.backTapScreenOff || screenDark()), Gesture.BACK_TAP_2, Gesture.BACK_TAP_3)
         val turn = wanted(prefs.twist, Gesture.TWIST)
         backTapTriple = testing || prefs.action(Gesture.BACK_TAP_3, player) != Action.NONE
         // The background service is what keeps sensor readings coming with the screen off. If it is not

@@ -105,6 +105,10 @@ jobs:
 
       - name: Build APK
         # Signing values come from the step above, cleaned up and checked.
+        env:
+          # The app's Last.fm key; when the secret is not set, the story goes without Last.fm.
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          SETLISTFM_API_KEY: ${{ secrets.SETLISTFM_API_KEY }}
         run: |
           ./gradlew assembleGithubRelease assembleRustoreRelease --no-daemon \
             -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE"

@@ -18,6 +18,11 @@ import android.view.KeyEvent
  * turned into a gesture (which has an action assigned, the same as the press itself by default) or passed
  * on to the player untouched.
  *
+ * Android does not simply give the buttons to the session that was active last: it gives them to the
+ * session of the app that started playing sound last, which is always the player. So while music plays,
+ * KnobNext plays inaudible silence of its own, started again just after the player (re)starts, so it is
+ * the app that started last and the buttons come to it.
+ *
  * What a button sends is up to the headphones: a tap is usually play/pause, two taps next, three
  * previous. Devices that send only play/pause can have the presses counted here (two or three in a row,
  * or a hold); waiting for a second press costs a short delay, so it is done only when one is assigned.
@@ -36,6 +41,15 @@ class HeadsetButtons(
     private var holdApplied: Boolean? = null
     private var pushed: String? = null
 
+    // The silence that makes KnobNext the app that played sound last (see above).
+    private val silence = Silence()
+    private var mirroredPlaying = false
+    private var mirroredTitle: String? = null
+    private val claim = Runnable { claimButtons() }
+
+    /** Whether that silence plays now: the system then can't tell music from it. */
+    val silencePlaying: Boolean get() = silence.playing
+
     val active: Boolean get() = session != null
 
     // Counting presses of the play/pause button.
@@ -43,6 +57,7 @@ class HeadsetButtons(
     private var lastKey = 0
     private var holdFired = false
     private var lastRepeatAt = 0L
+    private var lastPixelAt = 0L
     private val resolve = Runnable { resolvePresses() }
     private val hold = Runnable {
         holdFired = true
@@ -51,12 +66,17 @@ class HeadsetButtons(
         emit(Gesture.HS_PLAY_PAUSE_HOLD, lastKey)
     }
 
-    /** Keeps the session in step with the headphones: there while they are connected, gone otherwise. */
+    /**
+     * Keeps the session in step with what is wanted: there while headphones are connected (and their
+     * buttons are used), or while Pixel's Quick Tap is caught, gone otherwise.
+     */
     fun update() {
-        val device = if (prefs.enabled && prefs.headsetButtons && !media.isInCall()) media.externalOutput() else null
-        if (device != null && session == null) {
-            open(device.productName?.toString().orEmpty())
-        } else if (device == null && session != null) {
+        val idle = prefs.enabled && !media.isInCall()
+        val device = if (idle && prefs.headsetButtons) media.externalOutput() else null
+        val pixel = idle && prefs.pixelTap
+        if ((device != null || pixel) && session == null) {
+            open(device?.productName?.toString().orEmpty(), headset = device != null)
+        } else if (device == null && !pixel && session != null) {
             close()
         }
         applyHold(prefs.headsetHold)
@@ -68,6 +88,25 @@ class HeadsetButtons(
         if (controller?.packageName == context.packageName) return
         mirrored = controller
         push()
+        val playing = controller?.isPlaying() == true
+        val title = controller?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        if (playing && (!mirroredPlaying || title != mirroredTitle)) {
+            // The player has just (re)started its sound: start ours after it.
+            handler.removeCallbacks(claim)
+            handler.postDelayed(claim, CLAIM_DELAY_MS)
+        } else if (!playing) {
+            handler.removeCallbacks(claim)
+            silence.stop()
+        }
+        mirroredPlaying = playing
+        mirroredTitle = title
+    }
+
+    /** Plays the silence anew, so KnobNext is the app that started sound last and gets the buttons. */
+    private fun claimButtons() {
+        if (session == null || mirrored?.isPlaying() != true) return
+        silence.stop()
+        silence.start()
     }
 
     fun release() {
@@ -76,13 +115,15 @@ class HeadsetButtons(
 
     // ---- The session ----
 
-    private fun open(device: String) {
+    private fun open(device: String, headset: Boolean) {
         val s = MediaSession(context, SESSION_TAG)
         s.setCallback(callback, handler)
         s.isActive = true
         session = s
         pushed = null
         push()
+        if (mirrored?.isPlaying() == true) handler.postDelayed(claim, CLAIM_DELAY_MS)
+        if (!headset) return log(context.getString(R.string.log_pixel_tap_on))
         HeadsetLive.setDevice(device.ifBlank { "?" })
         if (device.isNotBlank() && prefs.lastHeadset != device) prefs.lastHeadset = device
         log(context.getString(R.string.log_headset_on, device.ifBlank { "?" }))
@@ -92,6 +133,8 @@ class HeadsetButtons(
         if (session == null) return
         handler.removeCallbacks(resolve)
         handler.removeCallbacks(hold)
+        handler.removeCallbacks(claim)
+        silence.stop()
         presses = 0
         session?.let {
             it.isActive = false
@@ -175,6 +218,19 @@ class HeadsetButtons(
         if (down && event.repeatCount == 0) {
             log(context.getString(R.string.log_headset_key, KeyEvent.keyCodeToString(code)))
         }
+        val headphones = media.externalOutput() != null
+        val playKey = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK ||
+            code == KeyEvent.KEYCODE_MEDIA_PLAY || code == KeyEvent.KEYCODE_MEDIA_PAUSE
+        // No headphones: a play/pause key can only be Quick Tap's. With headphones the two can't be told
+        // apart, and it is the headphones' (or, if their buttons are not used here, the player's).
+        if (!headphones && prefs.pixelTap && playKey) {
+            pixelTap(event)
+            return true
+        }
+        if (!prefs.headsetButtons) {
+            passThrough(event)
+            return true
+        }
         when (code) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> playButton(event)
@@ -193,6 +249,21 @@ class HeadsetButtons(
     /** The press is acted on, or, while the headphones page is open, only shown there. */
     private fun emit(gesture: Gesture, key: Int) {
         if (HeadsetLive.learning) HeadsetLive.report(gesture, key) else onGesture(gesture, key)
+    }
+
+    /** Quick Tap's "play/pause media": one press is one gesture, whichever way the system sends it. */
+    private fun pixelTap(event: KeyEvent) {
+        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) return
+        val now = event.eventTime
+        if (now - lastPixelAt < PIXEL_DEBOUNCE_MS) return
+        lastPixelAt = now
+        onGesture(Gesture.PIXEL_TAP, event.keyCode)
+    }
+
+    /** The key goes to the player as it came: its buttons are not used here. */
+    private fun passThrough(event: KeyEvent) {
+        val player = media.pick(media.controllers(), prefs.pausedPlayer) ?: return
+        player.dispatchMediaButtonEvent(event)
     }
 
     /** A key with one meaning: acts when pressed; held down, only seeking repeats. */
@@ -263,6 +334,8 @@ class HeadsetButtons(
         const val MULTI_MS = 350L
         const val HOLD_MS = 600L
         const val REPEAT_MS = 300L
+        const val PIXEL_DEBOUNCE_MS = 400L
+        const val CLAIM_DELAY_MS = 400L
         val PASS_ON_KEYS = setOf(
             KeyEvent.KEYCODE_MEDIA_STOP, KeyEvent.KEYCODE_MEDIA_RECORD, KeyEvent.KEYCODE_MEDIA_CLOSE,
             KeyEvent.KEYCODE_MEDIA_EJECT, KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK,
