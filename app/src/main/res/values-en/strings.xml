@@ -20,6 +20,10 @@
     <string name="src_wd_born_f">She was born %1$s.</string>
     <string name="src_wd_member_of">Member of %1$s.</string>
     <string name="src_wd_members">The band: %1$s.</string>
+    <string name="info_note_song">About the song: %1$s</string>
+    <string name="info_note_album">About the album %1$s: %2$s</string>
+    <string name="info_note_album_unnamed">About the album: %1$s</string>
+    <string name="info_note_artist">From the artist\'s story: %1$s</string>
     <string name="src_formed">The band was formed in %1$s.</string>
     <string name="src_style">Their style: %1$s.</string>
     <string name="src_album_date">The album came out on %1$s.</string>

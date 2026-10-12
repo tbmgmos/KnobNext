@@ -16,7 +16,8 @@ import java.util.TimeZone
  * who is in it, when and where an artist was born, genres.
  */
 object Wikidata {
-    class Found(val song: TrackInfo.Text?, val album: TrackInfo.Text?, val artist: TrackInfo.Text?)
+    /** [artistIntro]: who the artist is in a few sentences (when and where they began, genres). */
+    class Found(val song: TrackInfo.Text?, val album: TrackInfo.Text?, val artist: TrackInfo.Text?, val artistIntro: List<String> = emptyList())
 
     /** A Wikipedia article: its language and title. */
     class Page(val lang: String, val title: String)
@@ -36,21 +37,23 @@ object Wikidata {
         val wanted = items.values.flatMap { claims -> PROPERTIES.flatMap { p -> itemValues(claims, p) } }.distinct()
         val names = labels(wanted.take(MAX_IDS), lang)
         val res = TrackInfo.localized(context, lang)
-        fun text(id: String?, build: Facts.() -> Unit): TrackInfo.Text? {
-            val claims = id?.let { items[it] } ?: return null
-            val facts = Facts(res, claims, names, lang).apply(build).out
-            return facts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
-        }
+        fun facts(id: String?, build: Facts.() -> Unit): Facts? = id?.let { items[it] }?.let { Facts(res, it, names, lang).apply(build) }
+        fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
+        val artistFacts = facts(ids[2]) { artist() }
         return Found(
-            song = text(ids[0]) { song() },
-            album = text(ids[1]) { album() },
-            artist = text(ids[2]) { artist() },
+            song = facts(ids[0]) { song() }.text(),
+            album = facts(ids[1]) { album() }.text(),
+            artist = artistFacts.text(),
+            artistIntro = artistFacts?.let { it.out.take(it.introEnd) }.orEmpty(),
         )
     }
 
     /** One item's claims turned into sentences. */
     private class Facts(val res: Context, val claims: JSONObject, val names: Map<String, String>, val lang: String) {
         val out = ArrayList<String>()
+
+        /** The first [introEnd] sentences of an artist say who they are. */
+        var introEnd = 0
 
         fun names(property: String, max: Int = MAX_NAMES) = itemValues(claims, property).mapNotNull { names[it] }.take(max)
 
@@ -90,13 +93,13 @@ object Wikidata {
                 val female = itemValues(claims, "P21").contains(FEMALE)
                 date("P569", if (female) R.string.src_wd_born_f else R.string.src_wd_born_m)
                 list("P19", R.string.src_artist_from, max = 1)
-                list("P463", R.string.src_wd_member_of)
             } else {
                 timeValue(claims, "P571")?.let { out += res.getString(R.string.src_formed, it.year.toString()) }
                 list("P740", R.string.src_band_from, max = 1)
-                list("P527", R.string.src_wd_members, max = MAX_MEMBERS)
             }
             list("P136", R.string.src_genres)
+            introEnd = out.size
+            if (person) list("P463", R.string.src_wd_member_of) else list("P527", R.string.src_wd_members, max = MAX_MEMBERS)
             list("P264", R.string.src_wd_labels)
             list("P166", R.string.src_wd_awards)
         }

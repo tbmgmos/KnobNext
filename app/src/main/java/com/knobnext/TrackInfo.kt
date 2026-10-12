@@ -16,7 +16,11 @@ import java.security.MessageDigest
 import java.util.Locale
 
 /** How much to say about a track. */
-enum class InfoLength(val sentences: Int) { SHORT(2), NORMAL(3), LONG(5) }
+/**
+ * [sentences]: at most, for a model; [noteSentences]: facts in a note read as they are; [introNote]: facts
+ * after an introduction.
+ */
+enum class InfoLength(val sentences: Int, val noteSentences: Int, val introNote: Int) { SHORT(2, 1, 0), NORMAL(3, 2, 1), LONG(5, 3, 2) }
 
 /** Where the story comes from. */
 enum class InfoSource {
@@ -38,8 +42,10 @@ enum class InfoLanguage(val code: String?) {
 }
 
 /**
- * A few spoken sentences about the playing track: a little about the song, one fact about its album
- * and one about the artist, different each time. Facts come from whole Wikipedia articles (song, album,
+ * A short spoken note about the playing track. The first time KnobNext tells about an artist, it
+ * introduces them (who they are, where and when they began, what they play); after that each telling is
+ * one note on one subject, with facts not told yet: the song if there is something about it, else its
+ * album, else the next part of the artist's story, in the order the articles tell it. Facts come from whole Wikipedia articles (song, album,
  * artist) and MusicBrainz; each telling takes the next facts in turn, and a model, when one can run,
  * retells them and is told what was already said. Gemini Nano runs only while the app is on screen
  * (a system rule), so from a gesture the downloaded model retells, or the facts are read as they are.
@@ -53,7 +59,15 @@ object TrackInfo {
     class Text(val facts: List<String>, val lang: String)
 
     /** What is known, by subject; each subject from several sources (Wikipedia, TheAudioDB, Deezer, MusicBrainz). */
-    class Facts(val song: List<Text>, val artist: List<Text>, val album: String?, val year: String?, val albumText: List<Text>) {
+    class Facts(
+        val song: List<Text>,
+        val artist: List<Text>,
+        val album: String?,
+        val year: String?,
+        val albumText: List<Text>,
+        /** Who the artist is, in the story's language: the article's opening definition, or Wikidata's basics. */
+        val intro: List<String> = emptyList(),
+    ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
     }
 
@@ -103,10 +117,12 @@ object TrackInfo {
             return story
         }
         val history = History(context, track.artist)
+        // Never told about this artist in KnobNext: the listener is introduced to them first.
+        val firstMeet = track.artist != null && history.told().isEmpty()
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
         if (source == InfoSource.GEMINI) {
-            fromGemini(track, length, lang, history.told())?.let {
+            fromGemini(track, length, lang, history.told(), firstMeet)?.let {
                 factsAhead.cancel()
                 return@coroutineScope ready(history.add(it), "Gemini Nano")
             }
@@ -120,31 +136,31 @@ object TrackInfo {
         if (source != InfoSource.WIKI) {
             // Gemini already said no (or can't run from the background): only the downloaded model is left.
             val brain = if (source == InfoSource.GEMINI) Brains.background(context) else null
-            retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = source == InfoSource.GEMINI)
+            retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = source == InfoSource.GEMINI, firstMeet)
                 ?.let { return@coroutineScope ready(history.add(it), brain?.name ?: context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
         }
-        plainStory(context, track, facts, length, lang)?.let { ready(history.add(it), context.getString(R.string.log_info_way_plain)) }
+        plainStory(context, track, facts, length, lang, firstMeet)?.let { ready(history.add(it), context.getString(R.string.log_info_way_plain)) }
     }
 
     // ---- Gemini on its own ----
 
-    private suspend fun fromGemini(track: Track, length: InfoLength, lang: String, told: List<String>): String? {
+    private suspend fun fromGemini(track: Track, length: InfoLength, lang: String, told: List<String>, firstMeet: Boolean): String? {
         val nano = NanoBrain.ready() ?: return null.also { if (NanoBrain.lastError == null) NanoBrain.lastError = "Gemini Nano не готов" }
         val prompt = buildString {
             appendLine(
                 if (lang == "ru") {
-                    "Ты радиоведущий. Расскажи слушателю о треке, его альбоме и исполнителе, только на русском языке. " +
-                        "Говори только то, в чём уверен; если о треке знаешь мало — расскажи больше об альбоме, а если и о нём мало — об исполнителе. " +
+                    "Ты радиоведущий. Расскажи слушателю короткую заметку о треке, его альбоме или исполнителе, только на русском языке. " +
+                        "Говори только то, в чём уверен. " +
                         "Не цитируй текст песни. Не повторяй название и исполнителя в начале — их уже назвали. Без списков и разметки."
                 } else {
-                    "You are a radio host. Tell the listener about the track, its album and its artist, only in English. " +
-                        "Say only what you are sure of; if you know little about the track, say more about the album, and if little about it too, about the artist. " +
+                    "You are a radio host. Tell the listener a short note about the track, its album or its artist, only in English. " +
+                        "Say only what you are sure of. " +
                         "Do not quote the lyrics. Do not repeat the title and artist at the start — they were just said. No lists, no markup."
                 },
             )
             appendTrack(track, track.album, track.year)
-            appendLine(structure(length, track.album, lang))
+            appendLine(shape(length, track.album, lang, firstMeet, topic = null))
             appendTold(told, lang)
         }
         val answer = withTimeoutOrNull(MODEL_TIMEOUT_MS) {
@@ -164,9 +180,12 @@ object TrackInfo {
         told: List<String>,
         brain: Brain?,
         onlyBackground: Boolean,
+        firstMeet: Boolean,
     ): String? {
         if (onlyBackground && brain == null) return null
-        val rotation = Rotation(context)
+        // The same choice as without a model: the introduction, then one subject's untold facts.
+        val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL)
+        if (plan.intro.isEmpty() && plan.facts.isEmpty()) return null
         val prompt = buildString {
             appendLine(
                 if (lang == "ru") {
@@ -180,13 +199,14 @@ object TrackInfo {
                 },
             )
             appendTrack(track, facts.album, facts.year)
-            val song = rotation.next("song:${track.title}", merged(facts.song), FACTS_FOR_MODEL)
-            val album = rotation.next("album:${facts.album}", merged(facts.albumText), FACTS_FOR_MODEL)
-            val artist = rotation.next("artist:${track.artist}", merged(facts.artist), FACTS_FOR_MODEL)
-            if (song.isNotEmpty()) appendLine("About the song: " + song.joinToString(" "))
-            if (album.isNotEmpty()) appendLine("About the album: " + album.joinToString(" "))
-            if (artist.isNotEmpty()) appendLine("About the artist: " + artist.joinToString(" "))
-            appendLine(structure(length, facts.album, lang, shares(length, song.size, album.size, artist.size)))
+            if (plan.intro.isNotEmpty()) appendLine("Who the artist is: " + plan.intro.joinToString(" "))
+            when (plan.topic) {
+                Topic.SONG -> appendLine("About the song: " + plan.facts.joinToString(" "))
+                Topic.ALBUM -> appendLine("About the album: " + plan.facts.joinToString(" "))
+                Topic.ARTIST -> appendLine("From the artist's story: " + plan.facts.joinToString(" "))
+                null -> Unit
+            }
+            appendLine(shape(length, facts.album, lang, firstMeet && plan.intro.isNotEmpty(), plan.topic))
             appendTold(told, lang)
         }
         val tokens = length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS
@@ -196,18 +216,64 @@ object TrackInfo {
         return clean(answer, length, lang)
     }
 
-    /** Without a model: the next facts in turn, in the story's language only. */
-    private fun plainStory(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String): String? {
+    /** Without a model: the introduction or one note, read as it is, in the story's language only. */
+    private fun plainStory(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String, firstMeet: Boolean): String? {
+        val plan = plan(context, track, facts, length, lang, firstMeet, perFact = 0)
+        val res = localized(context, lang)
+        val note = plan.facts.takeIf { it.isNotEmpty() }?.joinToString(" ")?.let { body ->
+            when (plan.topic) {
+                Topic.SONG -> res.getString(R.string.info_note_song, body)
+                Topic.ALBUM -> facts.album?.let { res.getString(R.string.info_note_album, quote(Speech.cleanTitle(it), lang), body) }
+                    ?: res.getString(R.string.info_note_album_unnamed, body)
+                Topic.ARTIST -> res.getString(R.string.info_note_artist, body)
+                null -> body
+            }
+        }
+        return (plan.intro + listOfNotNull(note)).joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    private fun quote(name: String, lang: String) = if (lang == "ru") "«$name»" else "\"$name\""
+
+    /** What one telling is about. */
+    private enum class Topic { SONG, ALBUM, ARTIST }
+
+    /** The introduction (the first time only) and one subject's next facts. */
+    private class Plan(val intro: List<String>, val topic: Topic?, val facts: List<String>)
+
+    /**
+     * One subject per telling, the first that still has facts not told: the song, else its album, else
+     * the artist's story; when all have been told, the first that has any. [lang] null: facts in any
+     * language (a model translates them); [perFact] > 0: that many facts for a model to choose from.
+     */
+    private fun plan(context: Context, track: Track, facts: Facts, length: InfoLength, lang: String?, firstMeet: Boolean, perFact: Int): Plan {
         val rotation = Rotation(context)
-        val song = brief(merged(facts.song, lang))
-        val album = brief(merged(facts.albumText, lang))
-        val artist = brief(merged(facts.artist, lang))
-        val n = shares(length, song.size, album.size, artist.size)
-        fun take(key: String, list: List<String>, count: Int) = if (count > 0) rotation.next(key, list, count) else emptyList()
-        val parts = take("song:${track.title}", song, n.song) +
-            take("album:${facts.album}", album, n.album) +
-            take("artist:${track.artist}", artist, n.artist)
-        return parts.joinToString(" ").takeIf { it.isNotBlank() }
+        val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
+        fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
+        val topics = listOf(
+            Triple(Topic.SONG, "song:${track.title}", clean(merged(facts.song, lang))),
+            Triple(Topic.ALBUM, "album:${facts.album}", clean(merged(facts.albumText, lang))),
+            // The artist's story in its own order: the articles tell it from the beginning.
+            Triple(Topic.ARTIST, "artist:${track.artist}", clean(facts.artist.filter { lang == null || it.lang == lang }.flatMap { it.facts })),
+        )
+        val sentences = when {
+            perFact > 0 -> perFact
+            intro.isNotEmpty() -> length.introNote
+            else -> length.noteSentences
+        }
+        if (sentences == 0) return Plan(intro, null, emptyList())
+        val chosen = topics.firstOrNull { (_, key, list) -> list.isNotEmpty() && rotation.left(key, list.size) > 0 }
+            ?: topics.firstOrNull { it.third.isNotEmpty() }
+            ?: return Plan(intro, null, emptyList())
+        return Plan(intro, chosen.first, rotation.next(chosen.second, chosen.third, sentences))
+    }
+
+    /**
+     * A sentence that makes sense on its own. Cut out of an article, one that leans on the one before
+     * ("He also…", "In the same year…", "This became…") just confuses.
+     */
+    private fun standsAlone(sentence: String): Boolean {
+        val s = sentence.trimStart().lowercase(Locale.ROOT)
+        return DEPENDENT_STARTS.none { s.startsWith(it) } && sentence.count { it == ',' } <= MAX_COMMAS
     }
 
     /**
@@ -218,34 +284,6 @@ object TrackInfo {
         val compact = facts.map { it.replace(BRACKETS, "").replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("\\s{2,}"), " ").trim() }
             .filter { it.length >= MIN_FACT_CHARS }
         return compact.filter { it.length <= SHORT_FACT_CHARS }.ifEmpty { compact }
-    }
-
-    /** How many facts go to the song, the album and the artist. */
-    private data class Shares(val song: Int, val album: Int, val artist: Int)
-
-    /**
-     * Facts per part for this length, given how many each part has. Nothing about the song → its share goes
-     * to the album; nothing about the album either → to the artist. If the artist runs short, what's left
-     * goes back to the album, then to the song, so the story stays as long as the facts allow.
-     */
-    private fun shares(length: InfoLength, song: Int, album: Int, artist: Int): Shares {
-        val want = when (length) {
-            InfoLength.SHORT -> intArrayOf(0, 1, 1)
-            InfoLength.NORMAL -> intArrayOf(1, 1, 1)
-            InfoLength.LONG -> intArrayOf(1, 2, 2)
-        }
-        val have = intArrayOf(song, album, artist)
-        fun move(from: Int, to: Int) {
-            val extra = want[from] - minOf(want[from], have[from])
-            want[from] -= extra
-            want[to] += extra
-        }
-        move(0, 1)
-        move(1, 2)
-        move(2, 1)
-        move(1, 0)
-        want[0] = minOf(want[0], have[0])
-        return Shares(want[0], want[1], want[2])
     }
 
     private fun StringBuilder.appendTrack(track: Track, album: String?, year: String?) {
@@ -269,35 +307,29 @@ object TrackInfo {
         }
     }
 
-    /** What the model is asked to cover. */
-    private fun structure(length: InfoLength, album: String?, lang: String, known: Shares? = null): String {
+    /** What the model is asked to tell: the introduction the first time, then one note on one subject. */
+    private fun shape(length: InfoLength, album: String?, lang: String, firstMeet: Boolean, topic: Topic?): String {
         val ru = lang == "ru"
-        val albumName = album?.let { if (ru) " «$it»" else " \"$it\"" } ?: ""
-        if (known != null) {
-            // The facts are in front of the model: say exactly what to cover, the gaps already filled in.
-            val parts = listOfNotNull(
-                known.song.takeIf { it > 0 }?.let { if (ru) "о самой песне" else "about the song itself" },
-                known.album.takeIf { it > 0 }?.let { if (ru) "об альбоме$albumName" else "about the album$albumName" },
-                known.artist.takeIf { it > 0 }?.let { if (ru) "об исполнителе или группе" else "about the artist or band" },
-            )
-            if (parts.isNotEmpty()) {
-                return if (ru) "Расскажи по порядку: ${parts.joinToString(", затем ")}. ${brevity(length, ru)}"
-                else "Tell, in this order: ${parts.joinToString(", then ")}. ${brevity(length, ru)}"
+        val albumName = album?.let { " " + quote(it, lang) } ?: ""
+        val known = if (ru) "Слушатель уже знает исполнителя — не представляй его заново. " else "The listener already knows the artist — do not introduce them again. "
+        val what = when {
+            firstMeet -> if (ru) {
+                "Слушатель впервые слышит об этом исполнителе: начни с короткой визитки — кто это, откуда, когда начали, в каком жанре." +
+                    if (length == InfoLength.SHORT) "" else " Затем одна короткая заметка о песне или альбоме."
+            } else {
+                "The listener hears about this artist for the first time: start with a short introduction — who they are, where they come from, when they began, what they play." +
+                    if (length == InfoLength.SHORT) "" else " Then one short note about the song or the album."
+            }
+            topic == Topic.SONG -> known + if (ru) "Одна короткая заметка о самой песне." else "One short note about the song itself."
+            topic == Topic.ALBUM -> known + if (ru) "Одна короткая заметка об альбоме$albumName." else "One short note about the album$albumName."
+            topic == Topic.ARTIST -> known + if (ru) "Одна короткая заметка: следующий эпизод из истории исполнителя." else "One short note: the next part of the artist's story."
+            else -> known + if (ru) {
+                "Одна короткая заметка на одну тему: о самой песне, если есть что сказать; иначе об альбоме$albumName; иначе новый эпизод из истории исполнителя."
+            } else {
+                "One short note on one subject: the song itself if there is something to say; else the album$albumName; else a new part of the artist's story."
             }
         }
-        return if (ru) {
-            "Построй рассказ так: ${if (length == InfoLength.SHORT) "" else "сначала коротко о самой песне, затем "}" +
-                "ОДИН короткий интересный факт об альбоме$albumName, из которого эта песня, " +
-                "затем ОДИН короткий интересный факт об исполнителе или группе. " +
-                "Если о песне сказать нечего — вместо этого расскажи ещё один факт об альбоме; " +
-                "если и об альбоме нечего — расскажи больше об исполнителе. ${brevity(length, ru)}"
-        } else {
-            "Structure: ${if (length == InfoLength.SHORT) "" else "first briefly about the song itself, then "}" +
-                "ONE short interesting fact about the album$albumName the song is from, " +
-                "then ONE short interesting fact about the artist or band. " +
-                "If there is nothing to say about the song, tell one more fact about the album instead; " +
-                "if nothing about the album either, tell more about the artist. ${brevity(length, ru)}"
-        }
+        return "$what ${brevity(length, ru)}"
     }
 
     private fun brevity(length: InfoLength, ru: Boolean): String =
@@ -315,7 +347,7 @@ object TrackInfo {
 
     /** Everything found about the track, fetched all at once and kept on the phone. */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
-        val file = File(dir(context), "facts3-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
+        val file = File(dir(context), "facts4-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { return readFacts(JSONObject(file.readText())) }
         }
@@ -346,12 +378,14 @@ object TrackInfo {
                     val b = brainz.await()
                     val m = more.await()
                     val d = data.await()
+                    val artistText = about.await()?.text
                     Facts(
                         song = listOfNotNull(song.await()?.text, d?.song) + m?.song.orEmpty(),
-                        artist = listOfNotNull(about.await()?.text, d?.artist) + m?.artist.orEmpty(),
+                        artist = listOfNotNull(artistText, d?.artist) + m?.artist.orEmpty(),
                         album = track.album ?: b?.first ?: m?.albumName,
                         year = track.year ?: b?.second ?: m?.year,
                         albumText = listOfNotNull(albumText.await()?.text, d?.album) + m?.album.orEmpty(),
+                        intro = intro(artistText, d?.artistIntro.orEmpty(), lang),
                     )
                 }
             }
@@ -363,6 +397,20 @@ object TrackInfo {
         runCatching { file.writeText(writeFacts(fetched).toString()) }
         trimCache(context)
         return fetched
+    }
+
+    /**
+     * Who the artist is: the article's opening sentence when it defines them ("Nirvana — американская
+     * рок-группа…"), else Wikidata's basics (when and where they began, genres).
+     */
+    private fun intro(article: Text?, basics: List<String>, lang: String): List<String> {
+        val lead = article?.takeIf { it.lang == lang }?.facts?.firstOrNull()?.let { brief(listOf(it)).firstOrNull() }
+        val defines = lead != null && if (lang == "ru") {
+            lead.indexOf(" — ").let { it in 1..MAX_INTRO_NAME } || lead.contains(" является ")
+        } else {
+            Regex("""\b(is|was|are|were)\b""").containsMatchIn(lead.take(MAX_INTRO_NAME + 20))
+        }
+        return if (defines) listOf(lead!!) else basics
     }
 
     /**
@@ -487,6 +535,9 @@ object TrackInfo {
     private class Rotation(context: Context) {
         private val sp = context.getSharedPreferences("trackinfo_rotation", Context.MODE_PRIVATE)
 
+        /** How many of [size] facts under [key] have not been told yet. */
+        fun left(key: String, size: Int): Int = (size - sp.getInt(sha1(key), 0)).coerceAtLeast(0)
+
         fun next(key: String, facts: List<String>, n: Int): List<String> {
             if (facts.isEmpty()) return emptyList()
             val k = sha1(key)
@@ -520,6 +571,7 @@ object TrackInfo {
         putText("albumText", f.albumText)
         f.album?.let { o.put("album", it) }
         f.year?.let { o.put("year", it) }
+        o.put("intro", JSONArray(f.intro))
         return o
     }
 
@@ -532,7 +584,8 @@ object TrackInfo {
                 Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"))
             }
         }
-        return Facts(text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"))
+        val intro = o.optJSONArray("intro")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
+        return Facts(text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"), intro)
     }
 
     // ---- Helpers ----
@@ -599,6 +652,18 @@ object TrackInfo {
     private val BRACKETS = Regex("\\s*[(\\[][^()\\[\\]]*[)\\]]")
     private const val FACTS_FOR_MODEL = 5
     private const val MAX_TOLD = 5
+    private const val INTRO_SENTENCES = 2
+    private const val MAX_INTRO_NAME = 60
+    private const val MAX_COMMAS = 4
+
+    /** How sentences that lean on the one before begin (lowercased). */
+    private val DEPENDENT_STARTS = listOf(
+        "он ", "она ", "они ", "оно ", "его ", "её ", "ее ", "их ", "ему ", "ей ", "им ", "это ", "этот ", "эта ", "эти ", "этом ",
+        "там ", "тогда ", "также ", "тоже ", "кроме того", "однако", "позже", "позднее", "впоследствии", "после этого", "затем ",
+        "вскоре", "в том же", "в следующем", "в этом ", "при этом", "поэтому", "но ", "и ", "а ", "так ", "здесь ",
+        "he ", "she ", "they ", "it ", "his ", "her ", "their ", "this ", "these ", "that ", "those ", "also ", "however",
+        "later", "then ", "soon ", "the following", "in the same", "afterwards", "after that", "but ", "and ", "so ", "there ",
+    )
     private const val MAX_TOLD_CHARS = 140
     private const val TOLD_IN_PROMPT = 3
     private const val TOKENS_PER_SENTENCE = 50

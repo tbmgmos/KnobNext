@@ -138,6 +138,10 @@
     <string name="src_wd_born_f">Родилась %1$s.</string>
     <string name="src_wd_member_of">Участник групп: %1$s.</string>
     <string name="src_wd_members">В составе группы: %1$s.</string>
+    <string name="info_note_song">О песне: %1$s</string>
+    <string name="info_note_album">Об альбоме %1$s: %2$s</string>
+    <string name="info_note_album_unnamed">Об альбоме: %1$s</string>
+    <string name="info_note_artist">Из истории исполнителя: %1$s</string>
     <string name="src_formed">Группа образована в %1$s году.</string>
     <string name="src_style">Стиль — %1$s.</string>
     <string name="src_album_date">Альбом вышел %1$s.</string>
