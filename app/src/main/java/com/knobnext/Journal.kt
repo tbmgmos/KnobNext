@@ -45,6 +45,12 @@ object Journal {
         val links: List<String>,
         /** The artist whose story named this one before the listener asked about them. */
         val via: String?,
+        /** Their Wikidata item, when known. */
+        val id: String?,
+        /** Their own pages: "site", "bandcamp", "soundcloud" to address. */
+        val pages: Map<String, String>,
+        /** Album covers to fetch when the player had none: album (lowercased, cleaned) to address. */
+        val coverUrls: Map<String, String>,
     ) {
         /** The albums the notes are about. */
         val albums get() = notes.mapNotNull { it.album?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT) }.distinct().size
@@ -72,6 +78,10 @@ object Journal {
         /** The artists around them the facts name, and their Wikidata items. */
         related: List<String> = emptyList(),
         relatedIds: List<String> = emptyList(),
+        /** Where the album's cover is, for when the player had none. */
+        coverUrl: String? = null,
+        /** The artist's own pages. */
+        pages: Map<String, String> = emptyMap(),
     ) {
         val root = read(context)
         val artists = root.optJSONObject("artists") ?: JSONObject().also { root.put("artists", it) }
@@ -87,6 +97,11 @@ object Journal {
             artists.put(k, fresh)
         }
         id?.let { e.put("id", it) }
+        if (pages.isNotEmpty()) e.put("pages", JSONObject(pages))
+        if (coverUrl != null) {
+            val covers = e.optJSONObject("coverUrls") ?: JSONObject().also { e.put("coverUrls", it) }
+            covers.put(albumKey(album), coverUrl)
+        }
         if (related.isNotEmpty()) {
             e.put("links", JSONArray((links(e) + related).distinctBy { key(it) }.filter { key(it) != k }.take(MAX_LINKS)))
         }
@@ -195,9 +210,12 @@ object Journal {
      * history shows it next to the artist. Covers come from the player, so they work for any artist,
      * however unknown, and nothing is downloaded.
      */
-    fun saveCover(context: Context, artist: String, album: String?, art: Bitmap?) {
+    fun saveCover(context: Context, artist: String, album: String?, art: Bitmap?) = saveCoverOf(context, key(artist), album, art)
+
+    /** The same, for an artist already in the history (a cover fetched for the card). */
+    fun saveCoverOf(context: Context, key: String, album: String?, art: Bitmap?) {
         if (art == null || art.isRecycled || art.width <= 0 || art.height <= 0) return
-        val file = coverFile(context, key(artist), album)
+        val file = coverFile(context, key, album)
         if (file.exists()) {
             // Touched, so the artist's latest album is the one shown.
             file.setLastModified(System.currentTimeMillis())
@@ -223,7 +241,7 @@ object Journal {
     private fun prefix(key: String) = sha1(key).take(PREFIX_CHARS) + "-"
 
     private fun coverFile(context: Context, key: String, album: String?) =
-        File(covers(context).apply { mkdirs() }, prefix(key) + sha1(album?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT) ?: "") + ".jpg")
+        File(covers(context).apply { mkdirs() }, prefix(key) + sha1(albumKey(album)) + ".jpg")
 
     private fun forgetFiles(context: Context, key: String) {
         covers(context).listFiles { f -> f.name.startsWith(prefix(key)) }?.forEach { it.delete() }
@@ -254,10 +272,18 @@ object Journal {
             own = o.optString("own"),
             links = links(o),
             via = o.optString("via").takeIf { it.isNotEmpty() },
+            id = o.optString("id").takeIf { it.isNotEmpty() },
+            pages = map(o, "pages"),
+            coverUrls = map(o, "coverUrls"),
         )
     }
 
     private fun links(o: JSONObject): List<String> = strings(o, "links")
+
+    private fun map(o: JSONObject, name: String): Map<String, String> =
+        o.optJSONObject(name)?.let { m -> m.keys().asSequence().associateWith { m.optString(it) } }.orEmpty()
+
+    fun albumKey(album: String?) = album?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT) ?: ""
 
     private fun strings(o: JSONObject, name: String): List<String> =
         o.optJSONArray(name)?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()

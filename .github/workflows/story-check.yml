@@ -10,6 +10,7 @@ on:
       - 'app/src/main/java/com/knobnext/TrackInfo.kt'
       - 'app/src/main/java/com/knobnext/MusicSources.kt'
       - 'app/src/main/java/com/knobnext/Wikidata.kt'
+      - 'app/src/main/java/com/knobnext/Brainz.kt'
       - 'app/src/main/java/com/knobnext/Journal.kt'
       - 'app/src/main/res/values/strings.xml'
       - 'app/src/test/**'
@@ -35,4 +36,5 @@ jobs:
       - name: Tell stories
         env:
           LIVE_STORIES: '1'
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
         run: ./gradlew testGithubDebugUnitTest --no-daemon --tests com.knobnext.StoryLiveTest

@@ -16,6 +16,8 @@ android {
         targetSdk = 36
         versionCode = providers.gradleProperty("versionCode").orNull?.toInt() ?: 3
         versionName = providers.gradleProperty("versionName").orNull ?: "3.0.0-local"
+        // Last.fm's key for this app (a GitHub secret in CI): without it the story simply has no Last.fm facts.
+        buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("LASTFM_API_KEY") ?: "").trim() + "\"")
     }
 
     // github: checks GitHub Releases for updates (needs INTERNET). rustore: the store delivers updates,
@@ -52,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {

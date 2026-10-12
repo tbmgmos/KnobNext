@@ -72,14 +72,14 @@ object Wikidata {
             items.values.flatMap { claims -> PROPERTIES.flatMap { p -> itemValues(claims, p) } } +
                 memberClaims.values.flatMap { itemValues(it, "P463") }
             ).distinct()
-        val names = labels(wanted, lang)
+        val (names, musical) = labels(wanted, lang)
         val res = TrackInfo.localized(context, lang)
         val known = said.lowercase(Locale.ROOT)
         fun facts(id: String?, build: Facts.() -> Unit): Facts? =
             id?.let { items[it] }?.let { Facts(res, it, names, lang, known, albumKnown).apply(build) }
         fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
         val artistFacts = facts(ids[2]) { artist() }
-        val circle = ids[2]?.let { id -> items[id]?.let { Circle(res, id, it, memberClaims, names) } }
+        val circle = ids[2]?.let { id -> items[id]?.let { Circle(res, id, it, memberClaims, names, musical) } }
         return Found(
             song = facts(ids[0]) { song() }.text(),
             album = facts(ids[1]) { album() }.text(),
@@ -103,6 +103,8 @@ object Wikidata {
         claims: JSONObject,
         members: Map<String, JSONObject>,
         names: Map<String, String>,
+        /** The items described as music (a band, a singer): "member of" also lists parties and armies. */
+        musical: Set<String>,
     ) {
         val out = ArrayList<String>()
         val related = ArrayList<String>()
@@ -111,13 +113,13 @@ object Wikidata {
         init {
             for ((member, c) in members) {
                 val name = names[member] ?: continue
-                val bands = itemValues(c, "P463").filter { it != id && names[it] != null }.distinct().take(MAX_NAMES)
+                val bands = itemValues(c, "P463").filter { it != id && names[it] != null && it in musical }.distinct().take(MAX_NAMES)
                 if (bands.isEmpty()) continue
                 out += res.getString(R.string.src_wd_circle_bands, name, bands.joinToString(", ") { names.getValue(it) })
                 related += bands.map { names.getValue(it) }
                 relatedIds += bands
             }
-            val influences = itemValues(claims, "P737").filter { names[it] != null }.take(MAX_NAMES)
+            val influences = itemValues(claims, "P737").filter { names[it] != null && it in musical }.take(MAX_NAMES)
             if (influences.isNotEmpty()) {
                 out += res.getString(R.string.src_wd_circle_influences, influences.joinToString(", ") { names.getValue(it) })
                 related += influences.map { names.getValue(it) }
@@ -213,20 +215,29 @@ object Wikidata {
         return entities.keys().asSequence().mapNotNull { id -> entities.getJSONObject(id).optJSONObject("claims")?.let { id to it } }.toMap()
     }
 
-    /** Names in [lang], else in English; a name only in some other script is no use to say. */
-    private fun labels(ids: List<String>, lang: String): Map<String, String> {
+    /**
+     * Names in [lang], else in English (a name only in some other script is no use to say), and which of
+     * the items are about music, by their descriptions ("American rock band", "советский рок-музыкант").
+     */
+    private fun labels(ids: List<String>, lang: String): Pair<Map<String, String>, Set<String>> {
         val out = HashMap<String, String>()
+        val musical = HashSet<String>()
         ids.chunked(MAX_IDS).take(MAX_LABEL_REQUESTS).forEach { chunk ->
-            val url = "$API?action=wbgetentities&props=labels&format=json&languages=" + URLEncoder.encode("$lang|en", "UTF-8") +
+            val url = "$API?action=wbgetentities&props=labels|descriptions&format=json&languages=" + URLEncoder.encode("$lang|en", "UTF-8") +
                 "&ids=" + URLEncoder.encode(chunk.joinToString("|"), "UTF-8")
             val entities = TrackInfo.getJson(url)?.optJSONObject("entities") ?: return@forEach
             for (id in entities.keys()) {
-                val labels = entities.getJSONObject(id).optJSONObject("labels") ?: continue
+                val entity = entities.getJSONObject(id)
+                val labels = entity.optJSONObject("labels") ?: continue
                 val name = (labels.optJSONObject(lang) ?: labels.optJSONObject("en"))?.optString("value")
                 if (!name.isNullOrBlank()) out[id] = name
+                val about = entity.optJSONObject("descriptions")?.let { d ->
+                    listOfNotNull(d.optJSONObject(lang), d.optJSONObject("en")).joinToString(" ") { it.optString("value") }
+                }.orEmpty().lowercase(Locale.ROOT)
+                if (MUSIC_WORDS.containsMatchIn(about)) musical += id
             }
         }
-        return out
+        return out to musical
     }
 
     // ---- Claims ----
@@ -284,6 +295,13 @@ object Wikidata {
 
     /** Members whose other bands are looked up: one request for all of them. */
     private const val MAX_MEMBERS_LOOKED = 8
+
+    /** How a description says an item is about music: whole English words, Russian stems. */
+    private val MUSIC_WORDS = Regex(
+        """(?<!\p{L})(band|musical group|music group|duo|supergroup|musician|singer|rapper|composer|songwriter|guitarist|drummer|""" +
+            """bassist|dj|orchestra|ensemble)(?!\p{L})|групп[аыуе](?!\p{L})|коллектив|дуэт|трио|музыкант|певец|певица|рэпер|композитор|""" +
+            """гитарист|барабанщик|диджей|оркестр|ансамбль""",
+    )
 
     /** The properties whose values are items that need a name. */
     private val PROPERTIES = listOf(

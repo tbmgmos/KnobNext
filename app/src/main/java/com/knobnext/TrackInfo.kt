@@ -1,8 +1,11 @@
 package com.knobnext
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -74,6 +77,12 @@ object TrackInfo {
         val relatedIds: List<String> = emptyList(),
         /** The artist's Wikidata item: one artist, however the player spells them. */
         val artistId: String? = null,
+        /** The album's cover (Cover Art Archive), for the history when the player had none. */
+        val coverUrl: String? = null,
+        /** The artist's own pages ("site", "bandcamp", "soundcloud" to address). */
+        val pages: Map<String, String> = emptyMap(),
+        /** MusicBrainz's slower facts have joined these. */
+        val deep: Boolean = false,
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
     }
@@ -151,6 +160,7 @@ object TrackInfo {
                 Journal.record(
                     context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic,
                     found = true, id = found?.artistId, related = found?.related.orEmpty(), relatedIds = found?.relatedIds.orEmpty(),
+                    coverUrl = found?.coverUrl, pages = found?.pages.orEmpty(),
                 )
             }
             if (!wasUnknown) return story
@@ -353,7 +363,8 @@ object TrackInfo {
         val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
         fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
         val artist = artistFacts(facts, lang)
-        val who = track.artist?.let(Journal::key)
+        // The Wikidata item when known: "Kino" and "Кино" share one story.
+        val who = facts.artistId ?: track.artist?.let(Journal::key)
         val artistKey = "artist:$who"
         // The artists around this one come in once the listener knows them a little, or their story is told.
         val widen = artist.size - rotation.left(artistKey, artist.size) >= CIRCLE_AFTER || rotation.left(artistKey, artist.size) == 0
@@ -391,11 +402,12 @@ object TrackInfo {
         brief(facts.artist.filter { lang == null || it.lang == lang }.flatMap { it.facts }).filter { standsAlone(it) }
 
     /** Forgets that the artist was introduced and how far their story got: the next story starts afresh. */
-    fun forgetArtist(context: Context, artist: String) {
-        val who = Journal.key(artist)
-        File(dir(context), "told-" + sha1(who)).delete()
-        Rotation(context).forget("artist:$who")
-        Rotation(context).forget("circle:$who")
+    fun forgetArtist(context: Context, artist: String, id: String?) {
+        File(dir(context), "told-" + sha1(Journal.key(artist))).delete()
+        for (who in listOfNotNull(Journal.key(artist), id)) {
+            Rotation(context).forget("artist:$who")
+            Rotation(context).forget("circle:$who")
+        }
     }
 
     /** Forgets every artist: whom KnobNext introduced and how far each story got. */
@@ -495,7 +507,10 @@ object TrackInfo {
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
         val file = File(dir(context), FACTS_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
-            runCatching { return readFacts(JSONObject(file.readText())) }
+            runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { cached ->
+                deepenLater(context, track, lang, file, cached)
+                return cached
+            }
         }
         val started = System.currentTimeMillis()
         val fetched = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
@@ -531,15 +546,23 @@ object TrackInfo {
                     val m = more.await()
                     val d = data.await()
                     val artistText = about.await()?.text
+                    val songText = song.await()?.text
+                    val albumArticle = albumText.await()?.text
+                    // Last.fm's texts are often Wikipedia's own: only where Wikipedia has nothing in this language.
+                    val lf = m?.lastFm
+                    val wikiArtist = artistText?.takeIf { it.lang == lang }
+                    val lfArtist = lf?.artist?.takeIf { wikiArtist == null && (artistText == null || it.lang == lang) }
                     Facts(
-                        song = listOfNotNull(song.await()?.text, d?.song) + m?.song.orEmpty(),
-                        artist = listOfNotNull(artistText, d?.artist) + m?.artist.orEmpty(),
+                        song = listOfNotNull(songText, d?.song) + m?.song.orEmpty() +
+                            listOfNotNull(lf?.song?.takeIf { songText == null }, lf?.songNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang) }),
+                        artist = listOfNotNull(artistText, lfArtist, d?.artist) + m?.artist.orEmpty() +
+                            listOfNotNull(lf?.artistNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang) }),
                         album = track.album ?: b?.first ?: m?.albumName,
                         year = track.year ?: b?.second ?: m?.year,
-                        albumText = listOfNotNull(albumText.await()?.text, d?.album) + m?.album.orEmpty(),
-                        intro = intro(context, artist, artistText, d?.artistIntro.orEmpty(), lang),
-                        circle = d?.circle.orEmpty(),
-                        related = d?.related.orEmpty(),
+                        albumText = listOfNotNull(albumArticle, d?.album) + m?.album.orEmpty() + listOfNotNull(lf?.album?.takeIf { albumArticle == null }),
+                        intro = intro(context, artist, wikiArtist ?: lfArtist, d?.artistIntro.orEmpty().ifEmpty { m?.basics.orEmpty() }, lang),
+                        circle = d?.circle.orEmpty() + listOfNotNull(lf?.similar),
+                        related = d?.related.orEmpty() + lf?.similarNames.orEmpty(),
                         relatedIds = d?.relatedIds.orEmpty(),
                         artistId = d?.artistId,
                     )
@@ -548,11 +571,61 @@ object TrackInfo {
         }
         // Offline or slow: whatever was found before, however old.
         if (fetched == null || fetched.empty) {
-            return if (file.exists()) runCatching { readFacts(JSONObject(file.readText())) }.getOrNull() else fetched
+            val old = if (file.exists()) runCatching { readFacts(JSONObject(file.readText())) }.getOrNull() else null
+            if (old != null || fetched == null) return old
+            // Nothing quick at all: a small artist may still be in MusicBrainz, worth the wait.
+            return withTimeoutOrNull(DEEP_WAIT_MS) { deepen(context, track, lang, file, fetched) }?.takeIf { !it.empty } ?: fetched
         }
         runCatching { file.writeText(writeFacts(fetched).toString()) }
         trimCache(context)
+        deepenLater(context, track, lang, file, fetched)
         return fetched
+    }
+
+    // ---- MusicBrainz, in the background ----
+
+    private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val deepening = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** MusicBrainz's facts join the cached ones for the next telling (it allows a request a second). */
+    private fun deepenLater(context: Context, track: Track, lang: String, file: File, base: Facts) {
+        if (base.deep || !deepening.add(file.name)) return
+        background.launch {
+            try {
+                deepen(context, track, lang, file, base)
+            } finally {
+                deepening.remove(file.name)
+            }
+        }
+    }
+
+    private suspend fun deepen(context: Context, track: Track, lang: String, file: File, base: Facts): Facts? {
+        val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
+        val said = (base.song + base.artist + base.albumText).flatMap { it.facts }.joinToString(" ") + " " + base.intro.joinToString(" ")
+        val b = runCatching { Brainz.gather(context, lang, track.title, artist, base.album ?: track.album, said) }.getOrNull()
+            // Not found, or not reachable: tried again next time.
+            ?: return null
+        val intro = base.intro.ifEmpty {
+            if (b.basics.isEmpty()) emptyList() else listOf(localized(context, lang).getString(R.string.info_intro_basics, artist)) + b.basics
+        }
+        val merged = Facts(
+            song = base.song + listOfNotNull(b.song),
+            artist = base.artist + listOfNotNull(b.artist),
+            album = base.album,
+            year = base.year,
+            albumText = base.albumText,
+            intro = intro,
+            circle = base.circle + b.circle,
+            related = base.related + b.related,
+            relatedIds = base.relatedIds,
+            artistId = base.artistId,
+            coverUrl = b.coverUrl ?: base.coverUrl,
+            pages = b.pages + base.pages,
+            deep = true,
+        )
+        // Nothing to say even now: not kept, so the next look is a fresh one.
+        if (!merged.empty) runCatching { file.writeText(writeFacts(merged).toString()) }
+        return merged
     }
 
     /**
@@ -763,6 +836,9 @@ object TrackInfo {
         o.put("related", JSONArray(f.related))
         o.put("relatedIds", JSONArray(f.relatedIds))
         f.artistId?.let { o.put("artistId", it) }
+        f.coverUrl?.let { o.put("coverUrl", it) }
+        o.put("pages", JSONObject(f.pages))
+        o.put("deep", f.deep)
         return o
     }
 
@@ -779,6 +855,9 @@ object TrackInfo {
         return Facts(
             text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"),
             strings("intro"), strings("circle"), strings("related"), strings("relatedIds"), o.optString("artistId").ifBlank { null },
+            coverUrl = o.optString("coverUrl").ifBlank { null },
+            pages = o.optJSONObject("pages")?.let { p -> p.keys().asSequence().associateWith { p.optString(it) } }.orEmpty(),
+            deep = o.optBoolean("deep"),
         )
     }
 
@@ -877,8 +956,11 @@ object TrackInfo {
     private const val MIN_SCORE = 90
     private const val MAX_CACHED = 300
 
-    /** The cached facts' shape: a new one when the facts gain a field (now: the artist's Wikidata item). */
-    private const val FACTS_PREFIX = "facts6-"
+    /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
+    private const val FACTS_PREFIX = "facts7-"
+
+    /** With nothing quick found, how long MusicBrainz is waited for (a few requests, one a second). */
+    private const val DEEP_WAIT_MS = 5_000L
 
     /** Notes about the artist before the artists around them come in. */
     private const val CIRCLE_AFTER = 3

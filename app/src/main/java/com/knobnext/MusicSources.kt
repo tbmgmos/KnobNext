@@ -14,7 +14,9 @@ import java.util.Locale
  * hold up the rest):
  *  - TheAudioDB: artist biographies (often in Russian too), album and track descriptions;
  *  - Deezer: the album's label, release date and length, the artist's fans and albums;
- *  - MusicBrainz: where the artist is from, when a band was formed, genres.
+ *  - MusicBrainz: where the artist is from, when a band was formed, genres (more of it, slower, in [Brainz]);
+ *  - Last.fm (with the app's key): biographies and descriptions written by listeners, often of artists
+ *    Wikipedia has no article on, how many listen to them, and whom listeners pair them with.
  * Descriptions come as they are (in their language); numbers and dates become sentences in the story's
  * language, ready to be said even without a model.
  */
@@ -25,6 +27,22 @@ object MusicSources {
         val artist: List<TrackInfo.Text>,
         val albumName: String?,
         val year: String?,
+        /** Last.fm's texts: for when Wikipedia has no article (they are often copied from it). */
+        val lastFm: LastFm? = null,
+        /** When and where the artist began, by MusicBrainz: an introduction when nothing else has one. */
+        val basics: List<String> = emptyList(),
+    )
+
+    class LastFm(
+        val artist: TrackInfo.Text?,
+        val song: TrackInfo.Text?,
+        val album: TrackInfo.Text?,
+        /** How many listen, in the story's language: always new, so not held back like the texts. */
+        val artistNumbers: List<String>,
+        val songNumbers: List<String>,
+        /** Whom listeners pair the artist with: a sentence, and the names. */
+        val similar: String?,
+        val similarNames: List<String>,
     )
 
     suspend fun gather(context: Context, title: String, artist: String?, album: String?, lang: String): Found = coroutineScope {
@@ -34,6 +52,7 @@ object MusicSources {
         val audioDbTrack = async { runCatching { audioDbTrack(artist, title, lang) }.getOrNull() }
         val deezer = async { runCatching { deezer(res, artist, title, lang) }.getOrNull() }
         val brainz = async { runCatching { brainzArtist(res, artist, lang) }.getOrNull() }
+        val lastFm = async { runCatching { lastFm(res, artist, title, album, lang) }.getOrNull() }
         val d = deezer.await()
         // The album's description needs its name: the player's, else the one Deezer found.
         val albumName = album ?: d?.albumName
@@ -41,9 +60,11 @@ object MusicSources {
         Found(
             song = listOfNotNull(audioDbTrack.await()),
             album = listOfNotNull(audioDbAlbum, d?.album),
-            artist = listOfNotNull(audioDbArtist.await(), d?.artist, brainz.await()),
+            artist = listOfNotNull(audioDbArtist.await(), d?.artist, brainz.await()?.let { TrackInfo.Text(it, lang) }),
             albumName = albumName,
             year = d?.year,
+            lastFm = lastFm.await(),
+            basics = brainz.await().orEmpty(),
         )
     }
 
@@ -131,7 +152,7 @@ object MusicSources {
 
     // ---- MusicBrainz ----
 
-    private fun brainzArtist(res: Context, artist: String, lang: String): TrackInfo.Text? {
+    private fun brainzArtist(res: Context, artist: String, lang: String): List<String>? {
         val q = "artist:\"${artist.replace("\"", "")}\""
         val a = TrackInfo.getJson("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}")
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
@@ -148,12 +169,60 @@ object MusicSources {
                 .sortedByDescending { it.optInt("count") }.map { it.optString("name") }.filter { it.isNotBlank() }.take(3)
             if (names.isNotEmpty()) facts += res.getString(R.string.src_genres, names.joinToString(", "))
         }
-        return facts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
+        return facts.takeIf { it.isNotEmpty() }
+    }
+
+    // ---- Last.fm ----
+
+    private fun lastFm(res: Context, artist: String, title: String, album: String?, lang: String): LastFm? {
+        val key = BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() } ?: return null
+        fun call(method: String, params: String) =
+            TrackInfo.getJson("$LASTFM?method=$method&api_key=$key&format=json&autocorrect=1&lang=$lang$params")
+        val a = call("artist.getinfo", "&artist=${enc(artist)}")?.optJSONObject("artist") ?: return null
+        if (!sameName(a.optString("name"), artist)) return null
+        val t = call("track.getinfo", "&artist=${enc(artist)}&track=${enc(Speech.cleanTitle(title))}")?.optJSONObject("track")
+        val al = album?.let { call("album.getinfo", "&artist=${enc(artist)}&album=${enc(Speech.cleanTitle(it))}")?.optJSONObject("album") }
+
+        val artistNumbers = ArrayList<String>()
+        a.optJSONObject("stats")?.optString("listeners")?.toIntOrNull()?.takeIf { it >= MIN_LISTENERS }
+            ?.let { artistNumbers += res.getString(R.string.src_lastfm_listeners, number(it, lang)) }
+        val songNumbers = ArrayList<String>()
+        t?.optString("listeners")?.toIntOrNull()?.takeIf { it >= MIN_LISTENERS }
+            ?.let { songNumbers += res.getString(R.string.src_lastfm_song_listeners, number(it, lang)) }
+        val similar = a.optJSONObject("similar")?.optJSONArray("artist")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("name")?.takeIf { n -> n.isNotBlank() } }
+        }.orEmpty().take(MAX_SIMILAR)
+        return LastFm(
+            artist = written(a.optJSONObject("bio")?.optString("content")),
+            song = written(t?.optJSONObject("wiki")?.optString("content")),
+            album = written(al?.optJSONObject("wiki")?.optString("content")),
+            artistNumbers = artistNumbers,
+            songNumbers = songNumbers,
+            similar = similar.takeIf { it.isNotEmpty() }?.let { res.getString(R.string.src_lastfm_similar, it.joinToString(", ")) },
+            similarNames = similar,
+        )
+    }
+
+    /**
+     * A text written by Last.fm's listeners, without the link and licence line it ends with, marked with
+     * the language it turned out to be in (Last.fm gives English when it has nothing in the one asked).
+     */
+    private fun written(content: String?): TrackInfo.Text? {
+        val text = content?.substringBefore("<a ")?.replace(Regex("<[^>]+>"), " ")?.replace("&quot;", "\"")?.replace("&amp;", "&")
+            ?.trim()?.takeIf { it.length >= MIN_TEXT_CHARS } ?: return null
+        val letters = text.filter { it.isLetter() }
+        val cyrillic = letters.count { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
+        val textLang = if (cyrillic * 10 >= letters.length * 6) "ru" else "en"
+        return TrackInfo.splitFacts(text).takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, textLang) }
     }
 
     // ---- Helpers ----
 
     private const val MIN_SCORE = 90
+    private const val LASTFM = "https://ws.audioscrobbler.com/2.0/"
+    private const val MIN_LISTENERS = 1_000
+    private const val MAX_SIMILAR = 4
+    private const val MIN_TEXT_CHARS = 60
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 

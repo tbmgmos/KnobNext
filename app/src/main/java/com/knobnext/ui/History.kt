@@ -44,7 +44,10 @@ import com.knobnext.TrackInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import android.graphics.Bitmap
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.DateFormat
 import java.util.Date
 
@@ -78,6 +81,7 @@ fun HistoryList(version: Int, onOpen: (String) -> Unit) {
             Hint(stringResource(R.string.acq_unknown_list_hint))
             ArtistRows(context, unknown, version, onOpen) { summary(context, it) }
         }
+        Hint(stringResource(R.string.acq_sources))
         TextButton(
             onClick = {
                 // Everyone is a stranger again: the next story about anyone starts with an introduction.
@@ -163,16 +167,39 @@ fun ArtistCard(key: String, version: Int, onOpen: (String) -> Unit, onGone: () -
             NoteGroups(context, e, version)
         }
         if (e.links.isNotEmpty()) Links(context, e.links, version, onOpen)
+        if (e.pages.isNotEmpty()) Pages(context, e.pages)
         OwnNote(context, e)
         TextButton(
             onClick = {
-                TrackInfo.forgetArtist(context, e.name)
+                TrackInfo.forgetArtist(context, e.name, e.id)
                 Journal.forget(context, key)
                 onGone()
             },
         ) { Text(stringResource(R.string.acq_restart)) }
+        Hint(stringResource(R.string.acq_sources))
     }
 }
+
+/** The artist's own pages, from MusicBrainz: where to hear more of a small artist. */
+@Composable
+private fun Pages(context: Context, pages: Map<String, String>) {
+    val shown = PAGE_KINDS.mapNotNull { (kind, label) -> pages[kind]?.let { label to it } }
+    if (shown.isEmpty()) return
+    SectionTitle(stringResource(R.string.acq_pages))
+    Group(shown.size) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            shown.forEachIndexed { i, (label, url) ->
+                ListRow(shape(i), stringResource(label), subtitle = Uri.parse(url).host, onClick = { open(context, url) })
+            }
+        }
+    }
+}
+
+private val PAGE_KINDS = listOf(
+    "site" to R.string.acq_page_site,
+    "bandcamp" to R.string.acq_page_bandcamp,
+    "soundcloud" to R.string.acq_page_soundcloud,
+)
 
 @Composable
 private fun NoteGroups(context: Context, e: Journal.Entry, version: Int) {
@@ -292,6 +319,7 @@ private fun Cover(context: Context, key: String, album: String?, version: Int, s
         value = withContext(Dispatchers.IO) {
             val file: File? = if (album == null) Journal.latestCover(context, key) else Journal.cover(context, key, album)
             file?.let { runCatching { BitmapFactory.decodeFile(it.path)?.asImageBitmap() }.getOrNull() }
+                ?: fetchCover(context, key, album)?.asImageBitmap()
         }
     }
     val bitmap = image
@@ -308,6 +336,37 @@ private fun Cover(context: Context, key: String, album: String?, version: Int, s
     }
 }
 
+/**
+ * The player had no cover: the one MusicBrainz knows (Cover Art Archive), fetched once and kept like
+ * the player's. [album] null: the album heard last, or any.
+ */
+private fun fetchCover(context: Context, key: String, album: String?): Bitmap? {
+    // Once per run: a saved cover redraws every card, and a failed one would be fetched again each time.
+    if (!coverTried.add(key + "\u0000" + album)) return null
+    val entry = Journal.entry(context, key) ?: return null
+    val (which, url) = if (album != null) {
+        album to (entry.coverUrls[Journal.albumKey(album)] ?: return null)
+    } else {
+        val last = entry.coverUrls[Journal.albumKey(entry.lastAlbum)]
+        if (last != null) entry.lastAlbum to last else entry.coverUrls.entries.firstOrNull()?.let { it.key.ifEmpty { null } to it.value } ?: return null
+    }
+    val bitmap = runCatching {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = COVER_TIMEOUT_MS
+            conn.readTimeout = COVER_TIMEOUT_MS
+            conn.setRequestProperty("User-Agent", "KnobNext (https://github.com/tbmgmos/KnobNext)")
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) null else conn.inputStream.use { BitmapFactory.decodeStream(it) }
+        } finally {
+            conn.disconnect()
+        }
+    }.getOrNull() ?: return null
+    Journal.saveCoverOf(context, key, which, bitmap)
+    return bitmap
+}
+
+private val coverTried: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+
 private const val TOP_ARTISTS = 3
 private const val RECHECK_AT_ONCE = 3
 private const val LIST_COVER_DP = 40
@@ -315,3 +374,4 @@ private const val CARD_COVER_DP = 96
 private const val ALBUM_COVER_DP = 32
 private const val SAVE_DELAY_MS = 600L
 private const val MAX_OWN_CHARS = 500
+private const val COVER_TIMEOUT_MS = 6_000

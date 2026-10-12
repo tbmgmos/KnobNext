@@ -44,6 +44,12 @@ class StoryLiveTest {
                 }
             }
         }
+        // MusicBrainz, deeper: what joins the facts in the background after the first telling.
+        println("\n===== MusicBrainz (Last.fm: ${if (BuildConfig.LASTFM_KEY.isBlank()) "нет ключа" else "есть ключ"})")
+        for (track in tracks) {
+            val found = Brainz.gather(context, "ru", track.title, track.artist!!, track.album, said = "")
+            println("${track.artist}: песня ${found?.song?.facts} | исполнитель ${found?.artist?.facts} | основы ${found?.basics} | круг ${found?.circle} | обложка ${found?.coverUrl} | страницы ${found?.pages}")
+        }
         // The artists around each one, as the circle would tell them.
         println("\n===== Круг")
         for (track in tracks) {
