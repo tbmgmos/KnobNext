@@ -161,10 +161,7 @@
     <string name="acq_missing">Этого исполнителя уже нет в истории.</string>
     <string name="acq_unknown_title">Пока неизвестны</string>
     <string name="acq_unknown_list_hint">О них ничего не нашлось. Раз в неделю, когда открыта «История», KnobNext ищет снова.</string>
-    <string name="acq_found_now">Появились сведения — попросите рассказать</string>
-    <string name="acq_tell_more">Рассказать ещё</string>
-    <string name="acq_look_again">Поискать снова</string>
-    <string name="acq_stop">Остановить</string>
+    <string name="acq_found_now">Появились сведения — расскажу, когда зазвучат</string>
     <string name="acq_about_artist">Об исполнителе</string>
     <string name="acq_album">Альбом «%1$s»</string>
     <string name="acq_other_songs">Другие песни</string>

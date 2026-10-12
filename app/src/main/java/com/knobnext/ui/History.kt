@@ -14,22 +14,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,13 +39,10 @@ import androidx.compose.ui.unit.dp
 import com.knobnext.Journal
 import com.knobnext.Prefs
 import com.knobnext.R
-import com.knobnext.Speaker
 import com.knobnext.Speech
 import com.knobnext.TrackInfo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
@@ -85,7 +78,13 @@ fun HistoryList(version: Int, onOpen: (String) -> Unit) {
             Hint(stringResource(R.string.acq_unknown_list_hint))
             ArtistRows(context, unknown, version, onOpen) { summary(context, it) }
         }
-        TextButton(onClick = { Journal.clear(context) }) { Text(stringResource(R.string.acq_clear)) }
+        TextButton(
+            onClick = {
+                // Everyone is a stranger again: the next story about anyone starts with an introduction.
+                TrackInfo.forgetEveryone(context)
+                Journal.clear(context)
+            },
+        ) { Text(stringResource(R.string.acq_clear)) }
     }
 }
 
@@ -135,14 +134,13 @@ private suspend fun recheckUnknown(context: Context) {
 }
 
 /**
- * One artist: their cover, "tell more", the person's own note, and what was told, grouped: about the
+ * One artist: their cover, the person's own note, and what was told, grouped: about the
  * artist (the introduction and their story), then by album. Nothing known yet: where it can be added.
  */
 @Composable
 fun ArtistCard(key: String, version: Int, onOpen: (String) -> Unit, onGone: () -> Unit) {
     val context = LocalContext.current
     val e = remember(version, key) { Journal.entry(context, key) }
-    val teller = rememberTeller()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (e == null) {
             Hint(stringResource(R.string.acq_missing))
@@ -156,24 +154,6 @@ fun ArtistCard(key: String, version: Int, onOpen: (String) -> Unit, onGone: () -
                 e.via?.let {
                     Text(stringResource(R.string.acq_via, it), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 }
-            }
-        }
-        e.lastTrack?.let { title ->
-            val nothingYet = e.unknown && !e.foundNow
-            FilledTonalButton(
-                onClick = { teller.toggle(context, TrackInfo.Track(title, e.name, e.lastAlbum, null)) },
-                shapes = ButtonDefaults.shapes(),
-                modifier = Modifier.padding(horizontal = 16.dp),
-            ) {
-                Text(
-                    stringResource(
-                        when {
-                            teller.busy -> R.string.acq_stop
-                            nothingYet -> R.string.acq_look_again
-                            else -> R.string.acq_tell_more
-                        },
-                    ),
-                )
             }
         }
         if (e.notes.isEmpty()) {
@@ -326,37 +306,6 @@ private fun Cover(context: Context, key: String, album: String?, version: Int, s
             MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, size,
         )
     }
-}
-
-/** "Tell more" from the screen: the same story a gesture tells, said here; the button stops it too. */
-private class Teller(private val speaker: Speaker, private val scope: kotlinx.coroutines.CoroutineScope) {
-    var busy by mutableStateOf(false)
-    private var job: Job? = null
-
-    fun toggle(context: Context, track: TrackInfo.Track) {
-        if (busy) {
-            job?.cancel()
-            speaker.stop()
-            busy = false
-            return
-        }
-        val prefs = Prefs(context)
-        val lang = prefs.infoLanguage.resolve()
-        busy = true
-        job = scope.launch {
-            val told = TrackInfo.story(context, track, prefs.infoLength, lang, prefs.infoSource, aboutArtist = true) {}
-            speaker.say(told ?: context.getString(R.string.speak_info_none), { busy = false })
-        }
-    }
-}
-
-@Composable
-private fun rememberTeller(): Teller {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val speaker = remember { Speaker(context, Prefs(context)) }
-    DisposableEffect(Unit) { onDispose { speaker.stop(); speaker.release() } }
-    return remember { Teller(speaker, scope) }
 }
 
 private const val TOP_ARTISTS = 3

@@ -48,12 +48,6 @@ class StoryLiveTest {
             val facts = TrackInfo.facts(context, track, "ru")
             println("${track.artist}: ${facts?.circle?.joinToString(" | ") ?: "(ничего)"}  → ${facts?.related}")
         }
-        // "Tell more" from the history: the artist's story first.
-        println("\n===== Рассказать ещё: Кино")
-        repeat(2) { i ->
-            val story = TrackInfo.story(context, tracks[1], InfoLength.NORMAL, "ru", InfoSource.WIKI, aboutArtist = true) { println("   · $it") }
-            println("#${i + 1}: ${story ?: "(ничего)"}")
-        }
         // History off: nothing is remembered, so every story starts with the introduction again.
         Prefs(context).infoHistory = false
         println("\n===== История выключена: Nirvana дважды")
