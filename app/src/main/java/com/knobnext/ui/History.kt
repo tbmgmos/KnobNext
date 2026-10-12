@@ -139,7 +139,7 @@ private suspend fun recheckUnknown(context: Context) {
  * artist (the introduction and their story), then by album. Nothing known yet: where it can be added.
  */
 @Composable
-fun ArtistCard(key: String, version: Int, onGone: () -> Unit) {
+fun ArtistCard(key: String, version: Int, onOpen: (String) -> Unit, onGone: () -> Unit) {
     val context = LocalContext.current
     val e = remember(version, key) { Journal.entry(context, key) }
     val teller = rememberTeller()
@@ -153,6 +153,9 @@ fun ArtistCard(key: String, version: Int, onGone: () -> Unit) {
             Column(Modifier.padding(start = 16.dp).weight(1f)) {
                 Text(e.name, style = MaterialTheme.typography.headlineSmall)
                 Text(summary(context, e), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                e.via?.let {
+                    Text(stringResource(R.string.acq_via, it), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         e.lastTrack?.let { title ->
@@ -179,6 +182,7 @@ fun ArtistCard(key: String, version: Int, onGone: () -> Unit) {
         } else {
             NoteGroups(context, e, version)
         }
+        if (e.links.isNotEmpty()) Links(context, e.links, version, onOpen)
         OwnNote(context, e)
         TextButton(
             onClick = {
@@ -192,12 +196,18 @@ fun ArtistCard(key: String, version: Int, onGone: () -> Unit) {
 
 @Composable
 private fun NoteGroups(context: Context, e: Journal.Entry, version: Int) {
-    // About the artist: the introduction and their story. The rest by album, songs without one last.
-    val (artist, music) = e.notes.partition { it.topic == Journal.Topic.INTRO || it.topic == Journal.Topic.ARTIST }
+    // About the artist: the introduction and their story; the artists around them; the rest by album,
+    // songs without one last.
+    val (circle, notes) = e.notes.partition { it.topic == Journal.Topic.CIRCLE }
+    val (artist, music) = notes.partition { it.topic == Journal.Topic.INTRO || it.topic == Journal.Topic.ARTIST }
     val albums = music.groupBy { it.album?.let(Speech::cleanTitle) }
     if (artist.isNotEmpty()) {
         SectionTitle(stringResource(R.string.acq_about_artist))
         Notes(artist, showTrack = false)
+    }
+    if (circle.isNotEmpty()) {
+        SectionTitle(stringResource(R.string.acq_circle))
+        Notes(circle, showTrack = false)
     }
     albums.entries.sortedBy { it.key == null }.forEach { (album, notes) ->
         if (album == null) {
@@ -228,6 +238,26 @@ private fun Notes(notes: List<Journal.Note>, showTrack: Boolean) {
                     else -> null
                 }
                 ListRow(shape(i), n.text, subtitle = listOfNotNull(label, day(n.at)).joinToString(" · "))
+            }
+        }
+    }
+}
+
+/** The artists around this one: the ones already in the history open their card. */
+@Composable
+private fun Links(context: Context, links: List<String>, version: Int, onOpen: (String) -> Unit) {
+    val known = remember(version) { Journal.entries(context).map { it.key }.toSet() }
+    SectionTitle(stringResource(R.string.acq_links))
+    Group(links.size) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            links.forEachIndexed { i, name ->
+                val key = Journal.key(name)
+                val inHistory = key in known
+                ListRow(
+                    shape(i), name,
+                    subtitle = stringResource(if (inHistory) R.string.acq_link_known else R.string.acq_link_new),
+                    onClick = if (inHistory) ({ onOpen(key) }) else null,
+                )
             }
         }
     }

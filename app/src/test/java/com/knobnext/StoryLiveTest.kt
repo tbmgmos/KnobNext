@@ -42,6 +42,12 @@ class StoryLiveTest {
                 }
             }
         }
+        // The artists around each one, as the circle would tell them.
+        println("\n===== Круг")
+        for (track in tracks) {
+            val facts = TrackInfo.facts(context, track, "ru")
+            println("${track.artist}: ${facts?.circle?.joinToString(" | ") ?: "(ничего)"}  → ${facts?.related}")
+        }
         // "Tell more" from the history: the artist's story first.
         println("\n===== Рассказать ещё: Кино")
         repeat(2) { i ->
@@ -59,12 +65,13 @@ class StoryLiveTest {
         println("\n===== Знакомства")
         Journal.entries(context).forEach { e ->
             println("${e.name}: заметок ${e.notes.size}, спрашивали ${e.asked}, рассказано ${e.progress}%, неизвестен=${e.unknown}, последний трек ${e.lastTrack} / ${e.lastAlbum}")
+            e.via?.let { println("   через $it") }
             e.notes.forEach { n -> println("   [${n.topic ?: "-"}] ${n.album ?: "-"} · ${n.track}: ${n.text.take(80)}") }
         }
         assertTrue("Nothing was told about any artist: the sources could not be reached", told > 0)
     }
 
     private companion object {
-        const val TELLINGS = 5
+        const val TELLINGS = 7
     }
 }

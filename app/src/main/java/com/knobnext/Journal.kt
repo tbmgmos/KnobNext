@@ -15,7 +15,7 @@ import java.util.Locale
  */
 object Journal {
     /** What a note was about. */
-    enum class Topic { INTRO, SONG, ALBUM, ARTIST }
+    enum class Topic { INTRO, SONG, ALBUM, ARTIST, CIRCLE }
 
     /** [topic] null: a note from before topics were kept, or a model's free story. */
     class Note(val at: Long, val track: String, val album: String?, val text: String, val topic: Topic?) {
@@ -43,6 +43,10 @@ object Journal {
         val lastAlbum: String?,
         /** The person's own note: never said aloud, never leaves the phone. */
         val own: String,
+        /** The artists around them that stories named (members' other bands, influences). */
+        val links: List<String>,
+        /** The artist whose story named this one before the listener asked about them. */
+        val via: String?,
     )
 
     fun key(artist: String) = artist.trim().lowercase(Locale.ROOT)
@@ -62,12 +66,23 @@ object Journal {
         topic: Topic?,
         progress: Int?,
         found: Boolean = text != null,
+        /** The artists around them the facts name. */
+        related: List<String> = emptyList(),
     ) {
         val root = read(context)
         val artists = root.optJSONObject("artists") ?: JSONObject().also { root.put("artists", it) }
         val k = key(artist)
         val now = System.currentTimeMillis()
-        val e = artists.optJSONObject(k) ?: JSONObject().put("name", artist).put("first", now).also { artists.put(k, it) }
+        val e = artists.optJSONObject(k) ?: JSONObject().put("name", artist).put("first", now).also { fresh ->
+            // Met through someone already in the history: a story about them named this artist first.
+            artists.keys().asSequence().firstOrNull { other -> links(artists.getJSONObject(other)).any { key(it) == k } }
+                ?.let { fresh.put("via", artists.getJSONObject(it).optString("name")) }
+            artists.put(k, fresh)
+        }
+        if (related.isNotEmpty()) {
+            val all = (links(e) + related).distinctBy { key(it) }.filter { key(it) != k }.take(MAX_LINKS)
+            e.put("links", JSONArray(all))
+        }
         e.put("last", now)
         e.put("asked", e.optInt("asked") + 1)
         e.put("lastTitle", title)
@@ -219,8 +234,13 @@ object Journal {
             lastTrack = o.optString("lastTitle").takeIf { it.isNotEmpty() } ?: notes.lastOrNull()?.track,
             lastAlbum = o.optString("lastAlbum").takeIf { it.isNotEmpty() } ?: notes.lastOrNull()?.album,
             own = o.optString("own"),
+            links = links(o),
+            via = o.optString("via").takeIf { it.isNotEmpty() },
         )
     }
+
+    private fun links(o: JSONObject): List<String> =
+        o.optJSONArray("links")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
 
     private fun file(context: Context) = File(File(context.filesDir, "trackinfo").apply { mkdirs() }, "journal.json")
 
@@ -237,6 +257,7 @@ object Journal {
 
     private const val MAX_NOTES = 50
     private const val MAX_ARTISTS = 500
+    private const val MAX_LINKS = 30
     private const val COVER_PX = 256
     private const val COVER_QUALITY = 85
     private const val PREFIX_CHARS = 12

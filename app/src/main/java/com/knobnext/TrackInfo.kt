@@ -67,6 +67,10 @@ object TrackInfo {
         val albumText: List<Text>,
         /** Who the artist is, in the story's language: the article's opening definition, or Wikidata's basics. */
         val intro: List<String> = emptyList(),
+        /** The artists around this one (members' other bands, influences), a sentence each. */
+        val circle: List<String> = emptyList(),
+        /** Their names, for the history. */
+        val related: List<String> = emptyList(),
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
     }
@@ -122,6 +126,7 @@ object TrackInfo {
         val wasUnknown = remember && track.artist != null && Journal.entry(context, Journal.key(track.artist))?.unknown == true
         var progress: Int? = null
         var album: String? = track.album
+        var related: List<String> = emptyList()
         // What the story ends up being about, for the history.
         var told: Plan? = null
         // How long each way took goes to the log: the story is meant to follow the title without a pause.
@@ -135,12 +140,16 @@ object TrackInfo {
                         Topic.SONG -> Journal.Topic.SONG
                         Topic.ALBUM -> Journal.Topic.ALBUM
                         Topic.ARTIST -> Journal.Topic.ARTIST
+                        Topic.CIRCLE -> Journal.Topic.CIRCLE
                         null -> null
                     }
                 }
                 // A reminder, or "that is all I know", is nothing new for the history.
                 val news = found.takeUnless { told?.repeat == true || told?.exhausted == true }
-                Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic, progress, found = true)
+                Journal.record(
+                    context, track.artist, track.title, Speech.cleanTitle(track.title), album, news, topic, progress,
+                    found = true, related = related,
+                )
             }
             if (!wasUnknown) return found
             return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + found
@@ -166,6 +175,7 @@ object TrackInfo {
         }
         progress = artistProgress(context, track, facts, lang)
         album = facts.album
+        related = facts.related
         val keep = { plan: Plan -> told = plan }
         if (way != InfoSource.WIKI) {
             // Gemini already said no (or can't run from the background): only the downloaded model is left.
@@ -242,6 +252,7 @@ object TrackInfo {
                 Topic.SONG -> appendLine("About the song: " + plan.facts.joinToString(" "))
                 Topic.ALBUM -> appendLine("About the album: " + plan.facts.joinToString(" "))
                 Topic.ARTIST -> appendLine("From the artist's story: " + plan.facts.joinToString(" "))
+                Topic.CIRCLE -> appendLine("The artists around them: " + plan.facts.joinToString(" "))
                 null -> Unit
             }
             appendLine(shape(length, facts.album, lang, firstMeet && plan.intro.isNotEmpty(), plan.topic))
@@ -283,6 +294,7 @@ object TrackInfo {
                 Topic.ALBUM -> facts.album?.let { res.getString(R.string.info_note_album, quote(Speech.cleanTitle(it), lang), body) }
                     ?: res.getString(R.string.info_note_album_unnamed, body)
                 Topic.ARTIST -> res.getString(R.string.info_note_artist, body)
+                Topic.CIRCLE -> res.getString(R.string.info_note_circle, body)
                 null -> body
             }
         }
@@ -306,7 +318,7 @@ object TrackInfo {
     private fun quote(name: String, lang: String) = if (lang == "ru") "«$name»" else "\"$name\""
 
     /** What one telling is about. */
-    private enum class Topic { SONG, ALBUM, ARTIST }
+    private enum class Topic { SONG, ALBUM, ARTIST, CIRCLE }
 
     /**
      * The introduction (the first time only) and one subject's next facts. [repeat]: all was told, these
@@ -339,11 +351,17 @@ object TrackInfo {
         val rotation = Rotation(context)
         val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
         fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
+        val artist = artistFacts(facts, lang)
+        val artistKey = "artist:${track.artist}"
+        // The artists around this one come in once the listener knows them a little, or their story is told.
+        val widen = artist.size - rotation.left(artistKey, artist.size) >= CIRCLE_AFTER || rotation.left(artistKey, artist.size) == 0
         val topics = listOf(
             Triple(Topic.SONG, "song:${track.title}", clean(merged(facts.song, lang))),
-            Triple(Topic.ALBUM, "album:${facts.album}", clean(merged(facts.albumText, lang))),
+            // An album's article often begins with how the band came to be: that belongs to the artist's story.
+            Triple(Topic.ALBUM, "album:${facts.album}", clean(merged(facts.albumText, lang)).filterNot { BAND_STORY.containsMatchIn(it) }),
             // The artist's story in its own order: the articles tell it from the beginning.
-            Triple(Topic.ARTIST, "artist:${track.artist}", artistFacts(facts, lang)),
+            Triple(Topic.ARTIST, artistKey, artist),
+            Triple(Topic.CIRCLE, "circle:${track.artist}", if (widen) facts.circle else emptyList()),
         )
         val sentences = when {
             perFact > 0 -> perFact
@@ -356,8 +374,11 @@ object TrackInfo {
         // Subjects with untold facts take turns for the same track: the song first, then the album, then
         // the artist's story; each new track begins with its song again.
         val fresh = any.filter { (_, key, list) -> rotation.left(key, list.size) > 0 }
-        fresh.firstOrNull { aboutArtist && it.first == Topic.ARTIST }?.let { artist ->
-            return Plan(intro, Topic.ARTIST, rotation.next(artist.second, artist.third, sentences))
+        // "Tell more": the artist's story first, then the artists around them.
+        if (aboutArtist) {
+            fresh.firstOrNull { it.first == Topic.ARTIST || it.first == Topic.CIRCLE }?.let { (topic, key, list) ->
+                return Plan(intro, topic, rotation.next(key, list, sentences))
+            }
         }
         if (fresh.isNotEmpty()) {
             val turn = fresh[rotation.bump("turn:${track.artist}/${track.title}") % fresh.size]
@@ -445,6 +466,11 @@ object TrackInfo {
             topic == Topic.SONG -> known + if (ru) "Одна короткая заметка о самой песне." else "One short note about the song itself."
             topic == Topic.ALBUM -> known + if (ru) "Одна короткая заметка об альбоме$albumName." else "One short note about the album$albumName."
             topic == Topic.ARTIST -> known + if (ru) "Одна короткая заметка: следующий эпизод из истории исполнителя." else "One short note: the next part of the artist's story."
+            topic == Topic.CIRCLE -> known + if (ru) {
+                "Одна короткая заметка о том, с кем связан исполнитель: другие группы участников или кто на него повлиял."
+            } else {
+                "One short note on whom the artist is connected with: the members' other bands, or their influences."
+            }
             else -> known + if (ru) {
                 "Одна короткая заметка на одну тему: о самой песне, если есть что сказать; иначе об альбоме$albumName; иначе новый эпизод из истории исполнителя."
             } else {
@@ -469,7 +495,7 @@ object TrackInfo {
 
     /** Everything found about the track, fetched all at once and kept on the phone. */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
-        val file = File(dir(context), "facts4-" + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
+        val file = File(dir(context), FACTS_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { return readFacts(JSONObject(file.readText())) }
         }
@@ -514,6 +540,8 @@ object TrackInfo {
                         year = track.year ?: b?.second ?: m?.year,
                         albumText = listOfNotNull(albumText.await()?.text, d?.album) + m?.album.orEmpty(),
                         intro = intro(context, artist, artistText, d?.artistIntro.orEmpty(), lang),
+                        circle = d?.circle.orEmpty(),
+                        related = d?.related.orEmpty(),
                     )
                 }
             }
@@ -538,10 +566,24 @@ object TrackInfo {
         } else {
             Regex("""\b(is|was|are|were)\b""").containsMatchIn(lead.take(MAX_INTRO_NAME + 20))
         }
-        if (defines) return listOf(lead!!)
+        if (defines) return listOf(namedAsKnown(lead!!, artist, lang))
         // Wikidata's basics say nothing of whom they are about: the name goes first.
         if (basics.isEmpty() || artist == null) return emptyList()
         return listOf(localized(context, lang).getString(R.string.info_intro_basics, artist)) + basics
+    }
+
+    /**
+     * The definition under the name the listener knows: an article that opens with another one ("Grebz —
+     * украинский коллектив…" for «Грибы») would leave them wondering who that is.
+     */
+    private fun namedAsKnown(lead: String, artist: String?, lang: String): String {
+        if (artist == null || lang != "ru") return lead
+        val dash = lead.indexOf(" — ").takeIf { it in 1..MAX_INTRO_NAME } ?: return lead
+        val subject = lead.substring(0, dash).trim().trimEnd(',')
+        val known = normalize(artist)
+        val said = normalize(subject)
+        if (known.isEmpty() || said.contains(known) || known.contains(said)) return lead
+        return "$artist, или $subject, — " + lead.substring(dash + 3)
     }
 
     /**
@@ -715,6 +757,8 @@ object TrackInfo {
         f.album?.let { o.put("album", it) }
         f.year?.let { o.put("year", it) }
         o.put("intro", JSONArray(f.intro))
+        o.put("circle", JSONArray(f.circle))
+        o.put("related", JSONArray(f.related))
         return o
     }
 
@@ -727,8 +771,11 @@ object TrackInfo {
                 Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"))
             }
         }
-        val intro = o.optJSONArray("intro")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
-        return Facts(text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"), intro)
+        fun strings(name: String) = o.optJSONArray(name)?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
+        return Facts(
+            text("song"), text("artist"), o.optString("album").ifBlank { null }, o.optString("year").ifBlank { null }, text("albumText"),
+            strings("intro"), strings("circle"), strings("related"),
+        )
     }
 
     // ---- Helpers ----
@@ -751,9 +798,10 @@ object TrackInfo {
 
     private fun dir(context: Context) = File(context.filesDir, "trackinfo").apply { mkdirs() }
 
+    /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {
-        dir(context).listFiles { f -> f.name.startsWith("facts-") }?.forEach { it.delete() }
-        val files = dir(context).listFiles { f -> f.name.startsWith("facts2-") } ?: return
+        dir(context).listFiles { f -> f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) }?.forEach { it.delete() }
+        val files = dir(context).listFiles { f -> f.name.startsWith(FACTS_PREFIX) } ?: return
         if (files.size <= MAX_CACHED) return
         files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
     }
@@ -824,4 +872,16 @@ object TrackInfo {
     private const val MIN_ANSWER_CHARS = 20
     private const val MIN_SCORE = 90
     private const val MAX_CACHED = 300
+
+    /** The cached facts' shape: a new one when the facts gain a field (now: the artists around). */
+    private const val FACTS_PREFIX = "facts5-"
+
+    /** Notes about the artist before the artists around them come in. */
+    private const val CIRCLE_AFTER = 3
+
+    /** How the start of a band reads in an album's article. */
+    private val BAND_STORY = Regex(
+        "(образовал(ась|ись|ся)?|основан[аы]?|сформирова(л|н)\w*|собрал(ась|ись)) .{0,40}\b(19|20)\d\d|\b(formed|founded) in\b",
+        RegexOption.IGNORE_CASE,
+    )
 }

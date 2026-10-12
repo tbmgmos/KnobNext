@@ -19,8 +19,19 @@ import java.util.TimeZone
  * who is in it, when and where an artist was born, genres.
  */
 object Wikidata {
-    /** [artistIntro]: who the artist is in a few sentences (when and where they began, genres). */
-    class Found(val song: TrackInfo.Text?, val album: TrackInfo.Text?, val artist: TrackInfo.Text?, val artistIntro: List<String> = emptyList())
+    /**
+     * [artistIntro]: who the artist is in a few sentences (when and where they began, genres). [circle]:
+     * the artists around them (the other bands of their members, their influences), a sentence each;
+     * [related]: those artists' names.
+     */
+    class Found(
+        val song: TrackInfo.Text?,
+        val album: TrackInfo.Text?,
+        val artist: TrackInfo.Text?,
+        val artistIntro: List<String> = emptyList(),
+        val circle: List<String> = emptyList(),
+        val related: List<String> = emptyList(),
+    )
 
     /** A Wikipedia article: its language and title. */
     class Page(val lang: String, val title: String)
@@ -50,21 +61,61 @@ object Wikidata {
         if (late()) return none
         val items = ids.filterNotNull().takeIf { it.isNotEmpty() }?.let(::claims).orEmpty()
         if (items.isEmpty() || late()) return none
+        // The band's members, for the other bands they play in.
+        val members = ids[2]?.let { items[it] }?.let { itemValues(it, "P527").take(MAX_MEMBERS_LOOKED) }.orEmpty()
+        val memberClaims = members.takeIf { it.isNotEmpty() && !late() }?.let(::claims).orEmpty()
         // Everything the facts point to (a genre, a label, a city) needs its name: all in one request.
-        val wanted = items.values.flatMap { claims -> PROPERTIES.flatMap { p -> itemValues(claims, p) } }.distinct()
-        val names = labels(wanted.take(MAX_IDS), lang)
+        val wanted = (
+            items.values.flatMap { claims -> PROPERTIES.flatMap { p -> itemValues(claims, p) } } +
+                memberClaims.values.flatMap { itemValues(it, "P463") }
+            ).distinct()
+        val names = labels(wanted, lang)
         val res = TrackInfo.localized(context, lang)
         val known = said.lowercase(Locale.ROOT)
         fun facts(id: String?, build: Facts.() -> Unit): Facts? =
             id?.let { items[it] }?.let { Facts(res, it, names, lang, known, albumKnown).apply(build) }
         fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
         val artistFacts = facts(ids[2]) { artist() }
+        val circle = ids[2]?.let { id -> items[id]?.let { Circle(res, id, it, memberClaims, names) } }
         return Found(
             song = facts(ids[0]) { song() }.text(),
             album = facts(ids[1]) { album() }.text(),
             artist = artistFacts.text(),
             artistIntro = artistFacts?.let { it.out.take(it.introEnd) }.orEmpty(),
+            circle = circle?.out.orEmpty(),
+            related = circle?.related.orEmpty(),
         )
+    }
+
+    /**
+     * The artists around one: the other bands each member plays in ("Dave Grohl has also been in Foo
+     * Fighters, Scream."), and who influenced them. Unlike the artist's own facts these are said even
+     * when the article mentions them: it is the connection that is the news.
+     */
+    private class Circle(
+        res: Context,
+        id: String,
+        claims: JSONObject,
+        members: Map<String, JSONObject>,
+        names: Map<String, String>,
+    ) {
+        val out = ArrayList<String>()
+        val related = ArrayList<String>()
+
+        init {
+            for ((member, c) in members) {
+                val name = names[member] ?: continue
+                val bands = itemValues(c, "P463").filter { it != id }.mapNotNull { names[it] }.distinct().take(MAX_NAMES)
+                if (bands.isEmpty()) continue
+                out += res.getString(R.string.src_wd_circle_bands, name, bands.joinToString(", "))
+                related += bands
+            }
+            val influences = itemValues(claims, "P737").mapNotNull { names[it] }.take(MAX_NAMES)
+            if (influences.isNotEmpty()) {
+                out += res.getString(R.string.src_wd_circle_influences, influences.joinToString(", "))
+                related += influences
+            }
+        }
     }
 
     /** One item's claims turned into sentences. */
@@ -157,7 +208,7 @@ object Wikidata {
     /** Names in [lang], else in English; a name only in some other script is no use to say. */
     private fun labels(ids: List<String>, lang: String): Map<String, String> {
         val out = HashMap<String, String>()
-        ids.chunked(MAX_IDS).take(1).forEach { chunk ->
+        ids.chunked(MAX_IDS).take(MAX_LABEL_REQUESTS).forEach { chunk ->
             val url = "$API?action=wbgetentities&props=labels&format=json&languages=" + URLEncoder.encode("$lang|en", "UTF-8") +
                 "&ids=" + URLEncoder.encode(chunk.joinToString("|"), "UTF-8")
             val entities = TrackInfo.getJson(url)?.optJSONObject("entities") ?: return@forEach
@@ -220,9 +271,15 @@ object Wikidata {
     private const val MAX_MEMBERS = 5
     private const val MAX_IDS = 50
 
+    /** A big band with many awards points to more than one request's worth of names. */
+    private const val MAX_LABEL_REQUESTS = 2
+
+    /** Members whose other bands are looked up: one request for all of them. */
+    private const val MAX_MEMBERS_LOOKED = 8
+
     /** The properties whose values are items that need a name. */
     private val PROPERTIES = listOf(
         "P86", "P676", "P162", "P361", "P166", "P483", "P264", "P155", "P156",
-        "P19", "P463", "P740", "P527", "P136",
+        "P19", "P463", "P740", "P527", "P136", "P737",
     )
 }

@@ -270,7 +270,7 @@ fun KnobScreen(
                     Page.MOTION -> motionPage(ctx)
                     Page.HEADSET -> headsetPage(ctx, learn ?: HeadsetLearnState())
                     Page.ACQUAINT -> acquaintPage(ctx)
-                    Page.ARTIST -> artistKey?.let { key -> item { ArtistCard(key, ctx.s.journalVersion) { ctx.open(Page.ACQUAINT) } } } ?: acquaintPage(ctx)
+                    Page.ARTIST -> artistKey?.let { key -> item { ArtistCard(key, ctx.s.journalVersion, ctx.openArtist) { ctx.open(Page.ACQUAINT) } } } ?: acquaintPage(ctx)
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)

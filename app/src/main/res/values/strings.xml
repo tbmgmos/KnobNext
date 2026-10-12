@@ -138,6 +138,8 @@
     <string name="src_wd_born_f">Родилась %1$s.</string>
     <string name="src_wd_member_of">Участник групп: %1$s.</string>
     <string name="src_wd_members">В составе группы: %1$s.</string>
+    <string name="src_wd_circle_bands">%1$s — участник и других групп: %2$s.</string>
+    <string name="src_wd_circle_influences">Среди тех, кто повлиял на это творчество, — %1$s.</string>
     <string name="acq_title">История</string>
     <string name="acq_artist_title">Исполнитель</string>
     <string name="acq_tile">Исполнителей: %1$d</string>
@@ -170,6 +172,11 @@
     <string name="acq_add_musicbrainz_hint">Открытая музыкальная база: исполнитель, альбомы, участники. Добавить может любой, и сам музыкант тоже</string>
     <string name="acq_add_wikidata">Добавить в Wikidata</string>
     <string name="acq_add_wikidata_hint">Отсюда сведения берут Википедия и многие приложения, KnobNext в том числе</string>
+    <string name="acq_circle">Круг исполнителя</string>
+    <string name="acq_via">Знакомство через %1$s</string>
+    <string name="acq_links">Связанные исполнители</string>
+    <string name="acq_link_known">Есть в истории</string>
+    <string name="acq_link_new">Ещё не встречались</string>
     <string name="acq_own">Своя заметка</string>
     <string name="acq_own_placeholder">Например: концерт в 2024-м, посоветовал друг</string>
     <string name="acq_own_hint">Только для вас: не озвучивается и не покидает телефон</string>
@@ -177,6 +184,7 @@
     <string name="info_note_album">Об альбоме %1$s: %2$s</string>
     <string name="info_note_album_unnamed">Об альбоме: %1$s</string>
     <string name="info_note_artist">Из истории исполнителя: %1$s</string>
+    <string name="info_note_circle">Расширим круг: %1$s</string>
     <string name="info_all_told">Про %1$s я рассказал всё, что знаю.</string>
     <string name="info_remind">Напомню: %1$s</string>
     <string name="info_intro_basics">Знакомьтесь — %1$s.</string>
