@@ -96,10 +96,6 @@
     <string name="gesture_tap_hold_up">Нажать и удерживать «+»</string>
     <string name="gesture_tap_hold_down">Нажать и удерживать «−»</string>
     <string name="gesture_back_tap_2">Два постукивания</string>
-    <string name="gesture_pixel_tap">Быстрое касание Pixel</string>
-    <string name="quick_tap_short">Жест</string>
-    <string name="quick_tap_long">KnobNext: выполнить жест</string>
-    <string name="pixel_tap_hint">Двойное касание по задней панели распознаёт сам Pixel: его датчик точнее и почти не тратит батарею. Назначьте действие выше, затем откройте Настройки → Система → Жесты → Быстрое касание, включите его, в списке действий выберите «Открыть приложение», нажмите на шестерёнку и выберите KnobNext → «Жест». Если ярлыков у KnobNext в списке нет, выберите само приложение: тогда окно KnobNext откроется, а действие не выполнится. Этот способ работает независимо от постукивания по датчику ниже; если включены оба, двойное касание сработает в обоих, поэтому у датчика оставьте только три постукивания.</string>
     <string name="gesture_back_tap_3">Три постукивания</string>
     <string name="gesture_long_hold_up">Удерживать «+» долго</string>
     <string name="gesture_long_hold_down">Удерживать «−» долго</string>
@@ -319,7 +315,7 @@
     <string name="sensitivity_low">Слабая</string>
     <string name="sensitivity_medium">Средняя</string>
     <string name="sensitivity_high">Сильная</string>
-    <string name="back_tap_hint">Стучите пальцем по задней панели рядом с камерами. Если на Pixel включено «Быстрое касание» с жестом KnobNext (см. выше), двойное постукивание здесь сработает и там: оставьте для датчика только три постукивания.</string>
+    <string name="back_tap_hint">Стучите пальцем по задней панели рядом с камерами. Если на Pixel включено «Быстрое касание» (Настройки → Система → Жесты), отключите его, иначе двойное постукивание сработает и там.</string>
     <string name="section_motion">Движения</string>
     <string name="section_headset">Наушники и колонки</string>
     <string name="tile_headset_on">Кнопки наушников — свои действия</string>

@@ -468,7 +468,6 @@ fun gestureLabel(g: Gesture) = when (g) {
     Gesture.DOUBLE_DOWN -> R.string.gesture_double_down
     Gesture.BACK_TAP_2 -> R.string.gesture_back_tap_2
     Gesture.BACK_TAP_3 -> R.string.gesture_back_tap_3
-    Gesture.PIXEL_TAP -> R.string.gesture_pixel_tap
     Gesture.HS_PLAY_PAUSE -> R.string.gesture_hs_play_pause
     Gesture.HS_NEXT -> R.string.gesture_hs_next
     Gesture.HS_PREVIOUS -> R.string.gesture_hs_previous

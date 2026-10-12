@@ -191,7 +191,6 @@ fun gestureShape(g: Gesture): RoundedPolygon = when (g) {
     Gesture.DOWN_UP -> MaterialShapes.Bun
     Gesture.BACK_TAP_2 -> MaterialShapes.Puffy
     Gesture.BACK_TAP_3 -> MaterialShapes.Flower
-    Gesture.PIXEL_TAP -> MaterialShapes.Cookie12Sided
     Gesture.TWIST -> MaterialShapes.Burst
     Gesture.WAVE -> MaterialShapes.Ghostish
     Gesture.HS_PLAY_PAUSE -> MaterialShapes.Circle
