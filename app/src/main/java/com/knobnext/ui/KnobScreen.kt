@@ -1611,6 +1611,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                                 com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini_hint
                                 com.knobnext.InfoSource.COMBINED -> R.string.info_source_combined_hint
                                 com.knobnext.InfoSource.WIKI -> R.string.info_source_wiki_hint
+                                com.knobnext.InfoSource.CLOUD -> if (s.cloudReady) R.string.info_source_cloud_hint else R.string.info_source_cloud_nokey
                             },
                         ),
                     ) {
@@ -1619,6 +1620,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                                 com.knobnext.InfoSource.GEMINI to R.string.info_source_gemini,
                                 com.knobnext.InfoSource.COMBINED to R.string.info_source_combined,
                                 com.knobnext.InfoSource.WIKI to R.string.info_source_wiki,
+                                com.knobnext.InfoSource.CLOUD to R.string.info_source_cloud,
                             ),
                             selected = s.infoSource,
                             onSelect = { prefs.infoSource = it },
@@ -1697,6 +1699,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.bubble_remote_hint))
+            CloudKeys(s, prefs)
             SourceKeys(prefs)
         }
     }

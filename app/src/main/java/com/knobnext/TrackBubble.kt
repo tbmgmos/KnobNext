@@ -85,6 +85,11 @@ class TrackBubble(
     private var params: WindowManager.LayoutParams? = null
     private var noteView: TextView? = null
     private var statusView: TextView? = null
+    private var sourcesView: TextView? = null
+    private var askJob: Job? = null
+
+    /** The cloud model's answers this time, by card and question: asked again, shown at once. */
+    private val answers = HashMap<String, CloudBrain.Answer>()
     private var chipsRow: LinearLayout? = null
     private var circleBox: View? = null
     private var readButton: ImageView? = null
@@ -193,7 +198,10 @@ class TrackBubble(
     /** The note to show in the card (null: nothing was found). */
     fun setNote(text: String?) {
         note = text ?: service.getString(R.string.speak_info_none)
-        if (path.isEmpty()) noteView?.text = note
+        if (path.isEmpty()) {
+            noteView?.text = note
+            showSources(if (text != null) TrackInfo.lastSources else emptyList())
+        }
         keepOpen()
     }
 
@@ -295,12 +303,13 @@ class TrackBubble(
         if (sub.isNotEmpty()) names.addView(text(sub, 13f, MUTED, lines = 2))
         news?.let { names.addView(text(service.getString(newsLabel(it)), 12f, palette.accent, bold = true)) }
         noteSection(box)
+        askSection(box, TRACK_QUESTIONS)
         circleSection(box)
         recordSection(box)
         statusSection(box)
 
         val tools = row(Gravity.START)
-        readButton = tool(R.drawable.ic_bubble_read, R.string.bubble_read) { readAloud(note) }.also { tools.addView(it) }
+        readButton = tool(R.drawable.ic_bubble_read, R.string.bubble_read) { readAloud(noteView?.text?.toString()) }.also { tools.addView(it) }
         tools.addView(tool(R.drawable.ic_bubble_like, R.string.bubble_like) { like() })
         tools.addView(tool(R.drawable.ic_bubble_later, R.string.bubble_later) { t.artist?.let { later(it, t.title, null) } })
         tools.addView(
@@ -458,6 +467,7 @@ class TrackBubble(
             box.addView(text(why, 13f, palette.accent, lines = 3).apply { setPadding(0, dp(10), 0, 0); setTypeface(typeface, Typeface.ITALIC) })
         }
         noteSection(box)
+        askSection(box, ARTIST_QUESTIONS)
         circleSection(box)
         statusSection(box)
 
@@ -897,6 +907,88 @@ class TrackBubble(
         }
         noteView = n
         box.addView(n)
+        val src = text("", 11f, MUTED, lines = 2).apply {
+            visibility = View.GONE
+            setPadding(0, dp(4), 0, 0)
+        }
+        sourcesView = src
+        box.addView(src)
+    }
+
+    /** Where the cloud model found what it said: their names; a tap opens the first. */
+    private fun showSources(sources: List<CloudBrain.Source>) {
+        val v = sourcesView ?: return
+        if (sources.isEmpty()) {
+            v.visibility = View.GONE
+            return
+        }
+        v.text = service.getString(R.string.bubble_sources, sources.take(MAX_SOURCES).joinToString(", ") { it.title })
+        v.visibility = View.VISIBLE
+        v.setOnClickListener { launch(Intent(Intent.ACTION_VIEW, Uri.parse(sources.first().url))) }
+    }
+
+    /** Questions to the cloud model, when it has a key: the answer takes the note's place. */
+    private fun askSection(box: LinearLayout, questions: List<Pair<TrackInfo.Question, Int>>) {
+        if (CloudBrain.configured(prefs) == null) return
+        val section = LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        section.addView(text(service.getString(R.string.bubble_ask), 12f, palette.accent, bold = true))
+        val row = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(6), 0, 0) }
+        questions.forEach { (q, label) ->
+            row.addView(
+                text(service.getString(label), 13f, TEXT).apply {
+                    background = rounded(palette.chip, 16)
+                    setPadding(dp(12), dp(7), dp(12), dp(7))
+                    setOnClickListener { ask(q) }
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        marginEnd = dp(8)
+                    }
+                },
+            )
+        }
+        section.addView(HorizontalScrollView(service).apply { isHorizontalScrollBarEnabled = false; addView(row) })
+        box.addView(section)
+    }
+
+    /** [q] about the track, or about the artist whose card is open. */
+    private fun ask(q: TrackInfo.Question) {
+        val t = track ?: return
+        val artist = path.lastOrNull()
+        val key = "${artist ?: "${t.artist}\u0000${t.title}"}\u0000${q.name}"
+        val cached = answers[key]
+        if (cached != null) return showAnswer(q, cached, artist)
+        askJob?.cancel()
+        noteView?.setText(R.string.bubble_asking)
+        noteView?.maxLines = MAX_ANSWER_LINES
+        showSources(emptyList())
+        keepOpen()
+        askJob = scope.launch {
+            val facts = if (artist != null) artists[artist] else trackFacts
+            val a = runCatching { TrackInfo.ask(service, t.takeIf { artist == null }, artist, q, prefs.infoLanguage.resolve(), facts) }.getOrNull()
+            if (a == null) {
+                noteView?.text = service.getString(R.string.bubble_ask_failed, CloudBrain.lastError ?: "-")
+                log(service.getString(R.string.log_bubble_ask_failed, CloudBrain.lastError ?: "-"))
+                return@launch
+            }
+            answers[key] = a
+            if (path.lastOrNull() == artist) showAnswer(q, a, artist)
+        }
+    }
+
+    private fun showAnswer(q: TrackInfo.Question, a: CloudBrain.Answer, artist: String?) {
+        noteView?.maxLines = MAX_ANSWER_LINES
+        noteView?.text = a.text
+        showSources(a.sources)
+        // "What next": the names it gave join the circle, to open and play like any other.
+        if (q == TrackInfo.Question.NEXT) {
+            val names = a.text.lines().mapNotNull { line ->
+                line.split(" — ", " – ", " - ").firstOrNull()?.trim()?.trim('«', '»', '"', '*')?.takeIf { it.length in 2..MAX_NAME_CHARS }
+            }
+            if (names.isNotEmpty()) showCircle(names, artist ?: track?.artist)
+        }
+        keepOpen()
     }
 
     /** "About the recording", filled once MusicBrainz has answered. */
@@ -1119,6 +1211,23 @@ class TrackBubble(
         const val EDGE_DP = 8
         const val MAX_NOTE_LINES = 9
         const val MAX_CHIPS = 8
+        const val MAX_SOURCES = 3
+        const val MAX_ANSWER_LINES = 16
+        const val MAX_NAME_CHARS = 40
+
+        val TRACK_QUESTIONS = listOf(
+            TrackInfo.Question.SONG to R.string.ask_song,
+            TrackInfo.Question.MAKING to R.string.ask_making,
+            TrackInfo.Question.NEXT to R.string.ask_next,
+            TrackInfo.Question.START to R.string.ask_start,
+            TrackInfo.Question.ROOTS to R.string.ask_roots,
+        )
+        val ARTIST_QUESTIONS = listOf(
+            TrackInfo.Question.WHO to R.string.ask_who,
+            TrackInfo.Question.START to R.string.ask_start,
+            TrackInfo.Question.NEXT to R.string.ask_next,
+            TrackInfo.Question.ROOTS to R.string.ask_roots,
+        )
         const val DEFAULT_Y = 0.3
 
         /** The open card's height at most, of the screen's: more scrolls. */

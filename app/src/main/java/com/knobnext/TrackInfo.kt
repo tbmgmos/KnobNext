@@ -35,6 +35,9 @@ enum class InfoSource {
 
     /** The Wikipedia facts as they are, no model. */
     WIKI,
+
+    /** A large model in the cloud with the person's key (Gemini looks things up in Google), the facts as its footing. */
+    CLOUD,
 }
 
 /** How the story reaches the person: spoken, shown in the round card on screen (no sound), or both. */
@@ -197,6 +200,20 @@ object TrackInfo {
         }
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
+        lastSources = emptyList()
+        if (source == InfoSource.CLOUD) {
+            // The facts are its footing when they come quickly; the rest it looks up itself.
+            val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() }
+            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet)
+            if (answer != null) {
+                found = quick
+                album = quick?.album ?: album
+                lastSources = answer.sources
+                val service = Prefs(context).cloudService.title
+                return@coroutineScope ready(answer.text, if (answer.sources.isEmpty()) service else "$service + поиск")
+            }
+            note(context.getString(R.string.log_info_cloud_failed, CloudBrain.lastError ?: "-"))
+        }
         if (source == InfoSource.GEMINI) {
             fromGemini(track, length, lang, history.told(), firstMeet)?.let {
                 factsAhead.cancel()
@@ -225,6 +242,91 @@ object TrackInfo {
             note(context.getString(R.string.log_info_plain))
         }
         plainStory(context, track, facts, length, lang, firstMeet, keep) { bare = it }?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
+    }
+
+    // ---- A large model in the cloud ----
+
+    /** Where the last story from the cloud was found (Gemini's search): the card names them. */
+    @Volatile var lastSources: List<CloudBrain.Source> = emptyList()
+
+    private suspend fun fromCloud(
+        context: Context,
+        track: Track,
+        facts: Facts?,
+        length: InfoLength,
+        lang: String,
+        told: List<String>,
+        firstMeet: Boolean,
+    ): CloudBrain.Answer? {
+        val prefs = Prefs(context)
+        val prompt = buildString {
+            appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year)
+            footing(facts, lang)
+            appendLine(shape(length, facts?.album ?: track.album, lang, firstMeet, topic = null))
+            appendTold(told, lang)
+        }
+        val answer = withContext(Dispatchers.IO) {
+            CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS)
+        } ?: return null
+        val text = clean(answer.text, length, lang) ?: return null
+        return CloudBrain.Answer(text, answer.sources)
+    }
+
+    /** What the round card can ask the cloud model about the track or an artist down the circle. */
+    enum class Question { SONG, MAKING, START, ROOTS, NEXT, WHO }
+
+    /**
+     * [question] about [track] (or, with [artist], about that artist alone) to the cloud model, with what
+     * the open sources found as its footing. Null when there is no key or it could not answer.
+     */
+    suspend fun ask(context: Context, track: Track?, artist: String?, question: Question, lang: String, facts: Facts?): CloudBrain.Answer? {
+        val ru = lang == "ru"
+        val who = artist ?: track?.artist?.let(Speech::cleanArtist) ?: return null
+        val prompt = buildString {
+            if (artist == null && track != null) appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year) else appendLine("Artist: $who")
+            footing(facts, lang)
+            appendLine(
+                when (question) {
+                    Question.SONG -> if (ru) "О чём эта песня и как её понимают? Без цитат из текста." else "What is this song about, and how is it read? No quotes from the lyrics."
+                    Question.MAKING -> if (ru) "Как создавалась и записывалась эта песня: кто, где, что необычного." else "How was this song written and recorded: who, where, what was unusual."
+                    Question.START -> if (ru) "С чего начать знакомство с $who: два-три альбома или песни и почему именно они." else "Where to start with $who: two or three albums or songs and why those."
+                    Question.ROOTS -> if (ru) "Откуда этот звук: на кого опирался $who, из какой сцены вышел." else "Where does this sound come from: whom did $who build on, what scene did they come from."
+                    Question.NEXT -> if (ru) {
+                        "Посоветуй трёх исполнителей, которых стоит послушать после $who, — не самых очевидных. Каждого с новой строки: «Имя — чем связан и почему понравится»."
+                    } else {
+                        "Suggest three artists to hear after $who — not the obvious ones. Each on its own line: \"Name — how they are connected and why\"."
+                    }
+                    Question.WHO -> if (ru) "Кто такой $who: коротко — откуда, когда, что играет и чем известен." else "Who is $who: briefly — where from, when, what they play, what they are known for."
+                },
+            )
+            appendLine(if (ru) "До пяти коротких предложений." else "Five short sentences at most.")
+        }
+        val answer = withContext(Dispatchers.IO) { CloudBrain.ask(Prefs(context), host(lang), prompt) } ?: return null
+        // A list of names keeps its lines; anything else reads as one note.
+        val text = if (question == Question.NEXT) answer.text.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.isNotBlank() }.joinToString("\n")
+        else speakable(answer.text.replace(Regex("[*#_`]"), "")).trim()
+        return CloudBrain.Answer(text, answer.sources)
+    }
+
+    /** Who the cloud model is to be, and what it must not do. */
+    private fun host(lang: String) = if (lang == "ru") {
+        "Ты музыкальный журналист и радиоведущий. Отвечай только на русском языке. Говори только проверенные факты: " +
+            "найди их в поиске, если можешь; если не уверен — не говори. Не противоречь фактам, которые тебе дали. " +
+            "Не цитируй тексты песен. Не повторяй в начале название и исполнителя — их уже назвали. Без списков, ссылок и разметки, если не попросили."
+    } else {
+        "You are a music journalist and radio host. Answer only in English. Say only verified facts: look them up if you can; " +
+            "if unsure, leave it out. Do not contradict the facts you are given. Do not quote lyrics. Do not repeat the title and artist " +
+            "at the start — they were just said. No lists, links or markup unless asked."
+    }
+
+    /** What the open sources found, as the model's footing. */
+    private fun StringBuilder.footing(facts: Facts?, lang: String) {
+        facts ?: return
+        val known = (facts.intro + merged(facts.song) + merged(facts.albumText) + merged(facts.artist) + facts.circle)
+            .distinct().take(FOOTING_FACTS)
+        if (known.isEmpty()) return
+        appendLine(if (lang == "ru") "Что известно из открытых источников (опирайся на это):" else "What the open sources say (build on this):")
+        known.forEach { appendLine("- " + it.take(MAX_FACT_CHARS)) }
     }
 
     // ---- Gemini on its own ----
@@ -1108,6 +1210,15 @@ object TrackInfo {
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts8-"
+
+    /** How long the cloud model waits for the facts before it is asked without them. */
+    private const val CLOUD_FACTS_WAIT_MS = 4_000L
+
+    /** Facts given to the cloud model as its footing. */
+    private const val FOOTING_FACTS = 14
+
+    /** A thinking model spends tokens before it answers: more room than for the phone's model. */
+    private const val CLOUD_TOKENS_FACTOR = 4
 
     /** An artist's own facts, looked up from the round card's circle. */
     private const val ARTIST_PREFIX = "artist1-"

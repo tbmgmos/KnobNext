@@ -37,4 +37,5 @@ jobs:
         env:
           LIVE_STORIES: '1'
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew testGithubDebugUnitTest --no-daemon --tests com.knobnext.StoryLiveTest

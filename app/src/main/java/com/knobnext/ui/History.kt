@@ -485,6 +485,52 @@ fun SourceKeys(prefs: Prefs) {
     )
 }
 
+/**
+ * The cloud model: which service, its key (checked at once), and the model if not its usual one. Gemini
+ * is first: its key is free, and it looks things up in Google itself.
+ */
+@Composable
+fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
+    val context = LocalContext.current
+    val service = s.cloudService
+    SectionTitle(stringResource(R.string.cloud_title))
+    Hint(stringResource(R.string.cloud_hint))
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(com.knobnext.CloudService.entries.size) { i ->
+                val option = com.knobnext.CloudService.entries[i]
+                androidx.compose.material3.FilterChip(
+                    selected = option == service,
+                    onClick = { prefs.cloudService = option },
+                    label = { Text(option.title) },
+                )
+            }
+        }
+        Hint(stringResource(if (service.searches) R.string.cloud_searches else R.string.cloud_no_search))
+    }
+    androidx.compose.runtime.key(service) {
+        KeyField(
+            context, stringResource(R.string.cloud_key, service.title), prefs.cloudKey(service), { prefs.setCloudKey(service, it) },
+            getUrl = service.keyPage,
+            format = { null },
+            check = { com.knobnext.CloudBrain.check(service, it) },
+        )
+        var model by remember { mutableStateOf(prefs.cloudModel(service)) }
+        OutlinedTextField(
+            value = model,
+            onValueChange = {
+                model = it.trim()
+                prefs.setCloudModel(service, model)
+            },
+            label = { Text(stringResource(R.string.cloud_model)) },
+            placeholder = { Text(service.defaultModel) },
+            supportingText = { Text(stringResource(R.string.cloud_model_hint, service.defaultModel)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
 /** One more try, in a word or two: worked, refused (and what was said), or no answer. */
 @Composable
 private fun attempt(result: KeyCheck): String = when (result) {

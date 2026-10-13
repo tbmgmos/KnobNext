@@ -152,6 +152,9 @@ data class Settings(
     val bubbleSide: BubbleSide,
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
+    val cloudService: CloudService,
+    /** A key is set for the cloud model's service. */
+    val cloudReady: Boolean,
     val keysOnPause: Boolean,
     val infoHistory: Boolean,
     val journalVersion: Int,
@@ -310,6 +313,19 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putString("lastfm_key", v.trim()).apply()
 
     val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
+
+    /** The cloud model's service, and per service the person's key and the model (blank: its usual one). */
+    var cloudService: CloudService
+        get() = CloudService.entries.firstOrNull { it.name == sp.getString("cloud_service", null) } ?: CloudService.GEMINI
+        set(v) = sp.edit().putString("cloud_service", v.name).apply()
+
+    fun cloudKey(service: CloudService): String = sp.getString("cloud_key_" + service.name, null).orEmpty()
+
+    fun setCloudKey(service: CloudService, key: String) = sp.edit().putString("cloud_key_" + service.name, key.trim()).apply()
+
+    fun cloudModel(service: CloudService): String = sp.getString("cloud_model_" + service.name, null).orEmpty()
+
+    fun setCloudModel(service: CloudService, model: String) = sp.edit().putString("cloud_model_" + service.name, model.trim()).apply()
 
     /**
      * The artists the last "widening the circle" note named, for [Action.PLAY_CIRCLE]; [circlePick]
@@ -766,6 +782,8 @@ class Prefs(context: Context) {
         bubbleSide = bubbleSide,
         infoLanguage = infoLanguage,
         infoSource = infoSource,
+        cloudService = cloudService,
+        cloudReady = cloudKey(cloudService).isNotBlank(),
         keysOnPause = keysOnPause,
         infoHistory = infoHistory,
         journalVersion = journalVersion,

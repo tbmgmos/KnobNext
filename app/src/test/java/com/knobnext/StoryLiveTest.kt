@@ -102,6 +102,24 @@ class StoryLiveTest {
         assertTrue("Nothing was told about any artist: the sources could not be reached", told > 0)
     }
 
+    /** The cloud model, when the CI has a key for it (GEMINI_API_KEY): a story and a question. */
+    @Test
+    fun cloud() = runBlocking {
+        val key = System.getenv("GEMINI_API_KEY").orEmpty()
+        assumeTrue(System.getenv("LIVE_STORIES") == "1" && key.isNotBlank())
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = Prefs(context)
+        prefs.cloudService = CloudService.GEMINI
+        prefs.setCloudKey(CloudService.GEMINI, key)
+        println("\n===== Облако: ключ ${CloudBrain.check(CloudService.GEMINI, key).javaClass.simpleName}")
+        val track = TrackInfo.Track("The Man Who Sold the World", "Nirvana", "MTV Unplugged in New York", null)
+        val story = TrackInfo.story(context, track, InfoLength.NORMAL, "ru", InfoSource.CLOUD) { println("   · $it") }
+        println("рассказ: $story")
+        println("источники: ${TrackInfo.lastSources.joinToString { it.title }}")
+        val next = TrackInfo.ask(context, track, null, TrackInfo.Question.NEXT, "ru", null)
+        println("что дальше: ${next?.text ?: CloudBrain.lastError}")
+    }
+
     /** The round card's "about the recording": who plays, who produced, samples, covers. */
     @Test
     fun recordings() = runBlocking {
