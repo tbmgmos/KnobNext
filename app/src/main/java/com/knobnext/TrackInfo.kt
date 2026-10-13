@@ -336,7 +336,7 @@ object TrackInfo {
         val answer = withTimeoutOrNull(CLOUD_STORY_WAIT_MS) { asked.await() } ?: return null.also {
             if (asked.isActive) CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с"
         }
-        val checked = checked(answer, allowedYears(dates, track, facts)) ?: return null
+        val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
         val text = clean(checked.text, length, lang) ?: return null
         return CloudBrain.Answer(text, checked.sources)
     }
@@ -374,7 +374,7 @@ object TrackInfo {
             appendLine(if (ru) "До пяти коротких предложений." else "Five short sentences at most.")
         }
         val asked = withContext(Dispatchers.IO) { CloudBrain.ask(Prefs(context), host(lang), prompt) } ?: return null
-        val answer = checked(asked, allowedYears(dates, track.takeIf { artist == null }, facts)) ?: return null
+        val answer = checked(asked, allowedYears(dates, track.takeIf { artist == null }, facts), dates) ?: return null
         // A list of names keeps its lines; anything else reads as one note.
         val text = if (question == Question.NEXT) answer.text.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.isNotBlank() }.joinToString("\n")
         else speakable(answer.text.replace(Regex("[*#_`]"), "")).trim()
@@ -448,13 +448,19 @@ object TrackInfo {
      * The answer with every sentence that names a year not given to it taken out: a model's memory for
      * dates is what fails most. An answer found by a search (it names its sources) is let be.
      */
-    internal fun checked(answer: CloudBrain.Answer, allowed: Set<String>): CloudBrain.Answer? {
+    internal fun checked(answer: CloudBrain.Answer, allowed: Set<String>, dates: Brainz.Dates? = null): CloudBrain.Answer? {
         if (answer.sources.isNotEmpty()) return answer
+        // Each album the sentence names, with the year it came out: "Nevermind вышел в 1993" names 1993,
+        // a year of the band's (In Utero's), and still is wrong.
+        val albums = (dates?.albums.orEmpty() + listOfNotNull(dates?.album?.let { a -> dates.albumDate?.let { a to it.take(4) } }))
+            .map { (t, y) -> normalize(Speech.cleanTitle(t)) to y }.filter { it.first.length >= MIN_TITLE_CHARS }
         var dropped = 0
         val lines = answer.text.lines().map { line ->
             Regex("(?<=[.!?…])\\s+").split(line).filter { sentence ->
                 val years = YEAR.findAll(sentence).filterNot { decade(sentence, it) }.map { it.value }.toList()
-                val ok = years.all { it in allowed }
+                val said = normalize(sentence)
+                val named = albums.filter { (t, _) -> said.contains(t) }.map { it.second }.toSet()
+                val ok = years.all { it in allowed } && (named.isEmpty() || years.isEmpty() || years.any { it in named })
                 if (!ok) dropped++
                 ok
             }.joinToString(" ")
@@ -1381,6 +1387,9 @@ object TrackInfo {
     private const val STORY_DATES_WAIT_MS = 5_000L
     private const val ASK_DATES_WAIT_MS = 10_000L
     private const val MAX_REFERENCES = 40
+
+    /** An album title this short ("45", "9") is found inside other words: not looked for in sentences. */
+    private const val MIN_TITLE_CHARS = 4
     private const val DATES_PREFIX = "dates1-"
 
     /** How long the cloud model waits for the facts before it is asked without them. */

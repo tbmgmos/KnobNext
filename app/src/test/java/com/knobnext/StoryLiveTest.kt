@@ -121,8 +121,11 @@ class StoryLiveTest {
             println("начали ${d?.began}, закончили ${d?.ended}; альбом «${d?.album}» вышел ${d?.albumDate}")
             println("альбомы: ${d?.albums?.joinToString("; ") { "${it.first} (${it.second})" }}")
             val allowed = TrackInfo.allowedYears(d, track, facts)
-            val wrong = CloudBrain.Answer("Альбом вышел в 1993 году. Группа выступала и в 1990-х. Это одна из самых известных их песен.", emptyList())
-            println("проверка: «${wrong.text}» → «${TrackInfo.checked(wrong, allowed)?.text}» (убрано ${TrackInfo.lastDropped})")
+            val album = d?.album ?: track.album
+            val wrong = CloudBrain.Answer("Альбом $album вышел в 1993 году. Группа выступала и в 1990-х. Это одна из самых известных их песен.", emptyList())
+            println("проверка: «${wrong.text}» → «${TrackInfo.checked(wrong, allowed, d)?.text}» (убрано ${TrackInfo.lastDropped})")
+            val right = CloudBrain.Answer("Альбом $album вышел в ${d?.albumDate?.take(4)} году.", emptyList())
+            println("верная дата: «${right.text}» → «${TrackInfo.checked(right, allowed, d)?.text}»")
         }
     }
 
