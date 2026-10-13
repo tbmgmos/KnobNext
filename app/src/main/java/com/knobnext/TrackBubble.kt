@@ -11,6 +11,7 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -65,7 +66,7 @@ enum class BubbleNews { NEW_ARTIST, STORY }
  * screen, with a ring for how far the track has played. On the cover itself: a swipe changes the track, a
  * double tap pauses, a long press likes; a tap opens a card. The card: the track, a note about it (the
  * same the voice would tell), the artists of its circle. A name opens that artist's own card, with their
- * circle, and so on down the line (back with "←"); ▶ plays them in the player. An accessibility service
+ * circle, and so on down the line (back with "Back"); the play icon plays them in the player. An accessibility service
  * may draw such a window without any other permission.
  */
 class TrackBubble(
@@ -86,7 +87,8 @@ class TrackBubble(
     private var statusView: TextView? = null
     private var chipsRow: LinearLayout? = null
     private var circleBox: View? = null
-    private var readButton: TextView? = null
+    private var readButton: ImageView? = null
+    private var reading = false
     private var ring: View? = null
     private var badgeView: TextView? = null
     private var track: TrackInfo.Track? = null
@@ -258,6 +260,7 @@ class TrackBubble(
         noteJob?.cancel()
         circleJob?.cancel()
         r.removeAllViews()
+        reading = false
         r.addView(if (path.isEmpty()) trackCard(t, fetchNote) else artistCard(path.last()))
         keepOpen()
     }
@@ -281,15 +284,15 @@ class TrackBubble(
         statusSection(box)
 
         val tools = row(Gravity.START)
-        readButton = tool(GLYPH_READ, R.string.bubble_read) { readAloud(note) }.also { tools.addView(it) }
-        tools.addView(tool(GLYPH_LIKE, R.string.bubble_like) { like() })
-        tools.addView(tool(GLYPH_LATER, R.string.bubble_later) { t.artist?.let { later(it, t.title, null) } })
+        readButton = tool(R.drawable.ic_bubble_read, R.string.bubble_read) { readAloud(note) }.also { tools.addView(it) }
+        tools.addView(tool(R.drawable.ic_bubble_like, R.string.bubble_like) { like() })
+        tools.addView(tool(R.drawable.ic_bubble_later, R.string.bubble_later) { t.artist?.let { later(it, t.title, null) } })
         tools.addView(
-            tool(GLYPH_SHARE, R.string.bubble_share) {
+            tool(R.drawable.ic_bubble_share, R.string.bubble_share) {
                 share(listOfNotNull(listOfNotNull(t.artist?.let(Speech::cleanArtist), Speech.cleanTitle(t.title)).joinToString(" — "), note))
             },
         )
-        tools.addView(tool(GLYPH_MORE_INFO, R.string.bubble_wiki) { wiki(t.artist ?: t.title, trackFacts?.artistId) })
+        tools.addView(tool(R.drawable.ic_bubble_wiki, R.string.bubble_wiki) { wiki(t.artist ?: t.title, trackFacts?.artistId) })
         box.addView(tools)
 
         val buttons = row(Gravity.END)
@@ -350,15 +353,15 @@ class TrackBubble(
         statusSection(box)
 
         val tools = row(Gravity.START)
-        tools.addView(tool(GLYPH_PLAY + " " + service.getString(R.string.bubble_play), R.string.bubble_play, wide = true) { play(name) })
-        readButton = tool(GLYPH_READ, R.string.bubble_read) { readAloud(noteView?.text?.toString()) }.also { tools.addView(it) }
-        tools.addView(tool(GLYPH_LATER, R.string.bubble_later) { later(name, null, from) })
-        tools.addView(tool(GLYPH_SHARE, R.string.bubble_share) { share(listOfNotNull(name, reasons.lastOrNull(), noteView?.text?.toString())) })
-        tools.addView(tool(GLYPH_MORE_INFO, R.string.bubble_wiki) { wiki(name, artists[name]?.artistId) })
+        tools.addView(playButton { play(name) })
+        readButton = tool(R.drawable.ic_bubble_read, R.string.bubble_read) { readAloud(noteView?.text?.toString()) }.also { tools.addView(it) }
+        tools.addView(tool(R.drawable.ic_bubble_later, R.string.bubble_later) { later(name, null, from) })
+        tools.addView(tool(R.drawable.ic_bubble_share, R.string.bubble_share) { share(listOfNotNull(name, reasons.lastOrNull(), noteView?.text?.toString())) })
+        tools.addView(tool(R.drawable.ic_bubble_wiki, R.string.bubble_wiki) { wiki(name, artists[name]?.artistId) })
         box.addView(tools)
 
         val buttons = row(Gravity.END)
-        buttons.addView(button(service.getString(R.string.bubble_back)) { back() })
+        buttons.addView(button(service.getString(R.string.bubble_back), R.drawable.ic_bubble_back) { back() })
         buttons.addView(button(service.getString(R.string.bubble_more)) { turnPage() })
         buttons.addView(button(service.getString(R.string.bubble_close)) { dismiss() })
         box.addView(buttons)
@@ -464,11 +467,10 @@ class TrackBubble(
         }
     }
 
-    /** 🔊 reads the note aloud; the same button (■ then) stops it. */
+    /** The speaker reads the note aloud; the same button (a square then) stops it. */
     private fun readAloud(text: String?) {
-        val stopping = readButton?.text?.toString() == GLYPH_STOP
-        val reading = read(text?.takeIf { !stopping })
-        readButton?.text = if (reading) GLYPH_STOP else GLYPH_READ
+        reading = read(text?.takeIf { !reading })
+        readButton?.setImageDrawable(icon(if (reading) R.drawable.ic_bubble_stop else R.drawable.ic_bubble_read, TEXT, TOOL_ICON_DP))
         keepOpen()
     }
 
@@ -607,7 +609,7 @@ class TrackBubble(
                 override fun onLongPress(e: MotionEvent) {
                     v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     val outcome = act(Action.LIKE, controller)
-                    flashBadge(if (outcome.result == Outcome.Result.UNDONE) GLYPH_UNLIKED else GLYPH_LIKE)
+                    flashBadge(if (outcome.result == Outcome.Result.UNDONE) R.drawable.ic_bubble_unlike else R.drawable.ic_bubble_like)
                     keepOpen()
                 }
             },
@@ -662,12 +664,14 @@ class TrackBubble(
     private enum class Move { NONE, ALONG, ACROSS }
 
     /** A sign on the cover for a moment (a heart for a like), then its mark again. */
-    private fun flashBadge(sign: String) {
+    private fun flashBadge(sign: Int) {
         val b = badgeView ?: return
-        b.text = sign
+        b.text = null
+        b.setCompoundDrawablesRelative(icon(sign, palette.onAccent, BADGE_ICON_DP), null, null, null)
         b.visibility = View.VISIBLE
         handler.postDelayed({
             if (badgeView !== b) return@postDelayed
+            b.setCompoundDrawablesRelative(null, null, null, null)
             b.text = news?.let { service.getString(badgeLabel(it)) }
             b.visibility = if (news == null) View.GONE else View.VISIBLE
         }, FLASH_MS)
@@ -789,12 +793,20 @@ class TrackBubble(
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }
         } else {
-            TextView(service).apply {
-                text = letter?.trim()?.take(1)?.uppercase() ?: "♪"
-                setTextColor(TEXT)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-                typeface = Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
+            val initial = letter?.trim()?.take(1)?.uppercase()?.takeIf { it.isNotEmpty() }
+            if (initial == null) {
+                ImageView(service).apply {
+                    setImageDrawable(icon(R.drawable.ic_bubble_music, TEXT, sizeDp / 2))
+                    scaleType = ImageView.ScaleType.CENTER
+                }
+            } else {
+                TextView(service).apply {
+                    text = initial
+                    setTextColor(TEXT)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
             }
         }
         v.background = frame
@@ -804,7 +816,7 @@ class TrackBubble(
         return v
     }
 
-    /** An artist of the circle: the name opens their card, ▶ plays them. */
+    /** An artist of the circle: the name opens their card, the play icon plays them. */
     private fun chip(name: String) = LinearLayout(service).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -817,8 +829,10 @@ class TrackBubble(
         )
         addView(View(service).apply { setBackgroundColor(palette.card) }, LinearLayout.LayoutParams(dp(1), dp(18)))
         addView(
-            text(GLYPH_PLAY, 13f, palette.accent, bold = true).apply {
-                setPadding(dp(9), dp(7), dp(12), dp(7))
+            ImageView(service).apply {
+                setImageDrawable(icon(R.drawable.ic_bubble_play, palette.accent, CHIP_ICON_DP))
+                scaleType = ImageView.ScaleType.CENTER
+                setPadding(dp(8), dp(6), dp(10), dp(6))
                 contentDescription = service.getString(R.string.bubble_play_who, name)
                 setOnClickListener { play(name) }
             },
@@ -828,31 +842,51 @@ class TrackBubble(
         }
     }
 
-    private fun tool(glyph: String, label: Int, wide: Boolean = false, onClick: () -> Unit) = TextView(service).apply {
-        text = glyph
+    /** A button that is only an icon, named for TalkBack. */
+    private fun tool(res: Int, label: Int, onClick: () -> Unit) = ImageView(service).apply {
+        setImageDrawable(icon(res, TEXT, TOOL_ICON_DP))
+        scaleType = ImageView.ScaleType.CENTER
         contentDescription = service.getString(label)
-        setTextColor(if (wide) palette.onAccent else TEXT)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, if (wide) 13f else 17f)
-        if (wide) {
-            typeface = Typeface.DEFAULT_BOLD
-            background = rounded(palette.accent, 16)
-        }
-        gravity = Gravity.CENTER
-        setPadding(dp(if (wide) 12 else 9), dp(6), dp(if (wide) 12 else 9), dp(6))
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.chip) }
         setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            marginEnd = dp(4)
-        }
+        layoutParams = LinearLayout.LayoutParams(dp(TOOL_DP), dp(TOOL_DP)).apply { marginEnd = dp(8) }
     }
 
-    private fun button(label: String, onClick: () -> Unit) = TextView(service).apply {
+    /** "Play" on an artist's card: the one button with a word, it is what the card leads to. */
+    private fun playButton(onClick: () -> Unit) = TextView(service).apply {
+        text = service.getString(R.string.bubble_play)
+        setTextColor(palette.onAccent)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        typeface = Typeface.DEFAULT_BOLD
+        background = rounded(palette.accent, TOOL_DP / 2)
+        setCompoundDrawablesRelative(icon(R.drawable.ic_bubble_play, palette.onAccent, CHIP_ICON_DP), null, null, null)
+        compoundDrawablePadding = dp(4)
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(10), 0, dp(14), 0)
+        setOnClickListener { onClick() }
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(TOOL_DP)).apply { marginEnd = dp(8) }
+    }
+
+    private fun button(label: String, iconRes: Int? = null, onClick: () -> Unit) = TextView(service).apply {
         text = label
         setTextColor(palette.accent)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         typeface = Typeface.DEFAULT_BOLD
+        iconRes?.let {
+            setCompoundDrawablesRelative(icon(it, palette.accent, CHIP_ICON_DP), null, null, null)
+            compoundDrawablePadding = dp(4)
+        }
+        gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(12), dp(10), dp(12), dp(10))
         setOnClickListener { onClick() }
     }
+
+    /** One of the app's own icons, in [color], [sizeDp] square. */
+    private fun icon(res: Int, color: Int, sizeDp: Int): Drawable? =
+        service.getDrawable(res)?.mutate()?.apply {
+            setTint(color)
+            setBounds(0, 0, dp(sizeDp), dp(sizeDp))
+        }
 
     private fun text(value: String, sp: Float, color: Int, bold: Boolean = false, lines: Int = 1) = TextView(service).apply {
         text = value
@@ -950,14 +984,10 @@ class TrackBubble(
         const val MIN_SATURATION = 0.12f
         const val MAX_SATURATION = 0.55f
 
-        const val GLYPH_READ = "🔊"
-        const val GLYPH_STOP = "■"
-        const val GLYPH_LIKE = "♥"
-        const val GLYPH_UNLIKED = "♡"
-        const val GLYPH_LATER = "🔖"
-        const val GLYPH_SHARE = "↗"
-        const val GLYPH_MORE_INFO = "📖"
-        const val GLYPH_PLAY = "▶"
+        const val TOOL_DP = 36
+        const val TOOL_ICON_DP = 20
+        const val CHIP_ICON_DP = 16
+        const val BADGE_ICON_DP = 12
 
         // Dark in any theme: it sits above whatever app is open.
         const val TEXT = 0xFFEDEFE8.toInt()
