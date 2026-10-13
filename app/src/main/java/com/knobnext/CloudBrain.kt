@@ -39,8 +39,11 @@ object CloudBrain {
 
     class Source(val title: String, val url: String)
 
-    /** Why the last request gave nothing, for the log. */
+    /** Why the last request gave nothing, in a sentence the card can show. */
     @Volatile var lastError: String? = null
+
+    /** The service's own words for it, for the log. */
+    @Volatile var lastDetail: String? = null
 
     /** The service, key and model set in the settings, or null when there is no key. */
     fun configured(prefs: Prefs): Triple<CloudService, String, String>? {
@@ -53,9 +56,10 @@ object CloudBrain {
     fun ask(prefs: Prefs, system: String, prompt: String, maxTokens: Int = MAX_TOKENS): Answer? {
         val (service, key, model) = configured(prefs) ?: return null.also { lastError = "нет ключа" }
         return try {
-            if (service == CloudService.GEMINI) gemini(service, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
+            if (service == CloudService.GEMINI) gemini(prefs, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
         } catch (e: Exception) {
-            lastError = e.javaClass.simpleName + (e.message?.let { ": " + it.take(MAX_ERROR_CHARS) } ?: "")
+            lastError = e.javaClass.simpleName
+            lastDetail = e.message?.take(MAX_ERROR_CHARS)
             null
         }
     }
@@ -70,27 +74,98 @@ object CloudBrain {
         }
     }
 
-    private fun gemini(service: CloudService, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
+    // ---- Gemini ----
+
+    /**
+     * Gemini with its Google Search, and when the key's free quota does not cover that (a model or the
+     * search can have none at all): the same model without the search, then the key's other Flash
+     * models. What worked is kept, so the next question goes straight there.
+     */
+    private fun gemini(prefs: Prefs, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
+        val tries = LinkedHashSet<Pair<String, Boolean>>()
+        prefs.cloudWorking(CloudService.GEMINI)?.let { tries += it }
+        tries += model to true
+        tries += model to false
+        var reply: Reply? = null
+        fun attempt(m: String, search: Boolean): Answer? {
+            var r = geminiOnce(key, m, search, system, prompt, maxTokens)
+            // A per-minute limit says when to come back: a short wait is worth it.
+            if (r.code == HTTP_QUOTA && r.retryAfterS in 1..MAX_RETRY_WAIT_S) {
+                Thread.sleep(r.retryAfterS * 1000L)
+                r = geminiOnce(key, m, search, system, prompt, maxTokens)
+            }
+            reply = r
+            r.answer?.let { prefs.setCloudWorking(CloudService.GEMINI, m, search) }
+            return r.answer
+        }
+        for ((m, search) in tries) {
+            attempt(m, search)?.let { return it }
+            // A wrong key or no network: another model would not help.
+            if ((reply?.code ?: 0) !in RETRYABLE) return fail(reply, model)
+        }
+        for (m in flashModels(key).filter { it != model }.take(MAX_OTHER_MODELS)) {
+            for (search in listOf(true, false)) {
+                attempt(m, search)?.let { return it }
+                if ((reply?.code ?: 0) !in RETRYABLE) return fail(reply, model)
+            }
+        }
+        return fail(reply, model)
+    }
+
+    private fun geminiOnce(key: String, model: String, search: Boolean, system: String, prompt: String, maxTokens: Int): Reply {
         val body = JSONObject()
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-            // It looks the track up in Google itself, and says where it found what it tells.
-            .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
             .put("generationConfig", JSONObject().put("maxOutputTokens", maxTokens).put("temperature", TEMPERATURE))
-        val json = post("${service.base}/models/$model:generateContent", mapOf("x-goog-api-key" to key), body) ?: return null
-        val candidate = json.optJSONArray("candidates")?.optJSONObject(0) ?: return null.also { lastError = json.toString().take(MAX_ERROR_CHARS) }
+        // It looks the track up in Google itself, and says where it found what it tells.
+        if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+        val r = post("${CloudService.GEMINI.base}/models/$model:generateContent", mapOf("x-goog-api-key" to key), body)
+        val json = r.json ?: return r
+        val candidate = json.optJSONArray("candidates")?.optJSONObject(0) ?: return r.copy(said = json.toString().take(MAX_ERROR_CHARS))
         val parts = candidate.optJSONObject("content")?.optJSONArray("parts")
         val text = (0 until (parts?.length() ?: 0)).mapNotNull { parts!!.optJSONObject(it) }
             // A thinking model's thoughts are not the answer.
             .filter { !it.optBoolean("thought") }
             .joinToString("") { it.optString("text") }.trim()
-        if (text.isEmpty()) return null.also { lastError = "пустой ответ: " + candidate.optString("finishReason") }
+        if (text.isEmpty()) return r.copy(said = "пустой ответ: " + candidate.optString("finishReason"))
         val chunks = candidate.optJSONObject("groundingMetadata")?.optJSONArray("groundingChunks")
         val sources = (0 until (chunks?.length() ?: 0)).mapNotNull { chunks!!.optJSONObject(it)?.optJSONObject("web") }
             .mapNotNull { w -> w.optString("uri").takeIf { it.isNotBlank() }?.let { Source(w.optString("title").ifBlank { it }, it) } }
             .distinctBy { it.title }
-        return Answer(text, sources)
+        return r.copy(answer = Answer(text, sources))
     }
+
+    /** The key's Flash models that can answer, the stable ones first. */
+    private fun flashModels(key: String): List<String> {
+        val r = get("${CloudService.GEMINI.base}/models?pageSize=200", mapOf("x-goog-api-key" to key))
+        val list = r.json?.optJSONArray("models") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+            .filter { m ->
+                val methods = m.optJSONArray("supportedGenerationMethods")
+                (0 until (methods?.length() ?: 0)).any { methods!!.optString(it) == "generateContent" }
+            }
+            .map { it.optString("name").removePrefix("models/") }
+            .filter { n -> "flash" in n && UNFIT.none { it in n } }
+            .sortedWith(compareBy<String>({ "preview" in it || "exp" in it }, { "lite" in it }))
+    }
+
+    /** Why nothing came, said plainly: the card shows it, the log gets the service's own words. */
+    private fun fail(r: Reply?, model: String): Answer? {
+        val said = r?.said.orEmpty()
+        lastDetail = r?.let { "HTTP ${it.code}: ${said.take(MAX_ERROR_CHARS)}" }
+        lastError = when {
+            r == null -> "нет ответа"
+            r.code == 0 -> said.ifBlank { "нет связи" }
+            said.contains("location is not supported", ignoreCase = true) -> "Gemini недоступен из вашей страны — нужен VPN"
+            r.code == HTTP_QUOTA -> "у ключа закончился бесплатный лимит Gemini (или его нет для этих моделей). Попробуйте позже или включите оплату в Google AI Studio"
+            r.code == 401 || r.code == 403 || said.contains("API key", ignoreCase = true) -> "ключ не принят"
+            r.code == 404 -> "модель «$model» не найдена — укажите другую в настройках"
+            else -> "ошибка ${r.code}"
+        }
+        return null
+    }
+
+    // ---- OpenAI's format ----
 
     private fun chat(service: CloudService, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
         val body = JSONObject()
@@ -109,47 +184,63 @@ object CloudBrain {
             headers["HTTP-Referer"] = "https://github.com/tbmgmos/KnobNext"
             headers["X-Title"] = "KnobNext"
         }
-        val json = post("${service.base}/chat/completions", headers, body) ?: return null
-        val text = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim()
-            ?.takeIf { it.isNotEmpty() } ?: return null.also { lastError = json.toString().take(MAX_ERROR_CHARS) }
+        val r = post("${service.base}/chat/completions", headers, body)
+        val text = r.json?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: return fail(r, model).also {
+            if (r.code == HTTP_QUOTA) lastError = "у ключа ${service.title} закончился лимит или нет оплаты"
+        }
         return Answer(text, emptyList())
     }
 
-    private fun post(url: String, headers: Map<String, String>, body: JSONObject): JSONObject? {
+    // ---- Requests ----
+
+    /** What a request brought: the code (0: no answer at all), the JSON, the service's words, when to retry. */
+    private data class Reply(
+        val code: Int,
+        val json: JSONObject?,
+        val said: String = "",
+        val retryAfterS: Int = 0,
+        val answer: Answer? = null,
+    )
+
+    private fun post(url: String, headers: Map<String, String>, body: JSONObject): Reply = request(url, headers, body)
+
+    private fun get(url: String, headers: Map<String, String>): Reply = request(url, headers, null)
+
+    private fun request(url: String, headers: Map<String, String>, body: JSONObject?): Reply {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
-            conn.requestMethod = "POST"
-            conn.doOutput = true
             conn.connectTimeout = CONNECT_MS
             conn.readTimeout = READ_MS
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             conn.setRequestProperty("User-Agent", TrackInfo.USER_AGENT)
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
-            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            if (body != null) {
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            }
             val code = conn.responseCode
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) {
-                // The service's own words: "API key not valid", "model not found", "quota exceeded".
-                val said = runCatching { JSONObject(text) }.getOrNull()?.let { j ->
-                    j.optJSONObject("error")?.optString("message") ?: j.optString("message")
-                }?.takeIf { it.isNotBlank() } ?: text.take(MAX_ERROR_CHARS)
-                lastError = "HTTP $code: ${said.take(MAX_ERROR_CHARS)}"
-                return null
-            }
-            lastError = null
-            return JSONObject(text)
+            val json = runCatching { JSONObject(text) }.getOrNull()
+            if (code in 200..299) return Reply(code, json)
+            // The service's own words: "API key not valid", "model not found", "quota exceeded".
+            val error = json?.optJSONObject("error")
+            val said = (error?.optString("message") ?: json?.optString("message"))?.takeIf { it.isNotBlank() } ?: text.take(MAX_ERROR_CHARS)
+            // Google says when a per-minute limit lets go: {"@type": "...RetryInfo", "retryDelay": "7s"}.
+            val details = error?.optJSONArray("details")
+            val retry = (0 until (details?.length() ?: 0)).mapNotNull { details!!.optJSONObject(it)?.optString("retryDelay") }
+                .firstOrNull { it.isNotBlank() }?.removeSuffix("s")?.toDoubleOrNull()?.toInt() ?: 0
+            // "limit: 0": none at all for this model, waiting would not help.
+            return Reply(code, null, said, if (said.contains("limit: 0")) 0 else retry)
         } catch (e: SocketTimeoutException) {
-            lastError = "не ответил вовремя"
-            return null
+            return Reply(0, null, "не ответил вовремя")
         } catch (e: UnknownHostException) {
-            lastError = "нет сети"
-            return null
+            return Reply(0, null, "нет сети")
         } catch (e: SSLException) {
-            lastError = "ошибка защищённого соединения"
-            return null
+            return Reply(0, null, "ошибка защищённого соединения")
         } catch (e: IOException) {
-            lastError = e.javaClass.simpleName
-            return null
+            return Reply(0, null, e.javaClass.simpleName)
         } finally {
             conn.disconnect()
         }
@@ -160,5 +251,14 @@ object CloudBrain {
     private const val READ_MS = 30_000
     private const val MAX_TOKENS = 1_024
     private const val TEMPERATURE = 0.6
-    private const val MAX_ERROR_CHARS = 160
+    private const val MAX_ERROR_CHARS = 200
+    private const val HTTP_QUOTA = 429
+
+    /** Answers worth trying another way: no quota, no such model, a feature not offered (the search). */
+    private val RETRYABLE = setOf(HTTP_QUOTA, 404, 400)
+    private const val MAX_RETRY_WAIT_S = 10
+    private const val MAX_OTHER_MODELS = 3
+
+    /** Flash models that are not for text: pictures, speech, live audio, embeddings. */
+    private val UNFIT = listOf("image", "tts", "audio", "live", "embedding", "native", "robotics", "computer-use")
 }

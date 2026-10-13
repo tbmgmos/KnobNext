@@ -969,7 +969,7 @@ class TrackBubble(
             val a = runCatching { TrackInfo.ask(service, t.takeIf { artist == null }, artist, q, prefs.infoLanguage.resolve(), facts) }.getOrNull()
             if (a == null) {
                 noteView?.text = service.getString(R.string.bubble_ask_failed, CloudBrain.lastError ?: "-")
-                log(service.getString(R.string.log_bubble_ask_failed, CloudBrain.lastError ?: "-"))
+                log(service.getString(R.string.log_bubble_ask_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
                 return@launch
             }
             answers[key] = a

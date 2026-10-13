@@ -321,11 +321,22 @@ class Prefs(context: Context) {
 
     fun cloudKey(service: CloudService): String = sp.getString("cloud_key_" + service.name, null).orEmpty()
 
-    fun setCloudKey(service: CloudService, key: String) = sp.edit().putString("cloud_key_" + service.name, key.trim()).apply()
+    // A new key or model: what worked with the old one is tried afresh.
+    fun setCloudKey(service: CloudService, key: String) =
+        sp.edit().putString("cloud_key_" + service.name, key.trim()).remove("cloud_working_" + service.name).apply()
 
     fun cloudModel(service: CloudService): String = sp.getString("cloud_model_" + service.name, null).orEmpty()
 
-    fun setCloudModel(service: CloudService, model: String) = sp.edit().putString("cloud_model_" + service.name, model.trim()).apply()
+    fun setCloudModel(service: CloudService, model: String) =
+        sp.edit().putString("cloud_model_" + service.name, model.trim()).remove("cloud_working_" + service.name).apply()
+
+    /** The model, and whether with the search, that answered last with this key: tried first. */
+    fun cloudWorking(service: CloudService): Pair<String, Boolean>? =
+        sp.getString("cloud_working_" + service.name, null)?.split('\u0000')?.takeIf { it.size == 2 && it[0].isNotBlank() }
+            ?.let { it[0] to (it[1] == "1") }
+
+    fun setCloudWorking(service: CloudService, model: String, search: Boolean) =
+        sp.edit().putString("cloud_working_" + service.name, model + "\u0000" + (if (search) "1" else "0")).apply()
 
     /**
      * The artists the last "widening the circle" note named, for [Action.PLAY_CIRCLE]; [circlePick]

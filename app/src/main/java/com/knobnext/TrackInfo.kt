@@ -212,7 +212,7 @@ object TrackInfo {
                 val service = Prefs(context).cloudService.title
                 return@coroutineScope ready(answer.text, if (answer.sources.isEmpty()) service else "$service + поиск")
             }
-            note(context.getString(R.string.log_info_cloud_failed, CloudBrain.lastError ?: "-"))
+            note(context.getString(R.string.log_info_cloud_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
         }
         if (source == InfoSource.GEMINI) {
             fromGemini(track, length, lang, history.told(), firstMeet)?.let {
