@@ -274,15 +274,17 @@ class HeadsetButtons(
         // KnobNext sent this key itself (no player to ask): it must not become a gesture again.
         if (Media.justSent(code)) return true
         val down = event.action == KeyEvent.ACTION_DOWN
+        // Who sent the key: Quick Tap's come from the system's interface, the headphones' through Bluetooth.
+        val sender = if (android.os.Build.VERSION.SDK_INT >= 28) runCatching { session?.currentControllerInfo?.packageName }.getOrNull() else null
         if (down && event.repeatCount == 0) {
-            log(context.getString(R.string.log_headset_key, KeyEvent.keyCodeToString(code)))
+            log(context.getString(R.string.log_headset_key, KeyEvent.keyCodeToString(code), sender ?: "?"))
         }
         val headphones = media.externalOutput() != null
         val playKey = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_HEADSETHOOK ||
             code == KeyEvent.KEYCODE_MEDIA_PLAY || code == KeyEvent.KEYCODE_MEDIA_PAUSE
-        // No headphones: a play/pause key can only be Quick Tap's. With headphones the two can't be told
-        // apart, and it is the headphones' (or, if their buttons are not used here, the player's).
-        if (!headphones && prefs.pixelTap && playKey) {
+        // No headphones: a play/pause key can only be Quick Tap's. With headphones, it is Quick Tap's when
+        // the system's interface sent it; else the headphones' (or, if their buttons are not used here, the player's).
+        if (prefs.pixelTap && playKey && (!headphones || fromQuickTap(sender))) {
             pixelTap(event)
             return true
         }
@@ -309,6 +311,10 @@ class HeadsetButtons(
     private fun emit(gesture: Gesture, key: Int) {
         if (HeadsetLive.learning) HeadsetLive.report(gesture, key) else onGesture(gesture, key)
     }
+
+    /** The package that sent a key is Pixel's own interface, which is where Quick Tap lives. */
+    private fun fromQuickTap(sender: String?): Boolean =
+        sender != null && (sender in QUICK_TAP_SENDERS || "columbus" in sender)
 
     /** Quick Tap's "play/pause media": one press is one gesture, whichever way the system sends it. */
     private fun pixelTap(event: KeyEvent) {
@@ -395,6 +401,9 @@ class HeadsetButtons(
         const val REPEAT_MS = 300L
         const val PIXEL_DEBOUNCE_MS = 400L
         const val CLAIM_DELAY_MS = 400L
+
+        /** Where Quick Tap sends its key from: Pixel's system interface. */
+        val QUICK_TAP_SENDERS = setOf("com.android.systemui", "com.google.android.systemui")
 
         /** The shortest time between two claims of the buttons. */
         const val MIN_CLAIM_GAP_MS = 2_000L

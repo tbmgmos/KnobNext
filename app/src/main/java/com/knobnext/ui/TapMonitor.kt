@@ -16,7 +16,18 @@ import kotlinx.coroutines.delay
 
 /** One paragraph on what the back-tap detector is doing and what became of the taps. */
 fun tapSummary(context: Context): String {
-    if (!TapStats.running) return context.getString(R.string.tap_stats_off)
+    if (!TapStats.running) {
+        // Why it is off: "only while music plays" is wrong when it is off for another reason.
+        val prefs = com.knobnext.Prefs(context)
+        return context.getString(
+            when {
+                !prefs.backTap -> R.string.tap_stats_off_disabled
+                // The screen is on while this is read.
+                prefs.backTapScreenOff -> R.string.tap_stats_off_screen
+                else -> R.string.tap_stats_off
+            },
+        )
+    }
     val now = SystemClock.elapsedRealtime()
     val silentSec = ((now - TapStats.lastEventAt) / 1000).toInt()
     val sensor = if (silentSec >= 2) {
