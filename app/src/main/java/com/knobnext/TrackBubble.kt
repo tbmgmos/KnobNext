@@ -136,10 +136,20 @@ class TrackBubble(
     private val playerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             val m = metadata ?: return
-            if (root == null || expanded) return
+            if (root == null) return
             val t = TrackInfo.trackOf(m) ?: return
-            if (same(t)) return
-            setTrack(t, m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m.getBitmap(MediaMetadata.METADATA_KEY_ART))
+            val cover = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            if (same(t)) {
+                // A player (Spotify) gives the title first and the album, year and cover a moment later:
+                // taken as they come, the open card included.
+                val was = track ?: return
+                if ((was.album != null || t.album == null) && (was.year != null || t.year == null) && (art != null || cover == null)) return
+                setTrack(t.copy(album = t.album ?: was.album, year = t.year ?: was.year), cover ?: art)
+                if (expanded) subView?.text = subtitle(track ?: return, trackFacts) else collapse()
+                return
+            }
+            if (expanded) return
+            setTrack(t, cover)
             news = null
             note = null
             trackFacts = null
@@ -175,7 +185,9 @@ class TrackBubble(
         mark: BubbleNews? = null,
     ) {
         val sameTrack = same(t)
-        setTrack(t, cover ?: art.takeIf { sameTrack })
+        // What is already known of this track is kept when the new word on it says less.
+        val known = track.takeIf { sameTrack }
+        setTrack(t.copy(album = t.album ?: known?.album, year = t.year ?: known?.year), cover ?: art.takeIf { sameTrack })
         news = mark ?: news.takeIf { sameTrack }
         if (!sameTrack) {
             note = null
