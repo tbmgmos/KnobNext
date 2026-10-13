@@ -165,8 +165,19 @@ object TrackInfo {
                     coverUrl = found?.coverUrl, pages = found?.pages.orEmpty(),
                 )
             }
-            if (!wasUnknown) return story
-            return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + story
+            // The artists a circle note named: the next "play the circle" plays them, and the story says how.
+            var offer: String? = null
+            if (told?.topic == Topic.CIRCLE) {
+                val named = told?.facts.orEmpty().joinToString(" ").lowercase(Locale.ROOT)
+                val names = found?.related.orEmpty().filter { named.contains(it.lowercase(Locale.ROOT)) }.distinct()
+                if (names.isNotEmpty()) {
+                    Prefs(context).circleNames = names
+                    offer = circleOffer(context, lang, names.first())
+                }
+            }
+            val spoken = listOfNotNull(story, offer).joinToString(" ")
+            if (!wasUnknown) return spoken
+            return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + spoken
         }
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
@@ -421,6 +432,18 @@ object TrackInfo {
         }
         out += others.drop(next)
         return brief(out).filter { standsAlone(it) }
+    }
+
+    /**
+     * "To hear Foo Fighters: double tap on the back" — when a gesture plays the circle's artists, the
+     * note that named them says which.
+     */
+    private fun circleOffer(context: Context, lang: String, artist: String): String? {
+        val prefs = Prefs(context)
+        val gesture = Gesture.entries.firstOrNull { prefs.action(it, prefs.lastPlayer) == Action.PLAY_CIRCLE } ?: return null
+        val res = localized(context, lang)
+        val how = res.getString(com.knobnext.ui.gestureLabel(gesture)).replaceFirstChar { it.lowercase(Locale.ROOT) }
+        return res.getString(R.string.info_circle_offer, artist, how)
     }
 
     /** Forgets that the artist was introduced and how far their story got: the next story starts afresh. */

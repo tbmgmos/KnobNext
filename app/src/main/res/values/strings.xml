@@ -117,6 +117,7 @@
     <string name="action_voice">Голосовая команда</string>
     <string name="action_ask_gemini">Открыть в Gemini</string>
     <string name="action_track_info">Рассказать о треке</string>
+    <string name="action_play_circle">Включить исполнителя из рассказа</string>
     <string name="log_info_started">ищу сведения о треке</string>
     <string name="log_info_stopped">рассказ остановлен</string>
     <string name="speak_info_none">Об этом исполнителе пока ничего не известно: сведения берутся из Википедии, Wikidata и MusicBrainz.</string>
@@ -189,6 +190,7 @@
     <string name="acq_via">Знакомство через %1$s</string>
     <string name="acq_links">Связанные исполнители</string>
     <string name="acq_link_known">Есть в истории</string>
+    <string name="acq_link_play">Включить %1$s в плеере</string>
     <string name="acq_link_new">Ещё не встречались</string>
     <string name="acq_pages">Страницы исполнителя</string>
     <string name="acq_page_site">Официальный сайт</string>
@@ -229,6 +231,7 @@
     <string name="info_note_album_unnamed">Об альбоме: %1$s</string>
     <string name="info_note_artist">Из истории исполнителя: %1$s</string>
     <string name="info_note_circle">Расширим круг: %1$s</string>
+    <string name="info_circle_offer">Послушать %1$s — %2$s.</string>
     <string name="info_all_told">Про %1$s я рассказал всё, что знаю.</string>
     <string name="info_remind">Напомню: %1$s</string>
     <string name="info_intro_basics">Знакомьтесь — %1$s.</string>
@@ -512,6 +515,9 @@
     <string name="log_sleep_set">таймер на %1$d мин</string>
     <string name="log_sleep_cancelled">таймер отменён</string>
     <string name="log_no_player">не найден плеер</string>
+    <string name="log_circle_none">в рассказах ещё не звучали связанные исполнители</string>
+    <string name="log_circle_play">включаю %1$s в %2$s</string>
+    <string name="log_circle_cannot">%1$s не умеет включать по имени: %2$s</string>
     <string name="log_flip_paused">экраном вниз → пауза</string>
     <string name="log_flip_resumed">экраном вверх → продолжить</string>
     <string name="log_show">Журнал событий</string>

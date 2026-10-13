@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -257,6 +259,7 @@ private fun Notes(notes: List<Journal.Note>, showTrack: Boolean) {
 @Composable
 private fun Links(context: Context, links: List<String>, version: Int, onOpen: (String) -> Unit) {
     val known = remember(version) { Journal.entries(context).map { it.key }.toSet() }
+    val media = remember { com.knobnext.Media(context) }
     SectionTitle(stringResource(R.string.acq_links))
     Group(links.size) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -267,10 +270,29 @@ private fun Links(context: Context, links: List<String>, version: Int, onOpen: (
                     shape(i), name,
                     subtitle = stringResource(if (inHistory) R.string.acq_link_known else R.string.acq_link_new),
                     onClick = if (inHistory) ({ onOpen(key) }) else null,
+                    // Straight to the music: the artist in the player in use.
+                    trailing = {
+                        IconButton(onClick = { playInPlayer(context, media, name) }) {
+                            Icon(KnobIcons.PlayPause, contentDescription = stringResource(R.string.acq_link_play, name))
+                        }
+                    },
                 )
             }
         }
     }
+}
+
+/** Plays [name] in the player in use (or the last one), and says what happened. */
+private fun playInPlayer(context: Context, media: com.knobnext.Media, name: String) {
+    val prefs = Prefs(context)
+    val r = com.knobnext.CirclePlay.play(context, media.pick(media.controllers(), prefs.pausedPlayer), prefs.lastPlayer, name)
+    val player = r.player?.let { com.knobnext.appLabel(context, it) }
+    val text = when {
+        player == null -> context.getString(R.string.log_no_player)
+        r.ok -> context.getString(R.string.log_circle_play, name, player)
+        else -> context.getString(R.string.log_circle_cannot, player, name)
+    }
+    android.widget.Toast.makeText(context, text.replaceFirstChar { it.uppercase() }, android.widget.Toast.LENGTH_SHORT).show()
 }
 
 /** Nothing known: the open databases where the artist, or anyone who knows them, can add it. */

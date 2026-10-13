@@ -80,6 +80,7 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.RINGER -> toggleRinger()
         Action.ASK_GEMINI -> Outcome.of(askAbout(controller))
         Action.TRACK_INFO -> trackInfo(controller)
+        Action.PLAY_CIRCLE -> playCircle(controller)
         else -> Outcome.DONE
     }
 
@@ -133,6 +134,15 @@ class Extras(private val context: Context, private val media: Media, private val
         } catch (_: SecurityException) {
             Outcome.failed(context.getString(R.string.log_ringer_dnd))
         }
+
+    /** The next artist the last circle note named, in the player in use. */
+    private fun playCircle(controller: MediaController?): Outcome {
+        val r = CirclePlay.next(context, controller, prefs)
+        val artist = r.artist ?: return Outcome.failed(context.getString(R.string.log_circle_none))
+        val player = r.player?.let { appLabel(context, it) } ?: return Outcome.failed(context.getString(R.string.log_no_player))
+        return if (r.ok) Outcome.done(context.getString(R.string.log_circle_play, artist, player))
+        else Outcome.failed(context.getString(R.string.log_circle_cannot, player, artist))
+    }
 
     private fun announce(controller: MediaController?): String? {
         val meta = controller?.metadata

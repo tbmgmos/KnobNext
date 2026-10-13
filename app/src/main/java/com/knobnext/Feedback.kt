@@ -189,7 +189,7 @@ enum class CueGroup(vararg val sample: Cue) {
             Action.SHUFFLE, Action.REPEAT, Action.SWITCH_PLAYER -> MODES
             Action.SLEEP_TIMER -> TIMER
             Action.FLASHLIGHT, Action.RINGER, Action.OPEN_PLAYER, Action.POCKET, Action.VOICE, Action.ASK_GEMINI,
-            Action.TRACK_INFO -> OTHER
+            Action.TRACK_INFO, Action.PLAY_CIRCLE -> OTHER
             // Volume is heard anyway; "announce" and "time left" speak.
             Action.NONE, Action.VOLUME_UP, Action.VOLUME_DOWN, Action.ANNOUNCE, Action.TIME_LEFT -> null
         }

@@ -8,6 +8,9 @@ enum class Action {
     NONE, NEXT, PREVIOUS, RESTART, PLAY_PAUSE, SEEK_FORWARD, SEEK_BACK, VOLUME_UP, VOLUME_DOWN,
     ANNOUNCE, TIME_LEFT, LIKE, SHUFFLE, REPEAT, SWITCH_PLAYER, SLEEP_TIMER, OPEN_PLAYER, POCKET, VOICE, TRACK_INFO, ASK_GEMINI,
 
+    // An artist the track story's circle named, played in the person's own player.
+    PLAY_CIRCLE,
+
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
 
@@ -15,7 +18,7 @@ enum class Action {
     val worksWhenIdle: Boolean
         get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER ||
             // The story pauses the music if so set; the same gesture must still be able to stop it.
-            this == VOICE || this == TRACK_INFO
+            this == VOICE || this == TRACK_INFO || this == PLAY_CIRCLE
 
     val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
 }
@@ -300,6 +303,18 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putString("lastfm_key", v.trim()).apply()
 
     val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
+
+    /**
+     * The artists the last "widening the circle" note named, for [Action.PLAY_CIRCLE]; [circlePick]
+     * counts the plays, so each takes the next one.
+     */
+    var circleNames: List<String>
+        get() = sp.getString("circle_names", null)?.split('\u0000')?.filter { it.isNotBlank() }.orEmpty()
+        set(v) = sp.edit().putString("circle_names", v.joinToString("\u0000")).putInt("circle_pick", 0).apply()
+
+    var circlePick: Int
+        get() = sp.getInt("circle_pick", 0)
+        set(v) = sp.edit().putInt("circle_pick", v).apply()
 
     /** Last.fm refused the app's usual signature and took a plain one: the stories sign that way. */
     var lastFmPlainAgent: Boolean
