@@ -249,7 +249,8 @@ object CloudBrain {
                     .put(JSONObject().put("role", "system").put("content", system))
                     .put(JSONObject().put("role", "user").put("content", prompt)),
             )
-            .put("max_tokens", maxTokens)
+            // Thinking models (gpt-oss, DeepSeek R1, o-series) spend part of it thinking: room for the answer too.
+            .put("max_tokens", maxOf(maxTokens, CHAT_MIN_TOKENS))
             .put("temperature", TEMPERATURE)
         val headers = mutableMapOf("Authorization" to "Bearer $key")
         // OpenRouter asks apps to say who they are.
@@ -381,6 +382,7 @@ object CloudBrain {
      * small one left nothing for the answer. Only what is written is paid for; the prompt keeps it short.
      */
     private const val GEMINI_MIN_TOKENS = 4_096
+    private const val CHAT_MIN_TOKENS = 2_048
 
     /** The service is busy or briefly down: worth one more try a little later. */
     private val BUSY = setOf(500, 502, 503, 504)
