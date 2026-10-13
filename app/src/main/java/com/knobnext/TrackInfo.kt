@@ -872,7 +872,7 @@ object TrackInfo {
             runCatching { Brainz.Record.fromJson(JSONObject(file.readText())) }.getOrNull()?.let { return it }
         }
         val found = withContext(Dispatchers.IO) {
-            runCatching { Brainz.record(lang, track.title, artist, track.album, mbid) }.getOrNull()
+            runCatching { Brainz.record(lang, track.title, artist, track.album, mbid, track.year) }.getOrNull()
         } ?: return null
         runCatching { file.writeText(found.toJson().toString()) }
         trimCache(context)
@@ -1302,7 +1302,7 @@ object TrackInfo {
     private const val ARTIST_PREFIX = "artist1-"
 
     /** The recording as MusicBrainz knows it, for the round card. */
-    private const val RECORD_PREFIX = "record3-"
+    private const val RECORD_PREFIX = "record4-"
 
     /** Two sentences that begin with this many of the same characters are one. */
     private const val DUPLICATE_CHARS = 60

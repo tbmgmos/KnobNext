@@ -198,7 +198,7 @@ object Brainz {
     }
 
     /** The recording of [title] by [artist] as the card shows it; [mbid]: the artist's id, the right one. */
-    suspend fun record(lang: String, title: String, artist: String, album: String?, mbid: String?): Record? {
+    suspend fun record(lang: String, title: String, artist: String, album: String?, mbid: String?, knownYear: String? = null): Record? {
         val name = clean(Speech.cleanTitle(title))
         // By the artist's id when known (the right one), else, or when that finds nothing, by name.
         var found = candidates(name, artistQuery(artist, mbid), artist, mbid)
@@ -258,33 +258,32 @@ object Brainz {
             writers = work?.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
                 .filter { it.optString("type") in WRITER_TYPES }.mapNotNull { name(it, "artist") }.distinct().take(MAX_NAMES)
             // Everyone who recorded the song: one song each, the earliest first.
-            val all = get("$API/recording?work=$workId&inc=artist-credits&limit=100&fmt=json")?.optJSONArray("recordings")
+            // Everyone who recorded the song: a song with hundreds of live takes comes in pages.
+            val recordings = ArrayList<JSONObject>()
+            for (page in 0 until MAX_WORK_PAGES) {
+                val got = get("$API/recording?work=$workId&inc=artist-credits&limit=$WORK_PAGE&offset=${page * WORK_PAGE}&fmt=json") ?: break
+                val list = got.optJSONArray("recordings") ?: break
+                (0 until list.length()).mapNotNull { list.optJSONObject(it) }.forEach { recordings += it }
+                if (recordings.size >= got.optInt("recording-count", got.optInt("count"))) break
+            }
             fun firstArtist(o: JSONObject) = o.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id")
+            fun ours(o: JSONObject) = firstArtist(o) == selfId || songOf(o)?.let { Journal.key(it.artist).contains(Journal.key(artist)) } == true
             // One song per artist ("Lulu" and "Lulu & David Bowie" are one), their earliest.
-            val others = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
-                .filter { o -> firstArtist(o) != selfId }
+            val others = recordings.filter { !ours(it) }
                 .mapNotNull { o -> songOf(o)?.let { (firstArtist(o) ?: Journal.key(it.artist)) to it } }
-                // Not the artist themselves under another credit ("Eminem & The Prodigy"), nor the song's
-                // own writer singing it alone (Виктор Цой for «Кино»): those are not covers.
-                .filter { (_, s) ->
-                    val credit = Journal.key(s.artist)
-                    !credit.contains(Journal.key(artist)) && writers.none { w -> Journal.key(w) == credit }
-                }
                 .sortedBy { (_, s) -> s.year ?: "9999" }
                 .distinctBy { (who, _) -> who }
                 .map { (_, s) -> s }
-            // The artist's own first recording of it: who came first is a matter of years.
-            val recordings = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
-            firstYear = recordings.filter { o ->
-                firstArtist(o) == selfId || songOf(o)?.let { Journal.key(it.artist).contains(Journal.key(artist)) } == true
-            }.mapNotNull { year(it, "first-release-date") }.minOrNull() ?: year(r, "first-release-date")
-            val earliest = others.firstOrNull()
-            // Someone else had it out first (or MusicBrainz calls this a cover): theirs is the source.
-            original = earliest?.takeIf { e ->
-                cover || (e.year != null && firstYear != null && e.year < firstYear!!)
-            }
-            covers = others.filter { it !== original }.take(MAX_COVERS)
-            coverCount = others.size - (if (original != null) 1 else 0)
+            // The artist's own first recording of it (the player's year too): who came first is a matter of years.
+            firstYear = (recordings.filter(::ours).mapNotNull { year(it, "first-release-date") } + listOfNotNull(year(r, "first-release-date"), knownYear))
+                .minOrNull()
+            // Someone else had it out first (or MusicBrainz calls this a cover): theirs is the source, the
+            // song's own writer included (Bowie for Nirvana's "The Man Who Sold the World").
+            original = others.firstOrNull()?.takeIf { e -> cover || (e.year != null && firstYear != null && e.year < firstYear!!) }
+            // The covers: not the source, nor the writer singing it alone after the band (Виктор Цой for «Кино»).
+            val covering = others.filter { it !== original && writers.none { w -> Journal.key(w) == Journal.key(it.artist) } }
+            covers = covering.take(MAX_COVERS)
+            coverCount = covering.size
         }
         return Record(
             players.entries.map { it.key to it.value }.take(MAX_PLAYERS), producers, studio, writers, cover || original != null, original,
@@ -408,6 +407,10 @@ object Brainz {
     private const val MAX_PLAYERS = 8
     private const val MAX_SAMPLES = 3
     private const val MAX_COVERS = 8
+
+    /** A song's recordings, a page at a time: enough pages for the earliest to be among them. */
+    private const val WORK_PAGE = 100
+    private const val MAX_WORK_PAGES = 3
 
     /** Versions of a recording looked at for its credits: a request each. */
     private const val LOOKED_AT = 3

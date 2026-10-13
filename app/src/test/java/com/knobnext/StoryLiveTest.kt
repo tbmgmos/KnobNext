@@ -111,6 +111,7 @@ class StoryLiveTest {
         assumeTrue(System.getenv("LIVE_STORIES") == "1" && key.isNotBlank())
         val context = RuntimeEnvironment.getApplication()
         val prefs = Prefs(context)
+        prefs.devMode = true
         prefs.cloudService = CloudService.GEMINI
         prefs.setCloudKey(CloudService.GEMINI, key)
         println("\n===== Облако: ключ ${CloudBrain.check(CloudService.GEMINI, key).javaClass.simpleName}")
