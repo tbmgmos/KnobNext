@@ -138,7 +138,7 @@ class TrackBubble(
             val m = metadata ?: return
             if (root == null) return
             val t = TrackInfo.trackOf(m) ?: return
-            val cover = m.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: m.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            val cover = TrackInfo.coverOf(m)
             if (same(t)) {
                 // A player (Spotify) gives the title first and the album, year and cover a moment later:
                 // taken as they come, the open card included.

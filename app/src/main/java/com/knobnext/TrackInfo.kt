@@ -64,18 +64,44 @@ enum class InfoLanguage(val code: String?) {
 object TrackInfo {
     data class Track(val title: String, val artist: String?, val album: String?, val year: String?)
 
-    /** The playing track as the story knows it, from the player's data. */
+    /**
+     * The playing track as the story knows it, from the player's data, whichever player it is. Players
+     * fill different fields: Spotify the usual ones; others the artist only as the subtitle or the album
+     * artist, the album as the description, the year as a date; a video or a browser all of it as the
+     * title ("Artist - Song") with no artist at all.
+     */
     fun trackOf(meta: android.media.MediaMetadata): Track? {
-        val title = meta.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
-            ?: meta.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
-        return Track(
-            title = title,
-            artist = meta.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
-                ?: meta.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
-            album = meta.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
-            year = meta.getLong(android.media.MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
-        )
+        fun text(key: String) = meta.getString(key)?.trim()?.takeIf { it.isNotEmpty() }
+        var title = text(android.media.MediaMetadata.METADATA_KEY_TITLE) ?: text(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
+        var artist = text(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+            ?: text(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?: text(android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            ?: text(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+            ?: text(android.media.MediaMetadata.METADATA_KEY_COMPOSER)
+        if (artist == null) {
+            // "Artist - Song" in the title: a video, a browser tab.
+            TITLE_DASH.find(title)?.let { m ->
+                artist = m.groupValues[1].trim()
+                title = m.groupValues[2].trim()
+            }
+        }
+        val album = (text(android.media.MediaMetadata.METADATA_KEY_ALBUM) ?: text(android.media.MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION))
+            // A description that only repeats the artist or the title is no album.
+            ?.takeIf { d -> d != artist && d != title && d.length <= MAX_ALBUM_CHARS }
+        val year = meta.getLong(android.media.MediaMetadata.METADATA_KEY_YEAR).takeIf { it in 1000..9999 }?.toString()
+            ?: text(android.media.MediaMetadata.METADATA_KEY_DATE)?.let { Regex("""\b(1[89]|20)\d\d\b""").find(it)?.value }
+        return Track(title = title, artist = artist, album = album, year = year)
     }
+
+    /** The cover, wherever the player put it. */
+    fun coverOf(meta: android.media.MediaMetadata?): android.graphics.Bitmap? = meta?.let {
+        it.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: it.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
+            ?: it.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+    }
+
+    private val TITLE_DASH = Regex("""^(.{2,60}?)\s+[-–—]\s+(.{2,}?)$""")
+    private const val MAX_ALBUM_CHARS = 120
 
     /** An article's facts (one sentence each) and the language they are in. */
     class Text(val facts: List<String>, val lang: String)

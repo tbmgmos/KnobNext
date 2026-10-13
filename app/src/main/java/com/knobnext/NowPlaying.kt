@@ -128,13 +128,10 @@ class NowPlayingTracker(
             NowPlaying(
                 controller = c,
                 appLabel = appLabel(context, c.packageName),
-                title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
-                    ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE),
-                artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-                    ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
-                art = meta?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                    ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-                    ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+                // Read the same way for every player (see TrackInfo.trackOf).
+                title = meta?.let(TrackInfo::trackOf)?.title,
+                artist = meta?.let(TrackInfo::trackOf)?.artist,
+                art = TrackInfo.coverOf(meta),
                 playing = c.isPlaying(),
             ),
         )

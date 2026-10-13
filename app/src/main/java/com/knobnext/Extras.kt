@@ -437,7 +437,7 @@ class Extras(private val context: Context, private val media: Media, private val
         val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
         // The player's cover, for the history (it works for any artist, however unknown) and the card.
-        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        val art = TrackInfo.coverOf(meta)
         if (prefs.infoHistory && track.artist != null && art != null) {
             scope.launch(kotlinx.coroutines.Dispatchers.IO) { Journal.saveCover(context, track.artist, track.album, art) }
         }
@@ -505,7 +505,7 @@ class Extras(private val context: Context, private val media: Media, private val
             card.dismiss()
             return Outcome.undone(context.getString(R.string.log_bubble_closed))
         }
-        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        val art = TrackInfo.coverOf(meta)
         card.show(track, art, controller, expand = true)
         // Not shown: the log already has the reason from the card.
         return if (card.shown) Outcome.done(context.getString(R.string.log_bubble_shown))
