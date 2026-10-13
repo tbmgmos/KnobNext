@@ -194,21 +194,37 @@ object Brainz {
     }
 
     /** The recording of [title] by [artist] as the card shows it; [mbid]: the artist's id, the right one. */
-    suspend fun record(lang: String, title: String, artist: String, mbid: String?): Record? {
-        val who = artistQuery(artist, mbid)
-        val list = get("$API/recording/?fmt=json&limit=10&query=${enc("recording:\"${clean(Speech.cleanTitle(title))}\" AND $who")}")
-            ?.optJSONArray("recordings") ?: return null
-        val found = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
-            .filter { it.optInt("score") >= MIN_SCORE && credited(it, artist, mbid) }
-        // The search finds live takes and DJ mixes as readily as the record: the plain one first.
-        val r = found.firstOrNull { it.optString("disambiguation").isBlank() && !it.optBoolean("video") }
-            ?: found.firstOrNull { !LIVE.containsMatchIn(it.optString("disambiguation")) } ?: found.firstOrNull() ?: return null
+    suspend fun record(lang: String, title: String, artist: String, album: String?, mbid: String?): Record? {
+        val name = clean(Speech.cleanTitle(title))
+        // By the artist's id when known (the right one), else, or when that finds nothing, by name.
+        var found = candidates(name, artistQuery(artist, mbid), artist, mbid)
+        if (found.isEmpty() && mbid != null) found = candidates(name, artistQuery(artist, null), artist, null)
+        if (found.isEmpty()) return null
+        // The search finds live takes, edits and DJ mixes as readily as the record: the one on the album
+        // first, then plain ones. Credits are often kept on one of several versions: a few are looked at,
+        // the one that says most is taken.
+        val album0 = album?.let(Speech::cleanTitle)
+        val ranked = found.sortedWith(
+            compareByDescending<JSONObject> { r -> album0 != null && releaseTitles(r).any { sameName(it, album0) } }
+                .thenByDescending { it.optString("disambiguation").isBlank() && !it.optBoolean("video") }
+                .thenByDescending { !LIVE.containsMatchIn(it.optString("disambiguation")) },
+        )
+        var r = ranked.first()
+        var rels = emptyList<JSONObject>()
+        for (candidate in ranked.take(LOOKED_AT)) {
+            val rec = get("$API/recording/${candidate.optString("id")}?inc=artist-rels+place-rels+recording-rels+work-rels&fmt=json") ?: continue
+            val these = rec.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+            if (these.size > rels.size) {
+                r = candidate
+                rels = these
+            }
+            // Who plays on it and whose song it is: enough to stop looking.
+            if (rels.any { it.optString("type") in PLAYER_TYPES } && rels.any { it.optString("target-type") == "work" }) break
+        }
         val selfId = mbid ?: r.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id")
-        val rec = get("$API/recording/${r.optString("id")}?inc=artist-rels+place-rels+recording-rels+work-rels&fmt=json") ?: return null
-        val rels = rec.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
 
         val players = LinkedHashMap<String, MutableList<String>>()
-        rels.filter { it.optString("type") == "instrument" || it.optString("type") == "vocal" }.forEach { rel ->
+        rels.filter { it.optString("type") in PLAYER_TYPES }.forEach { rel ->
             val name = name(rel, "artist") ?: return@forEach
             val what = attributes(rel).ifEmpty { if (rel.optString("type") == "vocal") listOf("vocals") else emptyList() }
                 .map { instrument(it, lang) ?: it.lowercase(Locale.ROOT) }
@@ -238,18 +254,30 @@ object Brainz {
                 .filter { it.optString("type") in WRITER_TYPES }.mapNotNull { name(it, "artist") }.distinct().take(MAX_NAMES)
             // Everyone who recorded the song: one song each, the earliest first.
             val all = get("$API/recording?work=$workId&inc=artist-credits&limit=100&fmt=json")?.optJSONArray("recordings")
+            fun firstArtist(o: JSONObject) = o.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id")
+            // One song per artist ("Lulu" and "Lulu & David Bowie" are one), their earliest.
             val others = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
-                .filter { o -> o.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id") != selfId }
-                .mapNotNull(::songOf)
-                .filter { Journal.key(it.artist) != Journal.key(artist) }
-                .sortedBy { it.year ?: "9999" }
-                .distinctBy { Journal.key(it.artist) }
+                .filter { o -> firstArtist(o) != selfId }
+                .mapNotNull { o -> songOf(o)?.let { (firstArtist(o) ?: Journal.key(it.artist)) to it } }
+                .filter { (_, s) -> Journal.key(s.artist) != Journal.key(artist) }
+                .sortedBy { (_, s) -> s.year ?: "9999" }
+                .distinctBy { (who, _) -> who }
+                .map { (_, s) -> s }
             if (cover) original = others.firstOrNull()
             covers = others.filter { it !== original }.take(MAX_COVERS)
             coverCount = others.size - (if (original != null) 1 else 0)
         }
         return Record(players.entries.map { it.key to it.value }.take(MAX_PLAYERS), producers, studio, writers, cover, original, samples, sampledBy, covers, coverCount)
     }
+
+    private suspend fun candidates(name: String, who: String, artist: String, mbid: String?): List<JSONObject> {
+        val list = get("$API/recording/?fmt=json&limit=25&query=${enc("recording:\"$name\" AND $who")}")?.optJSONArray("recordings")
+            ?: return emptyList()
+        return (0 until list.length()).mapNotNull { list.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE && credited(it, artist, mbid) }
+    }
+
+    private fun releaseTitles(r: JSONObject): List<String> =
+        r.optJSONArray("releases")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("title") } }.orEmpty()
 
     private fun artistQuery(artist: String, mbid: String?) = if (mbid != null) "arid:$mbid" else "artist:\"${clean(Speech.cleanArtist(artist))}\""
 
@@ -358,6 +386,10 @@ object Brainz {
     private const val MAX_PLAYERS = 8
     private const val MAX_SAMPLES = 3
     private const val MAX_COVERS = 8
+
+    /** Versions of a recording looked at for its credits: a request each. */
+    private const val LOOKED_AT = 3
+    private val PLAYER_TYPES = setOf("instrument", "vocal", "performer")
     private val WRITER_TYPES = setOf("composer", "lyricist", "writer")
     private val LIVE = Regex("(?i)live|mix|demo|remix|edit|instrumental|karaoke")
     private const val SPACING_MS = 1_100L
