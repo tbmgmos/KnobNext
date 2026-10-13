@@ -81,6 +81,7 @@ class Extras(private val context: Context, private val media: Media, private val
         Action.ASK_GEMINI -> Outcome.of(askAbout(controller))
         Action.TRACK_INFO -> trackInfo(controller)
         Action.PLAY_CIRCLE -> playCircle(controller)
+        Action.SHOW_BUBBLE -> showBubble(controller)
         else -> Outcome.DONE
     }
 
@@ -485,6 +486,25 @@ class Extras(private val context: Context, private val media: Media, private val
             speaker.say(told, resume, queue = true)
         }
         return Outcome.done(context.getString(R.string.log_info_started))
+    }
+
+    /**
+     * The card alone, whatever "how to tell" says: open on the playing track, or closed when it already
+     * is (the same gesture both ways). The music plays on and nothing is said.
+     */
+    private fun showBubble(controller: MediaController?): Outcome {
+        val card = bubble ?: return Outcome.failed(context.getString(R.string.log_bubble_none))
+        val meta = controller?.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        if (card.openFor(track)) {
+            card.dismiss()
+            return Outcome.undone(context.getString(R.string.log_bubble_closed))
+        }
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        card.show(track, art, controller, expand = true)
+        // Not shown: the log already has the reason from the card.
+        return if (card.shown) Outcome.done(context.getString(R.string.log_bubble_shown))
+        else Outcome.failed(context.getString(R.string.log_bubble_none))
     }
 
     /**

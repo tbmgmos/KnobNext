@@ -115,7 +115,7 @@ class Media(private val context: Context) {
             // Handled by Extras: they need the service (speech, alarms, launching apps).
             Action.ANNOUNCE, Action.LIKE, Action.SHUFFLE, Action.REPEAT, Action.SLEEP_TIMER, Action.OPEN_PLAYER,
             Action.RESTART, Action.SWITCH_PLAYER, Action.FLASHLIGHT, Action.RINGER, Action.TIME_LEFT, Action.POCKET, Action.VOICE,
-            Action.ASK_GEMINI, Action.TRACK_INFO, Action.PLAY_CIRCLE -> Unit
+            Action.ASK_GEMINI, Action.TRACK_INFO, Action.PLAY_CIRCLE, Action.SHOW_BUBBLE -> Unit
         }
     }
 

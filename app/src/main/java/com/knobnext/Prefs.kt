@@ -11,6 +11,9 @@ enum class Action {
     // An artist the track story's circle named, played in the person's own player.
     PLAY_CIRCLE,
 
+    // The round card about the playing track, on its own gesture whatever the story's delivery.
+    SHOW_BUBBLE,
+
     // Not about music: the volume keys as shortcuts.
     FLASHLIGHT, RINGER;
 
@@ -18,7 +21,7 @@ enum class Action {
     val worksWhenIdle: Boolean
         get() = this == PLAY_PAUSE || this == OPEN_PLAYER || this == SLEEP_TIMER || this == FLASHLIGHT || this == RINGER ||
             // The story pauses the music if so set; the same gesture must still be able to stop it.
-            this == VOICE || this == TRACK_INFO || this == PLAY_CIRCLE
+            this == VOICE || this == TRACK_INFO || this == PLAY_CIRCLE || this == SHOW_BUBBLE
 
     val notMusic: Boolean get() = this == FLASHLIGHT || this == RINGER
 }

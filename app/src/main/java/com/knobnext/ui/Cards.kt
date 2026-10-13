@@ -420,6 +420,7 @@ fun actionLabel(a: Action) = when (a) {
     Action.ASK_GEMINI -> R.string.action_ask_gemini
     Action.TRACK_INFO -> R.string.action_track_info
     Action.PLAY_CIRCLE -> R.string.action_play_circle
+    Action.SHOW_BUBBLE -> R.string.action_show_bubble
 }
 
 fun actionIcon(a: Action) = when (a) {
@@ -447,6 +448,7 @@ fun actionIcon(a: Action) = when (a) {
     Action.ASK_GEMINI -> KnobIcons.Sparkle
     Action.TRACK_INFO -> KnobIcons.Info
     Action.PLAY_CIRCLE -> KnobIcons.MusicNote
+    Action.SHOW_BUBBLE -> KnobIcons.Info
 }
 
 fun gestureLabel(g: Gesture) = when (g) {

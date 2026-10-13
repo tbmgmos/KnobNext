@@ -131,8 +131,10 @@
     <string name="bubble_close">Закрыть</string>
     <string name="log_bubble_shown">показываю кружок с рассказом</string>
     <string name="log_bubble_closed">кружок закрыт</string>
+    <string name="log_bubble_none">кружок не показан</string>
     <string name="log_bubble_failed">кружок не показать: %1$s</string>
     <string name="action_play_circle">Включить исполнителя из рассказа</string>
+    <string name="action_show_bubble">Показать кружок</string>
     <string name="log_info_started">ищу сведения о треке</string>
     <string name="log_info_stopped">рассказ остановлен</string>
     <string name="speak_info_none">Об этом исполнителе пока ничего не известно: сведения берутся из Википедии, Wikidata и MusicBrainz.</string>

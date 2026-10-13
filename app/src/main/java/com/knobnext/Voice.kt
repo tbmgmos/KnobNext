@@ -69,6 +69,9 @@ object CommandRules {
         if (has("вибрац", "беззвуч", "звонок", "vibrate")) return Command.Run(Action.RINGER)
         if (has("другой плеер", "переключи плеер", "смени плеер", "switch player")) return Command.Run(Action.SWITCH_PLAYER)
 
+        // The card on screen: "покажи кружок".
+        if (has("покажи кружок", "покажи карточку", "кружок", "show card")) return Command.Run(Action.SHOW_BUBBLE)
+
         // The artist the story's circle just named: "включи их".
         if (has("включи их", "включи его", "включи её", "включи ее", "из круга", "послушать их", "play them")) {
             return Command.Run(Action.PLAY_CIRCLE)
