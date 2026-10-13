@@ -111,6 +111,8 @@ private enum class Page(val title: Int) {
     SETTINGS_ACTIONS(R.string.settings_actions),
     SETTINGS_SOUNDS(R.string.settings_sounds),
     SETTINGS_SPEECH(R.string.settings_speech),
+    SETTINGS_STORY(R.string.settings_story),
+    SETTINGS_BUBBLE(R.string.settings_bubble),
     SETTINGS_VOICE(R.string.settings_voice),
     SETTINGS_PAUSE(R.string.settings_pause),
     SETTINGS_POCKET(R.string.settings_pocket),
@@ -124,8 +126,8 @@ private val Page.parent: Page
     get() = when (this) {
         Page.PROFILE -> Page.PLAYERS
         Page.ARTIST -> Page.ACQUAINT
-        Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH,
-        Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
+        Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH, Page.SETTINGS_STORY,
+        Page.SETTINGS_BUBBLE, Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
         Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
         else -> Page.HOME
     }
@@ -278,9 +280,12 @@ fun KnobScreen(
                     Page.SETTINGS_ACTIONS -> actionSettings(ctx)
                     Page.SETTINGS_SOUNDS -> item { CueCard(ctx) }
                     Page.SETTINGS_SPEECH -> speechSettings(ctx)
+                    Page.SETTINGS_STORY -> storySettings(ctx)
+                    Page.SETTINGS_BUBBLE -> bubbleSettings(ctx)
                     Page.SETTINGS_VOICE -> {
                         item { VoiceCard(ctx) }
                         item { BrainCard(ctx) }
+                        item { CloudCard(ctx) }
                     }
                     Page.SETTINGS_PAUSE -> pauseSettings(ctx)
                     Page.SETTINGS_POCKET -> pocketSettings(ctx)
@@ -1423,6 +1428,9 @@ private fun SettingsHub(ctx: PageContext) {
                 Page.SETTINGS_SOUNDS, KnobIcons.VolumeUp,
                 stringResource(if (s.cueStyle == CueStyle.OFF) R.string.sum_off else R.string.sum_cues_on),
             ),
+        ),
+        // What the app says and shows about the music.
+        listOf(
             Category(
                 Page.SETTINGS_SPEECH, KnobIcons.RecordVoice,
                 stringResource(
@@ -1433,12 +1441,58 @@ private fun SettingsHub(ctx: PageContext) {
                     },
                 ),
             ),
-        ),
-        listOf(
+            Category(
+                Page.SETTINGS_STORY, KnobIcons.Info,
+                sentence(
+                    listOf(
+                        stringResource(
+                            when (s.infoDelivery) {
+                                com.knobnext.InfoDelivery.VOICE -> R.string.info_delivery_voice
+                                com.knobnext.InfoDelivery.BUBBLE -> R.string.info_delivery_bubble
+                                com.knobnext.InfoDelivery.BOTH -> R.string.sum_story_both
+                            },
+                        ),
+                        stringResource(
+                            when (s.infoSource) {
+                                com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini
+                                com.knobnext.InfoSource.COMBINED -> R.string.info_source_combined
+                                com.knobnext.InfoSource.WIKI -> R.string.info_source_wiki
+                                com.knobnext.InfoSource.CLOUD -> R.string.info_source_cloud
+                            },
+                        ),
+                    ),
+                ),
+            ),
+            Category(
+                Page.SETTINGS_BUBBLE, KnobIcons.MusicNote,
+                sentence(
+                    buildList {
+                        add(
+                            stringResource(
+                                when (s.bubbleAuto) {
+                                    com.knobnext.BubbleAuto.OFF -> R.string.sum_bubble_gesture
+                                    com.knobnext.BubbleAuto.EVERY -> R.string.sum_bubble_every
+                                    com.knobnext.BubbleAuto.NEWS -> R.string.sum_bubble_news
+                                },
+                            ),
+                        )
+                        if (s.bubbleAuto != com.knobnext.BubbleAuto.OFF && s.bubbleWhere == com.knobnext.BubbleWhere.LOCKED) {
+                            add(stringResource(R.string.sum_bubble_locked))
+                        }
+                    },
+                ),
+            ),
             Category(
                 Page.SETTINGS_VOICE, KnobIcons.Mic,
-                stringResource(if (mic) R.string.sum_voice_ready else R.string.sum_voice_mic),
+                sentence(
+                    buildList {
+                        add(stringResource(if (mic) R.string.sum_voice_ready else R.string.sum_voice_mic))
+                        if (s.devMode && s.cloudReady) add(stringResource(R.string.sum_cloud_on, s.cloudService.title))
+                    },
+                ),
             ),
+        ),
+        listOf(
             Category(
                 Page.SETTINGS_PAUSE, KnobIcons.Bedtime,
                 sentence(
@@ -1588,10 +1642,15 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
         }
     }
     item { SpeechCard(s, prefs) }
+}
+
+/** The story about a track: how it is told, and where what it says comes from. */
+private fun LazyListScope.storySettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
     item {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionTitle(stringResource(R.string.info_title))
-            Group(6) {
+            Group(5) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.info_delivery), caption = stringResource(R.string.info_delivery_hint)) {
                         ConnectedChoice(
@@ -1604,8 +1663,47 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoDelivery = it },
                         )
                     }
+                    ControlRow(shape(1), stringResource(R.string.info_language)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLanguage.RU to R.string.info_language_ru,
+                                com.knobnext.InfoLanguage.EN to R.string.info_language_en,
+                                com.knobnext.InfoLanguage.SYSTEM to R.string.info_language_system,
+                            ),
+                            selected = s.infoLanguage,
+                            onSelect = { prefs.infoLanguage = it },
+                        )
+                    }
+                    ControlRow(shape(2), stringResource(R.string.info_length)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.InfoLength.SHORT to R.string.info_length_short,
+                                com.knobnext.InfoLength.NORMAL to R.string.info_length_normal,
+                                com.knobnext.InfoLength.LONG to R.string.info_length_long,
+                            ),
+                            selected = s.infoLength,
+                            onSelect = { prefs.infoLength = it },
+                        )
+                    }
+                    ControlRow(shape(3), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
+                        ConnectedChoice(
+                            options = listOf(false to R.string.info_music_duck, true to R.string.info_music_pause),
+                            selected = s.infoPause,
+                            onSelect = { prefs.infoPause = it },
+                        )
+                    }
+                    SwitchRow(
+                        shape(4), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
+                        subtitle = stringResource(R.string.acq_history_hint),
+                    )
+                }
+            }
+            Hint(stringResource(R.string.info_hint))
+            SectionTitle(stringResource(R.string.story_sources))
+            Group(1) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(
-                        shape(1), stringResource(R.string.info_source),
+                        shape(0), stringResource(R.string.info_source),
                         caption = stringResource(
                             when (s.infoSource) {
                                 com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini_hint
@@ -1625,45 +1723,21 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                             onSelect = { prefs.infoSource = it },
                         )
                     }
-                    ControlRow(shape(2), stringResource(R.string.info_language)) {
-                        ConnectedChoice(
-                            options = listOf(
-                                com.knobnext.InfoLanguage.RU to R.string.info_language_ru,
-                                com.knobnext.InfoLanguage.EN to R.string.info_language_en,
-                                com.knobnext.InfoLanguage.SYSTEM to R.string.info_language_system,
-                            ),
-                            selected = s.infoLanguage,
-                            onSelect = { prefs.infoLanguage = it },
-                        )
-                    }
-                    ControlRow(shape(3), stringResource(R.string.info_length)) {
-                        ConnectedChoice(
-                            options = listOf(
-                                com.knobnext.InfoLength.SHORT to R.string.info_length_short,
-                                com.knobnext.InfoLength.NORMAL to R.string.info_length_normal,
-                                com.knobnext.InfoLength.LONG to R.string.info_length_long,
-                            ),
-                            selected = s.infoLength,
-                            onSelect = { prefs.infoLength = it },
-                        )
-                    }
-                    ControlRow(shape(4), stringResource(R.string.info_music), caption = stringResource(R.string.info_music_hint)) {
-                        ConnectedChoice(
-                            options = listOf(false to R.string.info_music_duck, true to R.string.info_music_pause),
-                            selected = s.infoPause,
-                            onSelect = { prefs.infoPause = it },
-                        )
-                    }
-                    SwitchRow(
-                        shape(5), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
-                        subtitle = stringResource(R.string.acq_history_hint),
-                    )
                 }
             }
             // Quietly, what told the last story: the model, the facts as they are, the cloud with its search.
             if (s.storyLast.isNotBlank()) Hint(stringResource(R.string.info_last, s.storyLast, clock(s.storyLastAt)))
-            Hint(stringResource(R.string.info_hint))
-            SectionTitle(stringResource(R.string.bubble_title))
+            SourceKeys(prefs)
+        }
+    }
+}
+
+/** The round card: when it comes by itself, where, and on which edge. */
+private fun LazyListScope.bubbleSettings(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Group(3) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.bubble_auto), caption = stringResource(R.string.bubble_auto_hint)) {
@@ -1700,10 +1774,21 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.bubble_remote_hint))
-            // Experimental, for development: shown in developer mode only.
-            if (s.devMode) CloudKeys(s, prefs)
-            SourceKeys(prefs)
         }
+    }
+}
+
+/** The cloud model, an experiment: one switch, and behind it the services, keys and models. */
+@Composable
+private fun CloudCard(ctx: PageContext) {
+    val s = ctx.s
+    val prefs = ctx.prefs
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionTitle(stringResource(R.string.cloud_title))
+        Group(1) {
+            SwitchRow(shape(0), stringResource(R.string.cloud_enable), s.devMode, { prefs.devMode = it }, subtitle = stringResource(R.string.dev_mode_hint))
+        }
+        if (s.devMode) CloudKeys(s, prefs)
     }
 }
 
@@ -1810,7 +1895,7 @@ private fun LazyListScope.aboutSettings(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(4) {
+        Group(3) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ListRow(
                     shape(0), stringResource(R.string.diag_title),
@@ -1832,7 +1917,6 @@ private fun LazyListScope.aboutSettings(ctx: PageContext) {
                 } else {
                     ListRow(shape(2), stringResource(R.string.app_name), stringResource(R.string.version_value, ctx.versionName))
                 }
-                DevModeRow(shape(3), ctx.versionName, s.devMode, prefs)
             }
         }
     }
@@ -2085,36 +2169,3 @@ internal fun Hint(text: String) {
         modifier = Modifier.padding(horizontal = 16.dp),
     )
 }
-
-/**
- * The build, and developer mode behind it: seven taps turn it on, as in Android's own settings; once
- * on, the row is a switch that turns it off.
- */
-@Composable
-private fun GroupScope.DevModeRow(shape: androidx.compose.ui.graphics.Shape, version: String, on: Boolean, prefs: Prefs) {
-    val context = LocalContext.current
-    if (on) {
-        SwitchRow(shape, stringResource(R.string.dev_mode), true, { prefs.devMode = it }, subtitle = stringResource(R.string.dev_mode_hint))
-        return
-    }
-    var taps by remember { mutableIntStateOf(0) }
-    ListRow(
-        shape, stringResource(R.string.dev_build), stringResource(R.string.version_value, version),
-        onClick = {
-            taps++
-            val left = DEV_TAPS - taps
-            when {
-                left <= 0 -> {
-                    prefs.devMode = true
-                    taps = 0
-                    android.widget.Toast.makeText(context, context.getString(R.string.dev_mode_on), android.widget.Toast.LENGTH_SHORT).show()
-                }
-                left <= DEV_TAPS_SHOWN ->
-                    android.widget.Toast.makeText(context, context.getString(R.string.dev_mode_left, left), android.widget.Toast.LENGTH_SHORT).show()
-            }
-        },
-    )
-}
-
-private const val DEV_TAPS = 7
-private const val DEV_TAPS_SHOWN = 4

@@ -329,8 +329,8 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putString("cloud_service", v.name).apply()
 
     /**
-     * Developer mode (seven taps on the version): the experimental cloud model, its keys and its questions
-     * in the card. Off, the app is as it was without it; a story set to the cloud goes back to Gemini.
+     * The experimental cloud model, switched on in "Voice and AI": its keys, the Cloud story source and its
+     * questions in the card. Off, the app is as it was without it; a story set to the cloud goes back to Gemini.
      */
     var devMode: Boolean
         get() = sp.getBoolean("dev_mode", false)

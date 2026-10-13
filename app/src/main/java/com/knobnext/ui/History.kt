@@ -493,7 +493,6 @@ fun SourceKeys(prefs: Prefs) {
 fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
     val context = LocalContext.current
     val service = s.cloudService
-    SectionTitle(stringResource(R.string.cloud_title))
     Hint(stringResource(R.string.cloud_hint))
     Column(Modifier.padding(horizontal = 16.dp)) {
         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
