@@ -4,11 +4,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Handler
+import android.os.SystemClock
 import android.view.KeyEvent
 
 /**
@@ -21,7 +24,9 @@ import android.view.KeyEvent
  * Android does not simply give the buttons to the session that was active last: it gives them to the
  * session of the app that started playing sound last, which is always the player. So while music plays,
  * KnobNext plays inaudible silence of its own, started again just after the player (re)starts, so it is
- * the app that started last and the buttons come to it.
+ * the app that started last and the buttons come to it. Whenever any other sound starts (a player that
+ * restarts its sound on the next track a little late, a video, a voice message), it does so again; and
+ * when it starts (after an update, a call) a moment of silence is enough even with the music paused.
  *
  * What a button sends is up to the headphones: a tap is usually play/pause, two taps next, three
  * previous. Devices that send only play/pause can have the presses counted here (two or three in a row,
@@ -46,6 +51,17 @@ class HeadsetButtons(
     private var mirroredPlaying = false
     private var mirroredTitle: String? = null
     private val claim = Runnable { claimButtons() }
+    private val endBurst = Runnable { if (mirrored?.isPlaying() != true) silence.stop() }
+    private var lastClaimAt = 0L
+
+    // Sound that starts while this is set is KnobNext's own silence, not someone taking the buttons.
+    private var ownUntil = 0L
+    private val audio = context.getSystemService(AudioManager::class.java)
+    private var sounding: Set<AudioPlaybackConfiguration> = emptySet()
+    private var ownSound: Set<AudioPlaybackConfiguration> = emptySet()
+    private val soundWatch = object : AudioManager.AudioPlaybackCallback() {
+        override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) = onSound(configs)
+    }
 
     /** Whether that silence plays now: the system then can't tell music from it. */
     val silencePlaying: Boolean get() = silence.playing
@@ -94,19 +110,54 @@ class HeadsetButtons(
             // The player has just (re)started its sound: start ours after it.
             handler.removeCallbacks(claim)
             handler.postDelayed(claim, CLAIM_DELAY_MS)
-        } else if (!playing) {
-            handler.removeCallbacks(claim)
+        } else if (!playing && mirroredPlaying) {
+            // Paused: no silence for nothing. The buttons stay with KnobNext, which played last.
+            handler.removeCallbacks(endBurst)
             silence.stop()
         }
         mirroredPlaying = playing
         mirroredTitle = title
     }
 
-    /** Plays the silence anew, so KnobNext is the app that started sound last and gets the buttons. */
+    /**
+     * Plays the silence anew, so KnobNext is the app that started sound last and gets the buttons: on and
+     * on while music plays, a moment when it is paused (being the last to have played is what counts).
+     */
     private fun claimButtons() {
-        if (session == null || mirrored?.isPlaying() != true) return
+        if (session == null) return
+        val now = SystemClock.uptimeMillis()
+        // Not more often than this: an app doing the same must not start a tug of war.
+        val wait = lastClaimAt + MIN_CLAIM_GAP_MS - now
+        if (wait > 0) {
+            handler.removeCallbacks(claim)
+            handler.postDelayed(claim, wait)
+            return
+        }
+        lastClaimAt = now
+        ownUntil = now + OWN_SOUND_MS
+        handler.removeCallbacks(endBurst)
         silence.stop()
         silence.start()
+        if (mirrored?.isPlaying() != true) handler.postDelayed(endBurst, BURST_MS)
+    }
+
+    /** Some sound started or stopped: one that is not KnobNext's own takes the buttons, so they are claimed back. */
+    private fun onSound(configs: List<AudioPlaybackConfiguration>) {
+        val now = configs.toSet()
+        val started = now - sounding
+        sounding = now
+        if (started.isEmpty() || session == null) return
+        if (SystemClock.uptimeMillis() < ownUntil) {
+            // Our silence (it can stop and start again in one go, so it is remembered as ours).
+            ownSound = (ownSound intersect now) + started
+            return
+        }
+        // Only a player's sound can take the buttons (an app plays media with a session); a notification
+        // or a spoken prompt can't, and KnobNext's own stories are spoken.
+        if (started.none { it !in ownSound && it.audioAttributes.usage in MEDIA_USAGES }) return
+        log(context.getString(R.string.log_buttons_reclaim))
+        handler.removeCallbacks(claim)
+        handler.postDelayed(claim, CLAIM_DELAY_MS)
     }
 
     fun release() {
@@ -122,7 +173,11 @@ class HeadsetButtons(
         session = s
         pushed = null
         push()
-        if (mirrored?.isPlaying() == true) handler.postDelayed(claim, CLAIM_DELAY_MS)
+        // Started anew (after an update, a call): the player played last, so the buttons are claimed at
+        // once, music playing or not, rather than only when it next starts.
+        handler.postDelayed(claim, CLAIM_DELAY_MS)
+        sounding = runCatching { audio.activePlaybackConfigurations.toSet() }.getOrDefault(emptySet())
+        runCatching { audio.registerAudioPlaybackCallback(soundWatch, handler) }
         if (!headset) return log(context.getString(R.string.log_pixel_tap_on))
         HeadsetLive.setDevice(device.ifBlank { "?" })
         if (device.isNotBlank() && prefs.lastHeadset != device) prefs.lastHeadset = device
@@ -134,6 +189,10 @@ class HeadsetButtons(
         handler.removeCallbacks(resolve)
         handler.removeCallbacks(hold)
         handler.removeCallbacks(claim)
+        handler.removeCallbacks(endBurst)
+        runCatching { audio.unregisterAudioPlaybackCallback(soundWatch) }
+        sounding = emptySet()
+        ownSound = emptySet()
         silence.stop()
         presses = 0
         session?.let {
@@ -336,6 +395,20 @@ class HeadsetButtons(
         const val REPEAT_MS = 300L
         const val PIXEL_DEBOUNCE_MS = 400L
         const val CLAIM_DELAY_MS = 400L
+
+        /** The shortest time between two claims of the buttons. */
+        const val MIN_CLAIM_GAP_MS = 2_000L
+
+        /** How long sound that starts is taken for KnobNext's own silence after it starts it. */
+        const val OWN_SOUND_MS = 600L
+
+        /** The moment of silence played to claim the buttons while the music is paused. */
+        const val BURST_MS = 300L
+
+        val MEDIA_USAGES = setOf(
+            android.media.AudioAttributes.USAGE_MEDIA, android.media.AudioAttributes.USAGE_GAME,
+            android.media.AudioAttributes.USAGE_UNKNOWN,
+        )
         val PASS_ON_KEYS = setOf(
             KeyEvent.KEYCODE_MEDIA_STOP, KeyEvent.KEYCODE_MEDIA_RECORD, KeyEvent.KEYCODE_MEDIA_CLOSE,
             KeyEvent.KEYCODE_MEDIA_EJECT, KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK,

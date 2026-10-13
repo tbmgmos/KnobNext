@@ -576,6 +576,7 @@
     <string name="log_pocket">%1$s: датчик приближения закрыт</string>
     <string name="log_headset_on">наушники: кнопки идут через KnobNext (%1$s)</string>
     <string name="log_headset_off">наушники: кнопки снова идут напрямую плееру</string>
+    <string name="log_buttons_reclaim">кнопки: запустился другой звук — забираю их обратно</string>
     <string name="log_headset_key">наушники: пришла кнопка %1$s</string>
     <string name="log_headset_same">наушники: %1$s пропущена, плеер уже в этом состоянии</string>
     <string name="log_headset_assist">наушники: кнопка ассистента</string>
