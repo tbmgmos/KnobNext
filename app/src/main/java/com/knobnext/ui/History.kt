@@ -551,8 +551,13 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
                 prefs.setCloudModel(service, model)
             },
             label = { Text(stringResource(R.string.cloud_model)) },
-            placeholder = { Text(service.defaultModel) },
-            supportingText = { Text(stringResource(R.string.cloud_model_hint, service.defaultModel)) },
+            placeholder = { Text(if (service == com.knobnext.CloudService.OPENROUTER) "…:free" else service.defaultModel) },
+            supportingText = {
+                Text(
+                    if (service == com.knobnext.CloudService.OPENROUTER) stringResource(R.string.cloud_model_hint_free)
+                    else stringResource(R.string.cloud_model_hint, service.defaultModel),
+                )
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )

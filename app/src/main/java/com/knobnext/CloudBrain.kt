@@ -77,7 +77,12 @@ object CloudBrain {
             val key = prefs.cloudKey(service)
             val model = prefs.cloudModel(service).ifBlank { service.defaultModel }
             val answer = try {
-                if (service == CloudService.GEMINI) gemini(prefs, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
+                when {
+                    service == CloudService.GEMINI -> gemini(prefs, key, model, system, prompt, maxTokens)
+                    // No model named: one of OpenRouter's free ones, found and kept.
+                    service == CloudService.OPENROUTER && prefs.cloudModel(service).isBlank() -> openRouterFree(prefs, key, system, prompt, maxTokens)
+                    else -> chat(service, key, model, system, prompt, maxTokens)
+                }
             } catch (e: Exception) {
                 lastError = e.javaClass.simpleName
                 lastDetail = e.message?.take(MAX_ERROR_CHARS)
@@ -251,6 +256,42 @@ object CloudBrain {
         return Answer(text, emptyList())
     }
 
+    /**
+     * OpenRouter with no model named: its free models (":free", priced at nothing), the one that answered
+     * last first. One key is all it needs; a free model that is busy or gone gives way to the next.
+     */
+    private fun openRouterFree(prefs: Prefs, key: String, system: String, prompt: String, maxTokens: Int): Answer? {
+        val service = CloudService.OPENROUTER
+        val tries = LinkedHashSet<String>()
+        prefs.cloudWorking(service)?.first?.let { tries += it }
+        tries += freeModels(key).take(MAX_FREE_TRIED)
+        if (tries.isEmpty()) {
+            lastError = "у OpenRouter не нашлось бесплатных моделей — впишите модель в настройках"
+            return null
+        }
+        for (m in tries) {
+            chat(service, key, m, system, prompt, maxTokens)?.let {
+                prefs.setCloudWorking(service, m, false)
+                return it
+            }
+        }
+        return null
+    }
+
+    /** OpenRouter's free text models, the better-known families first. */
+    private fun freeModels(key: String): List<String> {
+        val list = get("${CloudService.OPENROUTER.base}/models", mapOf("Authorization" to "Bearer $key")).json?.optJSONArray("data") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+            .filter { m ->
+                val price = m.optJSONObject("pricing")
+                val free = m.optString("id").endsWith(":free") || (price?.optString("prompt") == "0" && price?.optString("completion") == "0")
+                val text = m.optJSONObject("architecture")?.optString("output_modalities")?.contains("image") != true
+                free && text && m.optString("id") != "openrouter/auto"
+            }
+            .map { it.optString("id") }
+            .sortedBy { id -> FREE_PREFERRED.indexOfFirst { it in id }.let { if (it < 0) FREE_PREFERRED.size else it } }
+    }
+
     // ---- Requests ----
 
     /** What a request brought: the code (0: no answer at all), the JSON, the service's words, when to retry. */
@@ -332,6 +373,10 @@ object CloudBrain {
     private const val BUSY_WAIT_MS = 2_000L
     private const val MAX_RETRY_WAIT_S = 10
     private const val MAX_OTHER_MODELS = 3
+    private const val MAX_FREE_TRIED = 4
+
+    /** Free models from these families are tried first: they know music and Russian best. */
+    private val FREE_PREFERRED = listOf("deepseek", "gemini", "llama-3.3", "qwen", "mistral", "llama")
 
     /** Flash models that are not for text: pictures, speech, live audio, embeddings. */
     private val UNFIT = listOf("image", "tts", "audio", "live", "embedding", "native", "robotics", "computer-use")
