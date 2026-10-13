@@ -15,8 +15,12 @@ import javax.net.ssl.SSLException
 sealed interface KeyCheck {
     object Works : KeyCheck
 
-    /** The service answered and did not take the key: its HTTP status and, when it gave one, its own error code. */
-    class Rejected(val http: Int, val error: Int?) : KeyCheck
+    /**
+     * The service answered and did not take the key: its HTTP status, its own error code and message when
+     * it gave them, and [fromApi] false when the answer was not the API's at all (a page from a network
+     * filter, a VPN's or the site's guard): then the key was never looked at.
+     */
+    class Rejected(val http: Int, val error: Int?, val message: String?, val fromApi: Boolean) : KeyCheck
 
     /** No answer at all: [kind] says what went wrong, [detail] names the exception. */
     class NoAnswer(val kind: Kind, val detail: String) : KeyCheck
@@ -41,7 +45,12 @@ sealed interface KeyCheck {
                     if (http == HttpURLConnection.HTTP_OK && json != null && accepts(json)) {
                         Works
                     } else {
-                        Rejected(http, json?.optInt("error")?.takeIf { it != 0 })
+                        // What it said, short: the API's own message, or the start of a page's text.
+                        val said = json?.optString("message")?.takeIf { it.isNotBlank() }
+                            ?: body.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim().takeIf { it.isNotEmpty() }
+                        // A web page instead of the API's JSON or plain text: something on the way answered.
+                        val page = json == null && Regex("(?i)<(!doctype|html|head|body)").containsMatchIn(body)
+                        Rejected(http, json?.optInt("error")?.takeIf { it != 0 }, said?.take(MAX_DETAIL_CHARS), fromApi = !page)
                     }
                 } finally {
                     conn.disconnect()
@@ -62,6 +71,6 @@ sealed interface KeyCheck {
         val LASTFM_KEY = Regex("[0-9a-fA-F]{32}")
 
         private const val TIMEOUT_MS = 8_000
-        private const val MAX_DETAIL_CHARS = 60
+        private const val MAX_DETAIL_CHARS = 100
     }
 }

@@ -47,7 +47,7 @@ class StoryLiveTest {
         // What the services say to keys that cannot work: the answers the settings screen turns into messages.
         fun show(r: KeyCheck) = when (r) {
             is KeyCheck.Works -> "работает"
-            is KeyCheck.Rejected -> "отказ: HTTP ${r.http}, код ${r.error}"
+            is KeyCheck.Rejected -> "отказ: HTTP ${r.http}, код ${r.error}, от API ${r.fromApi}: ${r.message}"
             is KeyCheck.NoAnswer -> "нет ответа: ${r.kind} ${r.detail}"
         }
         println("\n===== Проверка ключей")

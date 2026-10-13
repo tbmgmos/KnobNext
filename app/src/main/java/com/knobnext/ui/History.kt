@@ -407,13 +407,19 @@ fun SourceKeys(prefs: Prefs) {
 @Composable
 private fun keyProblem(result: KeyCheck): String = when (result) {
     is KeyCheck.Works -> stringResource(R.string.keys_works)
-    is KeyCheck.Rejected -> when {
-        // Last.fm: error 26 is a suspended key, 29 a limit; setlist.fm says 429 for a limit.
-        result.error == KEY_SUSPENDED -> stringResource(R.string.keys_suspended)
-        result.error == KEY_LIMIT || result.http == HTTP_TOO_MANY -> stringResource(R.string.keys_limit)
-        result.error == KEY_INVALID || result.http == HTTP_UNAUTHORIZED || result.http == HTTP_FORBIDDEN ->
-            stringResource(R.string.keys_rejected)
-        else -> stringResource(R.string.keys_rejected_other, result.error ?: result.http)
+    is KeyCheck.Rejected -> {
+        val reason = when {
+            // Last.fm: error 26 is a suspended key, 29 a limit; setlist.fm says 429 for a limit.
+            result.error == KEY_SUSPENDED -> stringResource(R.string.keys_suspended)
+            result.error == KEY_LIMIT || result.http == HTTP_TOO_MANY -> stringResource(R.string.keys_limit)
+            // Not the API's answer (an HTML page): something on the way stopped the request, the key is not to blame.
+            !result.fromApi -> stringResource(R.string.keys_blocked, result.http)
+            result.error == KEY_INVALID || result.http == HTTP_UNAUTHORIZED || result.http == HTTP_FORBIDDEN ->
+                stringResource(R.string.keys_rejected)
+            else -> stringResource(R.string.keys_rejected_other, result.error ?: result.http)
+        }
+        // The service's own words, as it said them: the surest clue.
+        result.message?.let { reason + "\n" + stringResource(R.string.keys_service_said, it) } ?: reason
     }
     is KeyCheck.NoAnswer -> when (result.kind) {
         KeyCheck.Kind.TIMEOUT -> stringResource(R.string.keys_no_answer_timeout)
