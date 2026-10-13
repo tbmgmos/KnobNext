@@ -94,6 +94,8 @@ object Journal {
                 val o = artists.getJSONObject(other)
                 links(o).any { key(it) == k } || id != null && strings(o, "linkIds").contains(id)
             }?.let { fresh.put("via", artists.getJSONObject(it).optString("name")) }
+                // Or reached down the circle in the round card: the card before theirs.
+                ?: cameBy(root, k)?.let { fresh.put("via", it) }
             artists.put(k, fresh)
         }
         id?.let { e.put("id", it) }
@@ -269,6 +271,48 @@ object Journal {
     private fun same(l: Later, artist: String, title: String?) =
         key(l.artist) == key(artist) && (l.title?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT)) == title?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT)
 
+    // ---- Trails down the circle ----
+
+    /**
+     * A way down the circle in the round card: from the track's artist, card after card, in the order
+     * they were first opened. [played]: the artists put on from it.
+     */
+    class Trail(val at: Long, val steps: List<String>, val played: List<String>)
+
+    /** The latest first. */
+    @Synchronized
+    fun trails(context: Context): List<Trail> {
+        val list = read(context).optJSONArray("trails") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }
+            .map { Trail(it.optLong("at"), strings(it, "steps"), strings(it, "played")) }
+            .sortedByDescending { it.at }
+    }
+
+    /** The trail begun at [at] as it is now: [steps] so far, and [played] added to what was put on from it. */
+    @Synchronized
+    fun keepTrail(context: Context, at: Long, steps: List<String>, played: String? = null) {
+        if (steps.size < 2) return
+        val root = read(context)
+        val list = root.optJSONArray("trails") ?: JSONArray().also { root.put("trails", it) }
+        val o = (0 until list.length()).map { list.getJSONObject(it) }.firstOrNull { it.optLong("at") == at }
+            ?: JSONObject().put("at", at).also { list.put(it) }
+        o.put("steps", JSONArray(steps.map(Speech::cleanArtist)))
+        if (played != null) o.put("played", JSONArray((strings(o, "played") + Speech.cleanArtist(played)).distinctBy(::key)))
+        while (list.length() > MAX_TRAILS) list.remove(0)
+        write(context, root)
+    }
+
+    /** The artist whose card led to [k]'s in a trail, if any did. */
+    private fun cameBy(root: JSONObject, k: String): String? {
+        val list = root.optJSONArray("trails") ?: return null
+        for (i in list.length() - 1 downTo 0) {
+            val steps = strings(list.getJSONObject(i), "steps")
+            val at = steps.indexOfFirst { key(it) == k }
+            if (at > 0) return steps[at - 1]
+        }
+        return null
+    }
+
     // ---- Artists met ----
 
     /**
@@ -387,6 +431,7 @@ object Journal {
 
     private const val MAX_NOTES = 50
     private const val MAX_LATER = 200
+    private const val MAX_TRAILS = 50
     private const val MAX_SEEN = 3000
     private const val MAX_ARTISTS = 500
     private const val MAX_LINKS = 30

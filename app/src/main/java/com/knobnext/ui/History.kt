@@ -70,6 +70,7 @@ fun HistoryList(version: Int, onOpen: (String) -> Unit) {
     LaunchedEffect(Unit) { recheckUnknown(context) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Later(context, version)
+        Trails(context, version)
         if (entries.isEmpty()) {
             Hint(stringResource(R.string.acq_empty))
             return@Column
@@ -309,6 +310,36 @@ private fun Later(context: Context, version: Int) {
                             IconButton(onClick = { Journal.toggleLater(context, l.artist, l.title, null) }) {
                                 Icon(KnobIcons.Close, contentDescription = stringResource(R.string.later_remove))
                             }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** The ways taken down the circle in the round card: where each began and where it led. */
+@Composable
+private fun Trails(context: Context, version: Int) {
+    val list = remember(version) { Journal.trails(context).take(MAX_TRAILS_SHOWN) }
+    if (list.isEmpty()) return
+    val media = remember { com.knobnext.Media(context) }
+    val scope = rememberCoroutineScope()
+    SectionTitle(stringResource(R.string.trails_title))
+    Hint(stringResource(R.string.trails_hint))
+    Group(list.size) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            list.forEachIndexed { i, t ->
+                val last = t.steps.last()
+                ListRow(
+                    shape(i), t.steps.joinToString(" → "),
+                    subtitle = listOfNotNull(
+                        day(t.at),
+                        t.played.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.trails_played, it.joinToString(", ")) },
+                    ).joinToString(" · "),
+                    trailing = {
+                        IconButton(onClick = { scope.launch { playInPlayer(context, media, last) } }) {
+                            Icon(KnobIcons.Play, contentDescription = stringResource(R.string.acq_link_play, last))
                         }
                     },
                 )
@@ -568,6 +599,7 @@ private fun KeyField(
 private val coverTried: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
 
 private const val TOP_ARTISTS = 3
+private const val MAX_TRAILS_SHOWN = 10
 private const val RECHECK_AT_ONCE = 3
 private const val LIST_COVER_DP = 40
 private const val CARD_COVER_DP = 96

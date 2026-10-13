@@ -687,6 +687,24 @@ object TrackInfo {
         return found
     }
 
+    /**
+     * The recording itself for the round card (who plays on it, samples, covers): MusicBrainz, a request
+     * a second, so it comes a few seconds after the card opens, and is kept.
+     */
+    suspend fun record(context: Context, track: Track, lang: String, mbid: String?): Brainz.Record? {
+        val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
+        val file = File(dir(context), RECORD_PREFIX + sha1("${normalize(Speech.cleanTitle(track.title))}\u0000${normalize(artist)}\u0000$lang"))
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
+            runCatching { Brainz.Record.fromJson(JSONObject(file.readText())) }.getOrNull()?.let { return it }
+        }
+        val found = withContext(Dispatchers.IO) {
+            runCatching { Brainz.record(lang, track.title, artist, mbid) }.getOrNull()
+        } ?: return null
+        runCatching { file.writeText(found.toJson().toString()) }
+        trimCache(context)
+        return found
+    }
+
     /** What a card says of the artist: who they are, then the rest of their facts, a sentence each. */
     fun aboutLines(facts: Facts, lang: String): List<String> {
         val seen = HashSet<String>()
@@ -1008,7 +1026,7 @@ object TrackInfo {
     /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {
         dir(context).listFiles { f -> f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) }?.forEach { it.delete() }
-        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX)) {
+        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX)) {
             val files = dir(context).listFiles { f -> f.name.startsWith(prefix) } ?: continue
             if (files.size <= MAX_CACHED) continue
             files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
@@ -1093,6 +1111,9 @@ object TrackInfo {
 
     /** An artist's own facts, looked up from the round card's circle. */
     private const val ARTIST_PREFIX = "artist1-"
+
+    /** The recording as MusicBrainz knows it, for the round card. */
+    private const val RECORD_PREFIX = "record1-"
 
     /** Two sentences that begin with this many of the same characters are one. */
     private const val DUPLICATE_CHARS = 60

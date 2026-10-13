@@ -103,12 +103,19 @@ class TrackBubble(
     /** The note the track's card shows; null while it is being looked for. */
     private var note: String? = null
     private var trackFacts: TrackInfo.Facts? = null
+    private var trackRecord: Brainz.Record? = null
+    private var recordJob: Job? = null
+    private var recordBox: LinearLayout? = null
 
     /** Down the circle: the artists whose cards were opened, each with why they are in the one before. */
     private val path = ArrayList<String>()
     private val reasons = ArrayList<String?>()
     private val artists = HashMap<String, TrackInfo.Facts?>()
     private var page = 0
+
+    /** The trail down the circle this time the card is open: when it began, and who was opened. */
+    private var trailAt = 0L
+    private val trailSteps = ArrayList<String>()
 
     private val hide = Runnable { dismiss() }
     private val tick = object : Runnable {
@@ -130,6 +137,8 @@ class TrackBubble(
             news = null
             note = null
             trackFacts = null
+            trackRecord = null
+            recordJob?.cancel()
             collapse()
         }
 
@@ -165,6 +174,8 @@ class TrackBubble(
         if (!sameTrack) {
             note = null
             trackFacts = null
+            trackRecord = null
+            recordJob?.cancel()
         }
         controller = player
         watch(player)
@@ -199,6 +210,8 @@ class TrackBubble(
         expanded = false
         path.clear()
         reasons.clear()
+        trailAt = 0L
+        trailSteps.clear()
     }
 
     fun release() {
@@ -229,6 +242,8 @@ class TrackBubble(
         circleJob?.cancel()
         path.clear()
         reasons.clear()
+        trailAt = 0L
+        trailSteps.clear()
         val r = root ?: return
         r.removeAllViews()
         val b = bubbleView()
@@ -281,6 +296,7 @@ class TrackBubble(
         news?.let { names.addView(text(service.getString(newsLabel(it)), 12f, palette.accent, bold = true)) }
         noteSection(box)
         circleSection(box)
+        recordSection(box)
         statusSection(box)
 
         val tools = row(Gravity.START)
@@ -326,17 +342,112 @@ class TrackBubble(
 
     /** The artists around the track's artist. */
     private fun loadTrackCircle(t: TrackInfo.Track) {
-        trackFacts?.let { return showCircle(it.related, t.artist) }
+        trackFacts?.let {
+            showCircle(it.related, t.artist)
+            return loadRecord(t, it)
+        }
         circleJob = scope.launch {
             val facts = runCatching { TrackInfo.facts(service, t, prefs.infoLanguage.resolve()) }.getOrNull()
             trackFacts = facts
             if (path.isEmpty()) showCircle(facts?.related.orEmpty(), t.artist)
+            loadRecord(t, facts)
         }
     }
+
+    /** The recording itself: a few seconds later (MusicBrainz takes a request a second), once per track. */
+    private fun loadRecord(t: TrackInfo.Track, facts: TrackInfo.Facts?) {
+        trackRecord?.let { return showRecord(it) }
+        if (recordJob?.isActive == true) return
+        recordJob = scope.launch {
+            val r = runCatching { TrackInfo.record(service, t, prefs.infoLanguage.resolve(), facts?.mbid) }.getOrNull()
+            if (!same(t)) return@launch
+            trackRecord = r
+            if (r != null && path.isEmpty()) showRecord(r)
+        }
+    }
+
+    private fun showRecord(r: Brainz.Record) {
+        val box = recordBox ?: return
+        box.removeAllViews()
+        if (r.empty) return
+        box.visibility = View.VISIBLE
+        box.addView(text(service.getString(R.string.bubble_record), 12f, palette.accent, bold = true))
+        val lines = listOfNotNull(
+            r.producers.takeIf { it.isNotEmpty() }?.let { service.getString(R.string.bubble_record_producer, it.joinToString(", ")) },
+            r.studio?.let { service.getString(R.string.bubble_record_studio, it) },
+            // Who wrote it, when that is news: someone else's song, or written by others than the band.
+            r.writers.takeIf { it.isNotEmpty() && (r.cover || it.none { w -> Journal.key(w) == Journal.key(track?.artist ?: "") }) }
+                ?.let { service.getString(R.string.bubble_record_writers, it.joinToString(", ")) },
+        )
+        if (lines.isNotEmpty()) box.addView(text(lines.joinToString(" · "), 13f, TEXT, lines = 3).apply { setPadding(0, dp(4), 0, 0) })
+        if (r.players.isNotEmpty()) {
+            songRow(box, service.getString(R.string.bubble_record_players), r.players.map { (who, what) ->
+                personChip(who, what.joinToString(", "))
+            })
+        }
+        r.original?.let { songRow(box, service.getString(R.string.bubble_record_original), listOf(songChip(it))) }
+        if (r.samples.isNotEmpty()) songRow(box, service.getString(R.string.bubble_record_samples), r.samples.map(::songChip))
+        if (r.sampledBy.isNotEmpty()) songRow(box, service.getString(R.string.bubble_record_sampled), r.sampledBy.map(::songChip))
+        if (r.covers.isNotEmpty()) {
+            songRow(box, service.getString(R.string.bubble_record_covers, r.coverCount), r.covers.map(::songChip))
+        }
+    }
+
+    private fun songRow(box: LinearLayout, label: String, chips: List<View>) {
+        box.addView(text(label, 12f, MUTED).apply { setPadding(0, dp(8), 0, 0) })
+        val row = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(4), 0, 0) }
+        chips.forEach { row.addView(it) }
+        box.addView(HorizontalScrollView(service).apply { isHorizontalScrollBarEnabled = false; addView(row) })
+    }
+
+    /** One who plays on the recording: their name opens their card. */
+    private fun personChip(name: String, plays: String) = LinearLayout(service).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(palette.chip, 16)
+        setPadding(dp(12), dp(5), dp(12), dp(5))
+        addView(text(name, 13f, TEXT))
+        if (plays.isNotEmpty()) addView(text(plays, 11f, MUTED))
+        setOnClickListener { dive(name) }
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = dp(8)
+        }
+    }
+
+    /** A song: who plays it opens their card, the play icon puts that very song on. */
+    private fun songChip(song: Brainz.Song) = LinearLayout(service).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = rounded(palette.chip, 16)
+        addView(
+            LinearLayout(service).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(5), dp(8), dp(5))
+                addView(text(song.title, 13f, TEXT))
+                addView(text(listOfNotNull(song.artist, song.year).joinToString(" · "), 11f, MUTED))
+                setOnClickListener { dive(song.artist) }
+            },
+        )
+        addView(View(service).apply { setBackgroundColor(palette.card) }, LinearLayout.LayoutParams(dp(1), dp(24)))
+        addView(
+            ImageView(service).apply {
+                setImageDrawable(icon(R.drawable.ic_bubble_play, palette.accent, CHIP_ICON_DP))
+                scaleType = ImageView.ScaleType.CENTER
+                setPadding(dp(8), dp(6), dp(10), dp(6))
+                contentDescription = service.getString(R.string.bubble_play_who, "${song.artist} — ${song.title}")
+                setOnClickListener { play(song.artist, song.title) }
+            },
+        )
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = dp(8)
+        }
+    }
+
+    private fun circleSection(box: LinearLayout) {
 
     // ---- An artist's card, down the circle ----
 
     private fun artistCard(name: String): View {
+        recordBox = null
         val box = cardBox()
         val picture = runCatching {
             Journal.latestCover(service, Journal.key(name))?.let { BitmapFactory.decodeFile(it.path) }
@@ -415,7 +526,21 @@ class TrackBubble(
         val before = path.lastOrNull()?.let { artists[it] } ?: trackFacts
         path += name
         reasons += before?.let { TrackInfo.why(it.circle, name) }
+        step(name)
         render()
+    }
+
+    /** [name] joins this time's trail (kept in the Journal); [played]: and was put on. */
+    private fun step(name: String, played: Boolean = false) {
+        val from = track?.artist?.let(Speech::cleanArtist) ?: return
+        if (trailAt == 0L) {
+            trailAt = System.currentTimeMillis()
+            trailSteps += from
+        }
+        if (trailSteps.none { Journal.key(it) == Journal.key(name) }) trailSteps += name
+        val at = trailAt
+        val steps = trailSteps.toList()
+        scope.launch(Dispatchers.IO) { Journal.keepTrail(service, at, steps, name.takeIf { played }) }
     }
 
     private fun back() {
@@ -436,16 +561,18 @@ class TrackBubble(
         circleBox?.visibility = if (names.isEmpty()) View.GONE else View.VISIBLE
     }
 
-    private fun play(name: String) {
-        status(service.getString(R.string.bubble_circle_trying, name))
+    private fun play(name: String, title: String? = null) {
+        step(name, played = true)
+        val what = if (title != null) "$name — $title" else name
+        status(service.getString(R.string.bubble_circle_trying, what))
         scope.launch {
-            val r = CirclePlay.play(service, controller, prefs.lastPlayer, name)
+            val r = CirclePlay.play(service, controller, prefs.lastPlayer, name, title)
             val player = r.player?.let { appLabel(service, it) }
             val text = when {
                 player == null -> service.getString(R.string.log_no_player)
-                r.ok && r.opened -> service.getString(R.string.log_circle_opened, name, player)
-                r.ok -> service.getString(R.string.log_circle_play, name, player)
-                else -> service.getString(R.string.log_circle_cannot, player, name)
+                r.ok && r.opened -> service.getString(R.string.log_circle_opened, what, player)
+                r.ok -> service.getString(R.string.log_circle_play, what, player)
+                else -> service.getString(R.string.log_circle_cannot, player, what)
             }
             log(text)
             // The player came to the front: the card folds out of its way.
@@ -726,16 +853,30 @@ class TrackBubble(
     @SuppressLint("ClickableViewAccessibility")
     private fun cardBox() = LinearLayout(service).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(palette.card, 24)
         setPadding(dp(16), dp(16), dp(16), dp(6))
-        elevation = dp(8).toFloat()
         // Any touch inside keeps it open.
         setOnTouchListener { _, _ -> keepOpen(); false }
     }
 
+    /** The card on its background; taller than most of the screen, it scrolls. */
     private fun framed(box: View) = FrameLayout(service).apply {
-        addView(box, FrameLayout.LayoutParams(dp(CARD_DP), FrameLayout.LayoutParams.WRAP_CONTENT))
-        setPadding(0, 0, 0, dp(8))
+        val scroll = Capped().apply {
+            isVerticalScrollBarEnabled = false
+            background = rounded(palette.card, 24)
+            outlineProvider = ViewOutlineProvider.BACKGROUND
+            clipToOutline = true
+            elevation = dp(8).toFloat()
+            addView(box)
+        }
+        addView(scroll, FrameLayout.LayoutParams(dp(CARD_DP), FrameLayout.LayoutParams.WRAP_CONTENT))
+        setPadding(dp(4), 0, dp(4), dp(8))
+    }
+
+    private inner class Capped : android.widget.ScrollView(service) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val most = (resources.displayMetrics.heightPixels * MAX_CARD_HEIGHT).toInt()
+            super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(most, View.MeasureSpec.AT_MOST))
+        }
     }
 
     /** The picture and, beside it, a column for the names: returned to be filled. */
@@ -758,6 +899,17 @@ class TrackBubble(
         }
         noteView = n
         box.addView(n)
+    }
+
+    /** "About the recording", filled once MusicBrainz has answered. */
+    private fun recordSection(box: LinearLayout) {
+        val r = LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(0, dp(12), 0, 0)
+        }
+        recordBox = r
+        box.addView(r)
     }
 
     private fun circleSection(box: LinearLayout) {
@@ -970,6 +1122,9 @@ class TrackBubble(
         const val MAX_NOTE_LINES = 9
         const val MAX_CHIPS = 8
         const val DEFAULT_Y = 0.3
+
+        /** The open card's height at most, of the screen's: more scrolls. */
+        const val MAX_CARD_HEIGHT = 0.75f
 
         /** A swipe across the cover this long changes the track. */
         const val SWIPE_DP = 36

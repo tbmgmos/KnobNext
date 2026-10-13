@@ -127,6 +127,145 @@ object Brainz {
         )
     }
 
+    // ---- The recording itself, for the round card ----
+
+    /** A song as the card shows it: its title, who plays it, and the year it first came out. */
+    class Song(val title: String, val artist: String, val year: String?)
+
+    /**
+     * What the card says of the recording: who plays on it and what, who produced it and where; who
+     * wrote the song; whether it is someone else's song and whose first; what it samples and who sampled
+     * it; who else recorded the song.
+     */
+    class Record(
+        /** Each player and what they play or sing, in the order MusicBrainz lists them. */
+        val players: List<Pair<String, List<String>>>,
+        val producers: List<String>,
+        val studio: String?,
+        val writers: List<String>,
+        /** The artist plays someone else's song. */
+        val cover: Boolean,
+        /** The song's first recording by another artist: the original, when this is a cover. */
+        val original: Song?,
+        val samples: List<Song>,
+        val sampledBy: List<Song>,
+        /** Others' recordings of the song, the earliest first, one each; [coverCount]: how many artists in all. */
+        val covers: List<Song>,
+        val coverCount: Int,
+    ) {
+        val empty get() = players.isEmpty() && producers.isEmpty() && studio == null && writers.isEmpty() &&
+            original == null && samples.isEmpty() && sampledBy.isEmpty() && covers.isEmpty()
+
+        fun toJson(): JSONObject {
+            fun songs(list: List<Song>) = org.json.JSONArray(list.map { song(it) })
+            return JSONObject()
+                .put("players", org.json.JSONArray(players.map { (who, what) -> JSONObject().put("name", who).put("plays", org.json.JSONArray(what)) }))
+                .put("producers", org.json.JSONArray(producers))
+                .put("studio", studio ?: "")
+                .put("writers", org.json.JSONArray(writers))
+                .put("cover", cover)
+                .put("original", original?.let(::song) ?: JSONObject())
+                .put("samples", songs(samples))
+                .put("sampledBy", songs(sampledBy))
+                .put("covers", songs(covers))
+                .put("coverCount", coverCount)
+        }
+
+        companion object {
+            private fun song(s: Song) = JSONObject().put("title", s.title).put("artist", s.artist).put("year", s.year ?: "")
+
+            private fun songOf(o: JSONObject?): Song? =
+                o?.optString("title")?.takeIf { it.isNotBlank() }?.let { Song(it, o.optString("artist"), o.optString("year").ifBlank { null }) }
+
+            fun fromJson(o: JSONObject): Record {
+                fun strings(name: String) = o.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+                fun songs(name: String) = o.optJSONArray(name)?.let { a -> (0 until a.length()).mapNotNull { songOf(a.optJSONObject(it)) } }.orEmpty()
+                val players = o.optJSONArray("players")?.let { a ->
+                    (0 until a.length()).map { a.getJSONObject(it) }.map { p ->
+                        p.optString("name") to (p.optJSONArray("plays")?.let { x -> (0 until x.length()).map { x.getString(it) } }.orEmpty())
+                    }
+                }.orEmpty()
+                return Record(
+                    players, strings("producers"), o.optString("studio").ifBlank { null }, strings("writers"), o.optBoolean("cover"),
+                    songOf(o.optJSONObject("original")), songs("samples"), songs("sampledBy"), songs("covers"), o.optInt("coverCount"),
+                )
+            }
+        }
+    }
+
+    /** The recording of [title] by [artist] as the card shows it; [mbid]: the artist's id, the right one. */
+    suspend fun record(lang: String, title: String, artist: String, mbid: String?): Record? {
+        val who = artistQuery(artist, mbid)
+        val list = get("$API/recording/?fmt=json&limit=10&query=${enc("recording:\"${clean(Speech.cleanTitle(title))}\" AND $who")}")
+            ?.optJSONArray("recordings") ?: return null
+        val found = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+            .filter { it.optInt("score") >= MIN_SCORE && credited(it, artist, mbid) }
+        // The search finds live takes and DJ mixes as readily as the record: the plain one first.
+        val r = found.firstOrNull { it.optString("disambiguation").isBlank() && !it.optBoolean("video") }
+            ?: found.firstOrNull { !LIVE.containsMatchIn(it.optString("disambiguation")) } ?: found.firstOrNull() ?: return null
+        val selfId = mbid ?: r.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id")
+        val rec = get("$API/recording/${r.optString("id")}?inc=artist-rels+place-rels+recording-rels+work-rels&fmt=json") ?: return null
+        val rels = rec.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+
+        val players = LinkedHashMap<String, MutableList<String>>()
+        rels.filter { it.optString("type") == "instrument" || it.optString("type") == "vocal" }.forEach { rel ->
+            val name = name(rel, "artist") ?: return@forEach
+            val what = attributes(rel).ifEmpty { if (rel.optString("type") == "vocal") listOf("vocals") else emptyList() }
+                .map { instrument(it, lang) ?: it.lowercase(Locale.ROOT) }
+            players.getOrPut(name) { ArrayList() }.addAll(what.filter { it !in players[name].orEmpty() })
+        }
+        val producers = rels.filter { it.optString("type") == "producer" }.mapNotNull { name(it, "artist") }.distinct().take(MAX_NAMES)
+        val studio = rels.firstOrNull { it.optString("type") == "recorded at" }?.let { name(it, "place") }
+
+        // Samples: forward, this recording takes from the other; backward, the other takes from this one.
+        suspend fun songs(direction: String): List<Song> =
+            rels.filter { it.optString("type") == "samples material" && it.optString("direction") == direction }
+                .mapNotNull { it.optJSONObject("recording")?.optString("id") }.distinct().take(MAX_SAMPLES)
+                .mapNotNull { id -> get("$API/recording/$id?inc=artist-credits&fmt=json")?.let(::songOf) }
+        val samples = songs("forward")
+        val sampledBy = songs("backward")
+
+        val performance = rels.firstOrNull { it.optString("target-type") == "work" && it.optString("type") == "performance" }
+        val cover = performance?.let { "cover" in attributes(it) } == true
+        val workId = performance?.optJSONObject("work")?.optString("id")?.takeIf { it.isNotBlank() }
+        var writers = emptyList<String>()
+        var original: Song? = null
+        var covers = emptyList<Song>()
+        var coverCount = 0
+        if (workId != null) {
+            val work = get("$API/work/$workId?inc=artist-rels&fmt=json")
+            writers = work?.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+                .filter { it.optString("type") in WRITER_TYPES }.mapNotNull { name(it, "artist") }.distinct().take(MAX_NAMES)
+            // Everyone who recorded the song: one song each, the earliest first.
+            val all = get("$API/recording?work=$workId&inc=artist-credits&limit=100&fmt=json")?.optJSONArray("recordings")
+            val others = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+                .filter { o -> o.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist")?.optString("id") != selfId }
+                .mapNotNull(::songOf)
+                .filter { Journal.key(it.artist) != Journal.key(artist) }
+                .sortedBy { it.year ?: "9999" }
+                .distinctBy { Journal.key(it.artist) }
+            if (cover) original = others.firstOrNull()
+            covers = others.filter { it !== original }.take(MAX_COVERS)
+            coverCount = others.size - (if (original != null) 1 else 0)
+        }
+        return Record(players.entries.map { it.key to it.value }.take(MAX_PLAYERS), producers, studio, writers, cover, original, samples, sampledBy, covers, coverCount)
+    }
+
+    private fun artistQuery(artist: String, mbid: String?) = if (mbid != null) "arid:$mbid" else "artist:\"${clean(Speech.cleanArtist(artist))}\""
+
+    private fun credited(r: JSONObject, artist: String, mbid: String?): Boolean {
+        val a = r.optJSONArray("artist-credit")?.optJSONObject(0)?.optJSONObject("artist") ?: return false
+        return if (mbid != null) a.optString("id") == mbid else sameName(a.optString("name"), Speech.cleanArtist(artist))
+    }
+
+    private fun songOf(r: JSONObject): Song? {
+        val title = r.optString("title").takeIf { it.isNotBlank() } ?: return null
+        val credit = r.optJSONArray("artist-credit")?.let { a ->
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.joinToString("") { it.optString("name") + it.optString("joinphrase") }
+        }?.takeIf { it.isNotBlank() } ?: return null
+        return Song(title, credit, year(r, "first-release-date"))
+    }
+
     /**
      * The cover of [album] by [artist] in the Cover Art Archive, found by the album's name: for the
      * history, when the player showed none and no story has found one yet.
@@ -216,6 +355,11 @@ object Brainz {
     private const val COVER_SCORE = 70
     private const val MAX_MEMBERS = 6
     private const val MAX_NAMES = 3
+    private const val MAX_PLAYERS = 8
+    private const val MAX_SAMPLES = 3
+    private const val MAX_COVERS = 8
+    private val WRITER_TYPES = setOf("composer", "lyricist", "writer")
+    private val LIVE = Regex("(?i)live|mix|demo|remix|edit|instrumental|karaoke")
     private const val SPACING_MS = 1_100L
 
     private val INSTRUMENTS = mapOf(
