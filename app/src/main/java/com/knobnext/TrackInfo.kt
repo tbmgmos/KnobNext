@@ -37,6 +37,9 @@ enum class InfoSource {
     WIKI,
 }
 
+/** How the story reaches the person: spoken, shown in the round card on screen (no sound), or both. */
+enum class InfoDelivery { VOICE, BUBBLE, BOTH }
+
 /** The language of the story: one picked, or the phone's. */
 enum class InfoLanguage(val code: String?) {
     RU("ru"), EN("en"), SYSTEM(null);

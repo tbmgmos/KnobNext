@@ -143,6 +143,8 @@ data class Settings(
     val blindGestures: Boolean,
     val infoLength: InfoLength,
     val infoPause: Boolean,
+    val infoDelivery: InfoDelivery,
+    val bubbleOnTrack: Boolean,
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
     val keysOnPause: Boolean,
@@ -509,6 +511,21 @@ class Prefs(context: Context) {
         get() = InfoLanguage.entries.firstOrNull { it.name == sp.getString("info_language", null) } ?: InfoLanguage.RU
         set(v) = sp.edit().putString("info_language", v.name).apply()
 
+    /** Whether the story is spoken, shown in the round card on screen, or both. */
+    var infoDelivery: InfoDelivery
+        get() = InfoDelivery.entries.firstOrNull { it.name == sp.getString("info_delivery", null) } ?: InfoDelivery.VOICE
+        set(v) = sp.edit().putString("info_delivery", v.name).apply()
+
+    /** The round cover appears by itself for a few seconds when a new track starts. */
+    var bubbleOnTrack: Boolean
+        get() = sp.getBoolean("bubble_on_track", false)
+        set(v) = sp.edit().putBoolean("bubble_on_track", v).apply()
+
+    /** Where the round cover was dragged to, from the top of the screen; -1 before it ever was. */
+    var bubbleY: Int
+        get() = sp.getInt("bubble_y", -1)
+        set(v) = sp.edit().putInt("bubble_y", v).apply()
+
     /** Pause the music for the story about a track (otherwise it only gets quieter). */
     var infoPause: Boolean
         get() = sp.getBoolean("info_pause", false)
@@ -722,6 +739,8 @@ class Prefs(context: Context) {
         blindGestures = blindGestures,
         infoLength = infoLength,
         infoPause = infoPause,
+        infoDelivery = infoDelivery,
+        bubbleOnTrack = bubbleOnTrack,
         infoLanguage = infoLanguage,
         infoSource = infoSource,
         keysOnPause = keysOnPause,

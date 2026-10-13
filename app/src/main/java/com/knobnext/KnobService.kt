@@ -23,6 +23,10 @@ class KnobService : AccessibilityService() {
     private lateinit var prefs: Prefs
     private lateinit var media: Media
     private lateinit var extras: Extras
+    private lateinit var bubble: TrackBubble
+
+    // The track the round cover last appeared for by itself: once per track.
+    private var bubbledTrack: String? = null
     private lateinit var haptics: Haptics
     private lateinit var proximity: ProximityProbe
     private val cues = Cues()
@@ -412,6 +416,8 @@ class KnobService : AccessibilityService() {
         media = Media(this)
         media.silencePlaying = { silence.playing || ::headset.isInitialized && headset.silencePlaying }
         extras = Extras(this, media, prefs)
+        bubble = TrackBubble(this, prefs) { handler.post { log(it) } }
+        extras.bubble = bubble
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
         // A sleep-timer fade was cut short by the process dying: the music is at a low volume.
@@ -488,6 +494,7 @@ class KnobService : AccessibilityService() {
             if (fading) shake.stop()
             if (wakeLock.isHeld) wakeLock.release()
             extras.release()
+            bubble.release()
             proximity.release()
             cues.release()
         }
@@ -1269,6 +1276,7 @@ class KnobService : AccessibilityService() {
             // Another app took over: its own gestures may want other sensors.
             handler.post { updateSensors() }
         }
+        showBubbleFor(now)
         if (!prefs.announceAllTracks) {
             announcedTrack = null
             return
@@ -1281,6 +1289,25 @@ class KnobService : AccessibilityService() {
         // The track already playing when the option was turned on is not news.
         if (first || !screenDark() || !now.playing || GestureTest.active) return
         extras.perform(Action.ANNOUNCE, now.controller)
+    }
+
+    /** A new track playing: its round cover at the edge of the screen for a few seconds, when so set. */
+    private fun showBubbleFor(now: NowPlaying?) {
+        if (!prefs.bubbleOnTrack || !prefs.enabled || GestureTest.active || now?.playing != true) return
+        val title = now.title ?: return
+        val key = now.controller.packageName + "/" + now.artist + "/" + title
+        if (key == bubbledTrack) return
+        bubbledTrack = key
+        // An open card is being read: the next track does not take it away.
+        if (bubble.open) return
+        val meta = now.controller.metadata
+        val track = TrackInfo.Track(
+            title = title,
+            artist = now.artist,
+            album = meta?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
+            year = meta?.getLong(android.media.MediaMetadata.METADATA_KEY_YEAR)?.takeIf { it > 0 }?.toString(),
+        )
+        bubble.show(track, now.art, now.controller, expand = false)
     }
 
     /** Face down pauses; turning the phone back up resumes, but only playback that we paused. */

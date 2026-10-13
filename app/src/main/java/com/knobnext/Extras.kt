@@ -409,6 +409,9 @@ class Extras(private val context: Context, private val media: Media, private val
     /** Set by the service: a line for the event log. */
     var log: ((String) -> Unit)? = null
 
+    /** Set by the service: the round card that shows the story instead of (or as well as) telling it. */
+    var bubble: TrackBubble? = null
+
     /** Ends the story under way (gives the music back); null when none is. */
     private var storyEnd: (() -> Unit)? = null
 
@@ -427,6 +430,25 @@ class Extras(private val context: Context, private val media: Media, private val
         val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        // The player's cover, for the history (it works for any artist, however unknown) and the card.
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        if (prefs.infoHistory && track.artist != null && art != null) {
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) { Journal.saveCover(context, track.artist, track.album, art) }
+        }
+        val delivery = prefs.infoDelivery
+        val card = bubble?.takeIf { delivery != InfoDelivery.VOICE }
+        if (card != null && delivery == InfoDelivery.BUBBLE) {
+            // Shown, not told: the music plays on. The same gesture again closes the card.
+            if (card.openFor(track)) {
+                card.dismiss()
+                return Outcome.undone(context.getString(R.string.log_bubble_closed))
+            }
+            card.show(track, art, c, expand = true)
+            if (card.shown) return Outcome.done(context.getString(R.string.log_bubble_shown))
+            // The card could not be shown (the log says why): told instead, rather than nothing.
+        }
+        // Told and shown: the card waits for the same story the voice tells.
+        card?.show(track, art, c, expand = true, fetchNote = false)
         val lang = prefs.infoLanguage.resolve()
         val length = prefs.infoLength
         val source = prefs.infoSource
@@ -453,13 +475,9 @@ class Extras(private val context: Context, private val media: Media, private val
         // The opening line at once, from the player's own data; the story follows when it is ready.
         pauseMusic()
         speaker.say(TrackInfo.header(context, track, lang))
-        // The player's cover, for the history: it works for any artist, however unknown.
-        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
-        if (prefs.infoHistory && track.artist != null && art != null) {
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) { Journal.saveCover(context, track.artist, track.album, art) }
-        }
         infoJob = scope.launch {
             val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
+            card?.setNote(told)
             if (told == null) {
                 speaker.say(context.getString(R.string.speak_info_none), resume, queue = true)
                 return@launch
