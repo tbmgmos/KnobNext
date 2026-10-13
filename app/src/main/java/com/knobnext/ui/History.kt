@@ -414,6 +414,10 @@ private fun keyProblem(result: KeyCheck): String = when (result) {
             result.error == KEY_LIMIT || result.http == HTTP_TOO_MANY -> stringResource(R.string.keys_limit)
             // Not the API's answer (an HTML page): something on the way stopped the request, the key is not to blame.
             !result.fromApi -> stringResource(R.string.keys_blocked, result.http)
+            // Last.fm: "Access Denied - You cannot access this service" is about where the request comes
+            // from (a VPN's address, a country), not the key, which it calls "Invalid API key" (10).
+            result.error != KEY_INVALID && result.message?.contains("access denied", ignoreCase = true) == true ->
+                stringResource(R.string.keys_denied)
             result.error == KEY_INVALID || result.http == HTTP_UNAUTHORIZED || result.http == HTTP_FORBIDDEN ->
                 stringResource(R.string.keys_rejected)
             else -> stringResource(R.string.keys_rejected_other, result.error ?: result.http)
