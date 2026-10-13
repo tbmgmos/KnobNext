@@ -86,6 +86,7 @@ class TrackBubble(
     private var noteView: TextView? = null
     private var statusView: TextView? = null
     private var sourcesView: TextView? = null
+    private var subView: TextView? = null
     private var askJob: Job? = null
 
     /** The cloud model's answers this time, by card and question: asked again, shown at once. */
@@ -299,8 +300,9 @@ class TrackBubble(
         val box = cardBox()
         val names = header(box, coverView(COVER_DP, round = false, picture = art, letter = t.artist ?: t.title))
         names.addView(text(Speech.cleanTitle(t.title), 16f, TEXT, bold = true, lines = 2))
-        val sub = listOfNotNull(t.artist?.let(Speech::cleanArtist), t.album?.let(Speech::cleanTitle), t.year).joinToString(" · ")
-        if (sub.isNotEmpty()) names.addView(text(sub, 13f, MUTED, lines = 2))
+        val sub = text(subtitle(t, trackFacts), 13f, MUTED, lines = 2)
+        subView = sub
+        names.addView(sub)
         news?.let { names.addView(text(service.getString(newsLabel(it)), 12f, palette.accent, bold = true)) }
         noteSection(box)
         askSection(box, TRACK_QUESTIONS)
@@ -335,6 +337,13 @@ class TrackBubble(
         return framed(box)
     }
 
+    /** "Artist · Album · Year": the player's, filled in from what the sources found where it said nothing. */
+    private fun subtitle(t: TrackInfo.Track, facts: TrackInfo.Facts?): String = listOfNotNull(
+        t.artist?.let(Speech::cleanArtist),
+        (t.album ?: facts?.album)?.let(Speech::cleanTitle)?.takeIf { it.isNotBlank() },
+        t.year ?: facts?.year,
+    ).joinToString(" · ")
+
     /** The next note about the track: the same the voice would tell, and kept in the history the same way. */
     private fun fetchNote() {
         val t = track ?: return
@@ -358,7 +367,11 @@ class TrackBubble(
         circleJob = scope.launch {
             val facts = runCatching { TrackInfo.facts(service, t, prefs.infoLanguage.resolve()) }.getOrNull()
             trackFacts = facts
-            if (path.isEmpty()) showCircle(facts?.related.orEmpty(), t.artist)
+            if (path.isEmpty()) {
+                showCircle(facts?.related.orEmpty(), t.artist)
+                // The player did not say the album or the year: the sources often know them.
+                subView?.text = subtitle(t, facts)
+            }
             loadRecord(t, facts)
         }
     }
