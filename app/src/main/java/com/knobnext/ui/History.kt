@@ -538,8 +538,10 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
         KeyField(
             context, stringResource(R.string.cloud_key, service.title), prefs.cloudKey(service), { prefs.setCloudKey(service, it) },
             getUrl = service.keyPage,
-            format = { null },
+            // A gentle word when the key does not begin the way this service's keys do (it is checked anyway).
+            format = { key -> if (service.keyPrefix.none { key.startsWith(it) }) stringResource(R.string.cloud_key_prefix, service.title, service.keyPrefix.first()) else null },
             check = { com.knobnext.CloudBrain.check(service, it) },
+            formatBlocks = false,
         )
         var model by remember { mutableStateOf(prefs.cloudModel(service)) }
         OutlinedTextField(
@@ -613,6 +615,8 @@ private fun KeyField(
     getUrl: String,
     format: @Composable (String) -> String?,
     check: (String) -> KeyCheck,
+    /** A format problem stops the check (Last.fm's fixed length); false: only a warning, checked anyway. */
+    formatBlocks: Boolean = true,
 ) {
     var text by remember { mutableStateOf(stored) }
     // null: not checked yet; else what the service said.
@@ -630,7 +634,7 @@ private fun KeyField(
         delay(SAVE_DELAY_MS)
         // Kept as typed even when it looks wrong: a half-pasted key is theirs to finish.
         save(text)
-        if (formatProblem != null) return@LaunchedEffect
+        if (formatProblem != null && formatBlocks) return@LaunchedEffect
         checking = true
         try {
             result = withContext(Dispatchers.IO) {
@@ -648,23 +652,26 @@ private fun KeyField(
             singleLine = true,
             supportingText = {
                 val shown = result
-                val bad = formatProblem != null || (shown != null && shown !is KeyCheck.Works)
+                // The service's word wins over a guess from the format: a key it takes is fine however it looks.
+                val works = shown is KeyCheck.Works
+                val bad = !works && (formatProblem != null || shown != null)
                 Text(
                     when {
                         text.isBlank() -> stringResource(R.string.keys_empty)
-                        formatProblem != null -> formatProblem
-                        shown != null -> keyProblem(shown)
+                        works -> keyProblem(shown!!)
+                        formatProblem != null && (formatBlocks || shown == null) -> formatProblem
+                        shown != null -> listOfNotNull(formatProblem?.substringBefore(" —"), keyProblem(shown)).joinToString(". ")
                         else -> stringResource(R.string.keys_checking)
                     },
                     color = if (bad) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
-            isError = formatProblem != null || (result != null && result !is KeyCheck.Works),
+            isError = result !is KeyCheck.Works && (formatProblem != null || result != null),
             modifier = Modifier.fillMaxWidth(),
         )
         Row {
             TextButton(onClick = { open(context, getUrl) }) { Text(stringResource(R.string.keys_get)) }
-            if (text.isNotBlank() && !checking && formatProblem == null) {
+            if (text.isNotBlank() && !checking && (formatProblem == null || !formatBlocks)) {
                 TextButton(onClick = { again++ }) { Text(stringResource(R.string.keys_check_again)) }
             }
         }
@@ -682,7 +689,8 @@ private const val ALBUM_COVER_DP = 32
 private const val SAVE_DELAY_MS = 600L
 private const val MAX_OWN_CHARS = 500
 private const val COVER_TIMEOUT_MS = 6_000
-private const val MAX_KEY_CHARS = 64
+// Only a guard against pasting a page: an OpenAI project key is some 160 characters, OpenRouter's 73.
+private const val MAX_KEY_CHARS = 512
 private const val LASTFM_KEY_CHARS = 32
 
 /** Last.fm's own error codes, and the HTTP statuses the services use for a key they refuse. */

@@ -25,12 +25,14 @@ enum class CloudService(
     val keyPage: String,
     /** It looks things up on the web itself (Gemini's Google Search). */
     val searches: Boolean,
+    /** How its keys begin: a key that begins otherwise is likely the wrong one (or not all of it). */
+    val keyPrefix: List<String>,
 ) {
-    GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-flash-latest", "https://aistudio.google.com/apikey", true),
-    OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "https://openrouter.ai/keys", false),
-    GROQ("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "https://console.groq.com/keys", false),
-    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/api_keys", false),
-    OPENAI("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "https://platform.openai.com/api-keys", false),
+    GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-flash-latest", "https://aistudio.google.com/apikey", true, listOf("AIza")),
+    OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "https://openrouter.ai/keys", false, listOf("sk-or-")),
+    GROQ("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "https://console.groq.com/keys", false, listOf("gsk_")),
+    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/api_keys", false, listOf("sk-")),
+    OPENAI("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "https://platform.openai.com/api-keys", false, listOf("sk-")),
 }
 
 object CloudBrain {
@@ -207,6 +209,8 @@ object CloudBrain {
             r.code == 0 -> said.ifBlank { "нет связи" }
             said.contains("location is not supported", ignoreCase = true) -> "Gemini недоступен из вашей страны — нужен VPN"
             r.code in BUSY -> "сервис модели сейчас перегружен — попробуйте чуть позже"
+            // DeepSeek has no free quota: "Insufficient Balance".
+            r.code == HTTP_NO_MONEY -> "на счёте сервиса нет средств — пополните баланс (бесплатного лимита у него нет)"
             r.code == HTTP_QUOTA -> "у ключа закончился бесплатный лимит Gemini (или его нет для этих моделей). Попробуйте позже или включите оплату в Google AI Studio"
             r.code == 401 || r.code == 403 || said.contains("API key", ignoreCase = true) -> "ключ не принят"
             r.code == 404 -> "модель «$model» не найдена — укажите другую в настройках"
@@ -304,9 +308,10 @@ object CloudBrain {
     private const val TEMPERATURE = 0.6
     private const val MAX_ERROR_CHARS = 200
     private const val HTTP_QUOTA = 429
+    private const val HTTP_NO_MONEY = 402
 
     /** Answers worth trying another way: no quota, no such model, a feature not offered (the search). */
-    private val RETRYABLE = setOf(HTTP_QUOTA, 404, 400, 500, 502, 503, 504)
+    private val RETRYABLE = setOf(HTTP_QUOTA, HTTP_NO_MONEY, 404, 400, 500, 502, 503, 504)
 
     /** The service is busy or briefly down: worth one more try a little later. */
     private val BUSY = setOf(500, 502, 503, 504)
