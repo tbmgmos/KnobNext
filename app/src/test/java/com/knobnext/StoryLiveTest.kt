@@ -102,6 +102,45 @@ class StoryLiveTest {
         assertTrue("Nothing was told about any artist: the sources could not be reached", told > 0)
     }
 
+    /** What MusicBrainz says of a recording, raw: the shapes the card's "about the recording" reads. */
+    @Test
+    fun recordingShapes() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val api = "https://musicbrainz.org/ws/2"
+        fun get(url: String): org.json.JSONObject? {
+            Thread.sleep(1_100)
+            return TrackInfo.getJson(url)
+        }
+        fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+        for ((title, artist) in listOf(
+            "Smells Like Teen Spirit" to "Nirvana",
+            "The Man Who Sold the World" to "Nirvana",
+            "Smack My Bitch Up" to "The Prodigy",
+            "Группа крови" to "Кино",
+        )) {
+            println("\n===== RAW $artist — $title")
+            val list = get("$api/recording/?fmt=json&limit=3&query=" + enc("recording:\"$title\" AND artist:\"$artist\""))?.optJSONArray("recordings")
+            val first = list?.optJSONObject(0) ?: continue
+            println("search: " + first.toString().take(600))
+            val rec = get("$api/recording/${first.optString("id")}?inc=artist-rels+place-rels+recording-rels+work-rels+artist-credits&fmt=json")
+            val rels = rec?.optJSONArray("relations")
+            println("relations: ${rels?.length()}")
+            for (i in 0 until (rels?.length() ?: 0)) println("  " + rels!!.getJSONObject(i).toString().take(400))
+            val work = (0 until (rels?.length() ?: 0)).map { rels!!.getJSONObject(it) }.firstOrNull { it.optString("target-type") == "work" }?.optJSONObject("work")
+            if (work != null) {
+                val w = get("$api/work/${work.optString("id")}?inc=artist-rels&fmt=json")
+                println("work: " + w.toString().take(1200))
+                val covers = get("$api/recording/?fmt=json&limit=25&query=" + enc("wid:${work.optString("id")}"))
+                println("by work: count=${covers?.optInt("count")}")
+                val rs = covers?.optJSONArray("recordings")
+                for (i in 0 until (rs?.length() ?: 0)) {
+                    val r = rs!!.getJSONObject(i)
+                    println("  ${r.optString("title")} — ${r.optJSONArray("artist-credit")?.optJSONObject(0)?.optString("name")} (${r.optString("first-release-date")})")
+                }
+            }
+        }
+    }
+
     private companion object {
         const val TELLINGS = 7
     }
