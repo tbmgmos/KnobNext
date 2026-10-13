@@ -901,7 +901,9 @@ class TrackBubble(
     }
 
     private fun noteSection(box: LinearLayout) {
-        val n = text(service.getString(R.string.bubble_loading), 14f, TEXT, lines = MAX_NOTE_LINES).apply {
+        // Read whole: the card scrolls when the note is long.
+        val n = text(service.getString(R.string.bubble_loading), 14f, TEXT, lines = Int.MAX_VALUE).apply {
+            ellipsize = null
             setPadding(0, dp(12), 0, 0)
             setLineSpacing(0f, 1.15f)
         }
@@ -961,7 +963,6 @@ class TrackBubble(
         if (cached != null) return showAnswer(q, cached, artist)
         askJob?.cancel()
         noteView?.setText(R.string.bubble_asking)
-        noteView?.maxLines = MAX_ANSWER_LINES
         showSources(emptyList())
         keepOpen()
         askJob = scope.launch {
@@ -978,7 +979,6 @@ class TrackBubble(
     }
 
     private fun showAnswer(q: TrackInfo.Question, a: CloudBrain.Answer, artist: String?) {
-        noteView?.maxLines = MAX_ANSWER_LINES
         noteView?.text = a.text
         showSources(a.sources)
         // "What next": the names it gave join the circle, to open and play like any other.
@@ -1209,10 +1209,8 @@ class TrackBubble(
         const val COVER_DP = 56
         const val CARD_DP = 320
         const val EDGE_DP = 8
-        const val MAX_NOTE_LINES = 9
         const val MAX_CHIPS = 8
         const val MAX_SOURCES = 3
-        const val MAX_ANSWER_LINES = 16
         const val MAX_NAME_CHARS = 40
 
         val TRACK_QUESTIONS = listOf(
