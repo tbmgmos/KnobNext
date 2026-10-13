@@ -151,11 +151,6 @@
     <string name="src_mb_producer">Продюсер записи — %1$s.</string>
     <string name="src_mb_engineer">Звукорежиссёр записи — %1$s.</string>
     <string name="src_mb_studio">Место записи — %1$s.</string>
-    <string name="src_setlist_last">Последний известный концерт — %1$s, %2$s.</string>
-    <string name="src_setlist_tour">Последний концерт прошёл в рамках тура %1$s.</string>
-    <string name="src_setlist_song_count">Песня звучала на %1$s из %2$s последних концертов.</string>
-    <string name="src_setlist_song_last">В последний раз вживую её исполняли %1$s, %2$s.</string>
-    <string name="src_setlist_song_none">На последних %1$s концертах эту песню не исполняли.</string>
     <string name="src_lastfm_listeners">Слушателей на Last.fm — %1$s.</string>
     <string name="src_lastfm_song_listeners">Слушателей у этой песни на Last.fm — %1$s.</string>
     <string name="src_lastfm_similar">Тем, кто слушает этого исполнителя, нравятся и %1$s.</string>
@@ -199,11 +194,10 @@
     <string name="acq_page_site">Официальный сайт</string>
     <string name="acq_page_bandcamp">Bandcamp</string>
     <string name="acq_page_soundcloud">SoundCloud</string>
-    <string name="acq_sources">Сведения: Википедия, Wikidata, MusicBrainz, Last.fm, setlist.fm, TheAudioDB и Deezer. Тексты Википедии и Last.fm — по лицензии CC BY-SA, обложки — Cover Art Archive.</string>
-    <string name="keys_title">Ключи источников</string>
-    <string name="keys_hint">Last.fm добавляет к рассказу биографии исполнителей, о ком нет статьи в Википедии, а setlist.fm — концерты. Обоим нужен ключ: его бесплатно выдают на сайте после регистрации. Ключ хранится только на телефоне.</string>
+    <string name="acq_sources">Сведения: Википедия, Wikidata, MusicBrainz, Last.fm, TheAudioDB и Deezer. Тексты Википедии и Last.fm — по лицензии CC BY-SA, обложки — Cover Art Archive.</string>
+    <string name="keys_title">Last.fm</string>
+    <string name="keys_hint">Last.fm добавляет к рассказу биографии исполнителей, о ком нет статьи в Википедии. Ему нужен ключ: его бесплатно выдают на сайте после регистрации. Ключ хранится только на телефоне.</string>
     <string name="keys_lastfm">Ключ Last.fm (API key)</string>
-    <string name="keys_setlist">Ключ setlist.fm</string>
     <string name="keys_get">Получить ключ</string>
     <string name="keys_empty">Не задан — без этого источника</string>
     <string name="keys_checking">Проверяю…</string>

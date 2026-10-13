@@ -374,8 +374,8 @@ private suspend fun fetchCover(context: Context, key: String, album: String?): B
 }
 
 /**
- * The person's own keys for Last.fm and setlist.fm: each gets one free for a non-commercial app, and
- * with it the story has their facts. A key is checked against the service when asked.
+ * The person's own Last.fm key: free for a non-commercial app, and with it the story has Last.fm's
+ * facts. The key is checked against the service when asked.
  */
 @Composable
 fun SourceKeys(prefs: Prefs) {
@@ -395,12 +395,6 @@ fun SourceKeys(prefs: Prefs) {
         },
         check = { com.knobnext.MusicSources.checkLastFm(it) },
     )
-    KeyField(
-        context, stringResource(R.string.keys_setlist), prefs.setlistKey, { prefs.setlistKey = it },
-        getUrl = "https://www.setlist.fm/settings/api",
-        format = { null },
-        check = { com.knobnext.Setlist.check(it) },
-    )
 }
 
 /** What to tell about a key the service did not take, or could not be asked. */
@@ -409,7 +403,7 @@ private fun keyProblem(result: KeyCheck): String = when (result) {
     is KeyCheck.Works -> stringResource(R.string.keys_works)
     is KeyCheck.Rejected -> {
         val reason = when {
-            // Last.fm: error 26 is a suspended key, 29 a limit; setlist.fm says 429 for a limit.
+            // Last.fm: error 26 is a suspended key, 29 a limit.
             result.error == KEY_SUSPENDED -> stringResource(R.string.keys_suspended)
             result.error == KEY_LIMIT || result.http == HTTP_TOO_MANY -> stringResource(R.string.keys_limit)
             // Not the API's answer (an HTML page): something on the way stopped the request, the key is not to blame.

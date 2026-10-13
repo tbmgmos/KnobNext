@@ -83,7 +83,7 @@ object TrackInfo {
         val pages: Map<String, String> = emptyMap(),
         /** MusicBrainz's slower facts have joined these. */
         val deep: Boolean = false,
-        /** The artist's MusicBrainz id from Wikidata, for MusicBrainz and setlist.fm. */
+        /** The artist's MusicBrainz id from Wikidata, so MusicBrainz finds the right artist. */
         val mbid: String? = null,
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
@@ -605,7 +605,7 @@ object TrackInfo {
         return fetched
     }
 
-    // ---- MusicBrainz and setlist.fm, in the background ----
+    // ---- MusicBrainz, in the background ----
 
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val deepening = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -628,14 +628,12 @@ object TrackInfo {
         val b = runCatching { Brainz.gather(context, lang, track.title, artist, base.album ?: track.album, said, base.mbid) }.getOrNull()
             // Not found, or not reachable: tried again next time.
             ?: return null
-        // The artist on stage, now that their MusicBrainz id is known.
-        val live = runCatching { Setlist.gather(context, lang, b.artistMbid, track.title) }.getOrNull()
         val intro = base.intro.ifEmpty {
             if (b.basics.isEmpty()) emptyList() else listOf(localized(context, lang).getString(R.string.info_intro_basics, artist)) + b.basics
         }
         val merged = Facts(
-            song = base.song + listOfNotNull(b.song, live?.song),
-            artist = base.artist + listOfNotNull(b.artist, live?.artist),
+            song = base.song + listOfNotNull(b.song),
+            artist = base.artist + listOfNotNull(b.artist),
             album = base.album,
             year = base.year,
             albumText = base.albumText,

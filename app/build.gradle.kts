@@ -18,8 +18,6 @@ android {
         versionName = providers.gradleProperty("versionName").orNull ?: "3.0.0-local"
         // Last.fm's key for this app (a GitHub secret in CI): without it the story simply has no Last.fm facts.
         buildConfigField("String", "LASTFM_KEY", "\"" + (System.getenv("LASTFM_API_KEY") ?: "").trim() + "\"")
-        // setlist.fm's, the same way: without it, no concert facts.
-        buildConfigField("String", "SETLISTFM_KEY", "\"" + (System.getenv("SETLISTFM_API_KEY") ?: "").trim() + "\"")
     }
 
     // github: checks GitHub Releases for updates (needs INTERNET). rustore: the store delivers updates,

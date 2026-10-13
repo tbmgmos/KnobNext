@@ -28,8 +28,6 @@ object Brainz {
         val coverUrl: String?,
         /** The artist's own pages: kind ("site", "bandcamp", "soundcloud") to address. */
         val pages: Map<String, String>,
-        /** The artist's MusicBrainz id: setlist.fm knows them by it. */
-        val artistMbid: String,
     )
 
     /**
@@ -126,7 +124,6 @@ object Brainz {
             related = related,
             coverUrl = recording?.releaseGroup?.let { "https://coverartarchive.org/release-group/$it/front-250" },
             pages = pages,
-            artistMbid = artistId,
         )
     }
 

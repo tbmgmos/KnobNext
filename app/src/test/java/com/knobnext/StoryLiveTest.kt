@@ -53,22 +53,16 @@ class StoryLiveTest {
         println("\n===== Проверка ключей")
         println("Last.fm, 32 нуля: ${show(MusicSources.checkLastFm("0".repeat(32)))}")
         println("Last.fm, 31 символ: ${show(MusicSources.checkLastFm("0".repeat(31)))}")
-        println("setlist.fm, выдуманный ключ: ${show(Setlist.check("00000000-0000-0000-0000-000000000000"))}")
         // The real keys, from the repository's secrets (never printed): what a server far from the phone is told.
         BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() }?.let { println("Last.fm, ключ из секрета: ${show(MusicSources.checkLastFm(it))}") }
-        BuildConfig.SETLISTFM_KEY.takeIf { it.isNotBlank() }?.let { println("setlist.fm, ключ из секрета: ${show(Setlist.check(it))}") }
         // MusicBrainz, deeper: what joins the facts in the background after the first telling.
-        println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"}, setlist.fm: ${if (Prefs(context).setlistKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
+        println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
         for (track in tracks) {
             // As the background step does: with what was already found, and Wikidata's MusicBrainz id.
             val quick = TrackInfo.facts(context, track, "ru")
             val said = quick?.let { q -> (q.song + q.artist + q.albumText).flatMap { it.facts }.joinToString(" ") }.orEmpty()
             val found = Brainz.gather(context, "ru", track.title, track.artist!!, track.album, said, quick?.mbid)
             println("${track.artist}: песня ${found?.song?.facts} | исполнитель ${found?.artist?.facts} | основы ${found?.basics} | круг ${found?.circle} | обложка ${found?.coverUrl} | страницы ${found?.pages}")
-            found?.let { f ->
-                val live = Setlist.gather(context, "ru", f.artistMbid, track.title)
-                println("   setlist.fm: песня ${live?.song?.facts} | исполнитель ${live?.artist?.facts}")
-            }
         }
         // Covers for the history: found by the album's name, then fetched (through the archive's redirects).
         println("\n===== Обложки")
