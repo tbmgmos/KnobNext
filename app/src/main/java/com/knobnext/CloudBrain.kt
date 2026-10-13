@@ -79,8 +79,11 @@ object CloudBrain {
             val answer = try {
                 when {
                     service == CloudService.GEMINI -> gemini(prefs, key, model, system, prompt, maxTokens)
-                    // No model named: one of OpenRouter's free ones, found and kept.
+                    // No model named: one of OpenRouter's free ones, found and kept. A named one that is no
+                    // chat model (an embedding model, a model gone) gives way to them too.
                     service == CloudService.OPENROUTER && prefs.cloudModel(service).isBlank() -> openRouterFree(prefs, key, system, prompt, maxTokens)
+                    service == CloudService.OPENROUTER -> chat(service, key, model, system, prompt, maxTokens)
+                        ?: if (lastCode == 400 || lastCode == 404) openRouterFree(prefs, key, system, prompt, maxTokens) else null
                     else -> chat(service, key, model, system, prompt, maxTokens)
                 }
             } catch (e: Exception) {
@@ -117,6 +120,9 @@ object CloudBrain {
         val k = key.trim()
         return if (service == CloudService.GEMINI) {
             KeyCheck.ask("${service.base}/models?pageSize=1", mapOf("x-goog-api-key" to k)) { it.has("models") }
+        } else if (service == CloudService.OPENROUTER) {
+            // OpenRouter's model list is open to anyone: only its key endpoint says whether the key is good.
+            KeyCheck.ask("${service.base}/key", mapOf("Authorization" to "Bearer $k")) { it.has("data") }
         } else {
             KeyCheck.ask("${service.base}/models", mapOf("Authorization" to "Bearer $k")) { it.has("data") }
         }
@@ -210,7 +216,10 @@ object CloudBrain {
     /** Why nothing came, said plainly: the card shows it, the log gets the service's own words. */
     private fun fail(r: Reply?, model: String): Answer? {
         val said = r?.said.orEmpty()
+        lastCode = r?.code ?: 0
         lastDetail = r?.let { "HTTP ${it.code}: ${said.take(MAX_ERROR_CHARS)}" }
+        // The service's own words after ours: what it really said is often the whole answer.
+        val quoted = said.takeIf { it.isNotBlank() }?.let { " — «${it.take(MAX_QUOTE_CHARS)}»" }.orEmpty()
         lastError = when {
             r == null -> "нет ответа"
             r.code == 0 -> said.ifBlank { "нет связи" }
@@ -221,9 +230,10 @@ object CloudBrain {
             // DeepSeek has no free quota: "Insufficient Balance".
             r.code == HTTP_NO_MONEY -> "на счёте сервиса нет средств — пополните баланс (бесплатного лимита у него нет)"
             r.code == HTTP_QUOTA -> "у ключа закончился бесплатный лимит Gemini (или его нет для этих моделей). Попробуйте позже или включите оплату в Google AI Studio"
-            r.code == 401 || r.code == 403 || said.contains("API key", ignoreCase = true) -> "ключ не принят"
-            r.code == 404 -> "модель «$model» не найдена — укажите другую в настройках"
-            else -> "ошибка ${r.code}"
+            r.code == 401 || r.code == 403 -> "ключ не принят$quoted"
+            r.code == 404 -> "модель «$model» не найдена или не умеет отвечать текстом$quoted"
+            r.code == 400 -> "сервис отклонил запрос к «$model»$quoted"
+            else -> "ошибка ${r.code}$quoted"
         }
         return null
     }
@@ -283,10 +293,14 @@ object CloudBrain {
         val list = get("${CloudService.OPENROUTER.base}/models", mapOf("Authorization" to "Bearer $key")).json?.optJSONArray("data") ?: return emptyList()
         return (0 until list.length()).mapNotNull { list.optJSONObject(it) }
             .filter { m ->
+                val id = m.optString("id")
                 val price = m.optJSONObject("pricing")
-                val free = m.optString("id").endsWith(":free") || (price?.optString("prompt") == "0" && price?.optString("completion") == "0")
-                val text = m.optJSONObject("architecture")?.optString("output_modalities")?.contains("image") != true
-                free && text && m.optString("id") != "openrouter/auto"
+                val free = id.endsWith(":free") || (price?.optString("prompt") == "0" && price?.optString("completion") == "0")
+                // A chat model, writing text: not embeddings, rerankers, speech or pictures.
+                val out = m.optJSONObject("architecture")?.optJSONArray("output_modalities")
+                val writes = out == null || (0 until out.length()).any { out.optString(it) == "text" } &&
+                    (0 until out.length()).none { out.optString(it) == "image" }
+                free && writes && NOT_CHAT.none { it in id.lowercase() } && id != "openrouter/auto"
             }
             .map { it.optString("id") }
             .sortedBy { id -> FREE_PREFERRED.indexOfFirst { it in id }.let { if (it < 0) FREE_PREFERRED.size else it } }
@@ -374,6 +388,13 @@ object CloudBrain {
     private const val MAX_RETRY_WAIT_S = 10
     private const val MAX_OTHER_MODELS = 3
     private const val MAX_FREE_TRIED = 4
+    private const val MAX_QUOTE_CHARS = 120
+
+    /** Models by these names do not chat: embeddings, rerankers, speech, guards. */
+    private val NOT_CHAT = listOf("embed", "rerank", "whisper", "tts", "guard", "moderation")
+
+    /** The last failed request's code, for the next step to decide on. */
+    @Volatile private var lastCode = 0
 
     /** Free models from these families are tried first: they know music and Russian best. */
     private val FREE_PREFERRED = listOf("deepseek", "gemini", "llama-3.3", "qwen", "mistral", "llama")

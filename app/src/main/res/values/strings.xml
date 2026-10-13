@@ -373,7 +373,7 @@
     <string name="cloud_last_failed">Последний раз не ответила (%2$s): %1$s</string>
     <string name="info_last">Последний рассказ: %1$s, %2$s</string>
     <string name="cloud_model_hint">Пусто — %1$s</string>
-    <string name="cloud_model_hint_free">Пусто — бесплатная модель OpenRouter, подберётся сама (около 50 запросов в день). Или впишите модель со страницы openrouter.ai/models</string>
+    <string name="cloud_model_hint_free">Лучше оставить пустым: бесплатная чат-модель подберётся сама (около 50 запросов в день). Вписывать только модели для чата (не embed)</string>
     <string name="info_source_gemini_hint">Gemini Nano рассказывает сам, из своих знаний. Но система разрешает его только открытому приложению: из жеста в фоне факты берутся из Википедии и других источников и пересказываются скачанной моделью (или читаются как есть). Каждый раз — другие факты</string>
     <string name="info_source_combined_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz, пересказ — модель на телефоне (в фоне — скачанная). Каждый раз — другие факты. Нужен интернет (найденное сохраняется)</string>
     <string name="info_source_wiki_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz как есть, без модели; каждый раз — следующие. Нужен интернет (найденное сохраняется)</string>
