@@ -54,6 +54,9 @@ class StoryLiveTest {
         println("Last.fm, 32 нуля: ${show(MusicSources.checkLastFm("0".repeat(32)))}")
         println("Last.fm, 31 символ: ${show(MusicSources.checkLastFm("0".repeat(31)))}")
         println("setlist.fm, выдуманный ключ: ${show(Setlist.check("00000000-0000-0000-0000-000000000000"))}")
+        // The real keys, from the repository's secrets (never printed): what a server far from the phone is told.
+        BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() }?.let { println("Last.fm, ключ из секрета: ${show(MusicSources.checkLastFm(it))}") }
+        BuildConfig.SETLISTFM_KEY.takeIf { it.isNotBlank() }?.let { println("setlist.fm, ключ из секрета: ${show(Setlist.check(it))}") }
         // MusicBrainz, deeper: what joins the facts in the background after the first telling.
         println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"}, setlist.fm: ${if (Prefs(context).setlistKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
         for (track in tracks) {
