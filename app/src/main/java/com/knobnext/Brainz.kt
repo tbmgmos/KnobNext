@@ -259,7 +259,12 @@ object Brainz {
             val others = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
                 .filter { o -> firstArtist(o) != selfId }
                 .mapNotNull { o -> songOf(o)?.let { (firstArtist(o) ?: Journal.key(it.artist)) to it } }
-                .filter { (_, s) -> Journal.key(s.artist) != Journal.key(artist) }
+                // Not the artist themselves under another credit ("Eminem & The Prodigy"), nor the song's
+                // own writer singing it alone (Виктор Цой for «Кино»): those are not covers.
+                .filter { (_, s) ->
+                    val credit = Journal.key(s.artist)
+                    !credit.contains(Journal.key(artist)) && writers.none { w -> Journal.key(w) == credit }
+                }
                 .sortedBy { (_, s) -> s.year ?: "9999" }
                 .distinctBy { (who, _) -> who }
                 .map { (_, s) -> s }
