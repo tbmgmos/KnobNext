@@ -1305,7 +1305,7 @@ class KnobService : AccessibilityService() {
         if (prefs.bubbleWhere == BubbleWhere.LOCKED && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return
         // An open card is being read: the next track does not take it away.
         if (bubble.open) return
-        val track = now.controller.metadata?.let(TrackInfo::trackOf) ?: TrackInfo.Track(title, now.artist, null, null)
+        val track = now.controller.metadata?.let { TrackInfo.trackOf(it, now.controller.packageName) } ?: TrackInfo.Track(title, now.artist, null, null)
         if (auto == BubbleAuto.EVERY) bubble.show(track, now.art, now.controller, expand = false)
         scope.launch {
             val news = newsOf(track) ?: return@launch

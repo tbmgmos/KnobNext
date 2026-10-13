@@ -70,8 +70,9 @@ object TrackInfo {
      * artist, the album as the description, the year as a date; a video or a browser all of it as the
      * title ("Artist - Song") with no artist at all.
      */
-    fun trackOf(meta: android.media.MediaMetadata): Track? {
-        fun text(key: String) = meta.getString(key)?.trim()?.takeIf { it.isNotEmpty() }
+    fun trackOf(meta: android.media.MediaMetadata, player: String? = null): Track? {
+        // "<unknown>", "Unknown artist": a file without tags (Poweramp, any local player) says nothing.
+        fun text(key: String) = meta.getString(key)?.trim()?.takeIf { it.isNotEmpty() && it.lowercase() !in PLACEHOLDERS }
         var title = text(android.media.MediaMetadata.METADATA_KEY_TITLE) ?: text(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
         var artist = text(android.media.MediaMetadata.METADATA_KEY_ARTIST)
             ?: text(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
@@ -79,7 +80,12 @@ object TrackInfo {
             ?: text(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
             ?: text(android.media.MediaMetadata.METADATA_KEY_COMPOSER)
         if (artist == null) {
-            // "Artist - Song" in the title: a video, a browser tab.
+            // A file's name for the title: "01 - Artist - Song.mp3".
+            title = title.replace(FILE_EXTENSION, "").replace(TRACK_NUMBER, "").trim().ifEmpty { title }
+        }
+        // "Artist - Song" in the title: a video, a browser tab, a file; and on SoundCloud, where the
+        // artist field is whoever uploaded it (a label, a channel) and the title names the musician.
+        if (artist == null || player == SOUNDCLOUD) {
             TITLE_DASH.find(title)?.let { m ->
                 artist = m.groupValues[1].trim()
                 title = m.groupValues[2].trim()
@@ -100,6 +106,13 @@ object TrackInfo {
             ?: it.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
     }
 
+    private const val SOUNDCLOUD = "com.soundcloud.android"
+    private val PLACEHOLDERS = setOf(
+        "<unknown>", "unknown", "unknown artist", "unknown album", "неизвестный исполнитель", "неизвестный альбом",
+        "неизвестно", "various artists", "<неизвестно>",
+    )
+    private val FILE_EXTENSION = Regex("""(?i)\.(mp3|flac|m4a|aac|ogg|opus|wav|wma|ape|alac)$""")
+    private val TRACK_NUMBER = Regex("""^\d{1,3}\s*[-.)_]\s*""")
     private val TITLE_DASH = Regex("""^(.{2,60}?)\s+[-–—]\s+(.{2,}?)$""")
     private const val MAX_ALBUM_CHARS = 120
 

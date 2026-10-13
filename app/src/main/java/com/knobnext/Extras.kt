@@ -8,7 +8,6 @@ import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
-import android.media.MediaMetadata
 import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.PlaybackState
@@ -159,7 +158,7 @@ class Extras(private val context: Context, private val media: Media, private val
             scope.launch { playFrom(controller, told).message?.let { log?.invoke(it) } }
             return Outcome.DONE
         }
-        val track = controller?.metadata?.let(::trackOf)
+        val track = controller?.metadata?.let { TrackInfo.trackOf(it, controller.packageName) }
         val artist = track?.artist?.let(Speech::cleanArtist)
         if (track == null || artist == null) {
             speaker.say(context.getString(R.string.speak_circle_no_track))
@@ -195,14 +194,11 @@ class Extras(private val context: Context, private val media: Media, private val
         return Outcome.done(context.getString(if (r.opened) R.string.log_circle_opened else R.string.log_circle_play, artist, player))
     }
 
-    private fun trackOf(meta: MediaMetadata) = TrackInfo.trackOf(meta)
-
     private fun announce(controller: MediaController?): String? {
-        val meta = controller?.metadata
-        val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
-            ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-            ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        // Read as for any player: SoundCloud's uploader, a file's name, "Artist - Song" in the title.
+        val read = controller?.metadata?.let { TrackInfo.trackOf(it, controller.packageName) }
+        val title = read?.title
+        val artist = read?.artist
         if (title == null) {
             speaker.say(context.getString(R.string.speak_unknown))
             return context.getString(R.string.log_no_metadata)
@@ -435,7 +431,7 @@ class Extras(private val context: Context, private val media: Media, private val
         }
         val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
-        val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val track = TrackInfo.trackOf(meta, c.packageName) ?: return Outcome.failed(context.getString(R.string.log_no_track))
         // The player's cover, for the history (it works for any artist, however unknown) and the card.
         val art = TrackInfo.coverOf(meta)
         if (prefs.infoHistory && track.artist != null && art != null) {
@@ -500,7 +496,7 @@ class Extras(private val context: Context, private val media: Media, private val
     private fun showBubble(controller: MediaController?): Outcome {
         val card = bubble ?: return Outcome.failed(context.getString(R.string.log_bubble_none))
         val meta = controller?.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
-        val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val track = TrackInfo.trackOf(meta, controller.packageName) ?: return Outcome.failed(context.getString(R.string.log_no_track))
         if (card.openFor(track)) {
             card.dismiss()
             return Outcome.undone(context.getString(R.string.log_bubble_closed))
@@ -518,11 +514,9 @@ class Extras(private val context: Context, private val media: Media, private val
      */
     private fun askAbout(controller: MediaController?): String? {
         val meta = controller?.metadata ?: return context.getString(R.string.log_no_track)
-        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
-            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            ?: return context.getString(R.string.log_no_track)
-        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST)
-            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        val read = TrackInfo.trackOf(meta, controller.packageName) ?: return context.getString(R.string.log_no_track)
+        val title = read.title
+        val artist = read.artist
         val track = if (artist.isNullOrBlank()) "«${Speech.cleanTitle(title)}»" else "«${Speech.cleanTitle(title)}» — ${Speech.cleanArtist(artist)}"
         val question = context.getString(R.string.gemini_question, track)
         val tries = listOf(

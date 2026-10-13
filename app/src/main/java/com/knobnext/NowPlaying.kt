@@ -129,8 +129,8 @@ class NowPlayingTracker(
                 controller = c,
                 appLabel = appLabel(context, c.packageName),
                 // Read the same way for every player (see TrackInfo.trackOf).
-                title = meta?.let(TrackInfo::trackOf)?.title,
-                artist = meta?.let(TrackInfo::trackOf)?.artist,
+                title = meta?.let { TrackInfo.trackOf(it, c.packageName) }?.title,
+                artist = meta?.let { TrackInfo.trackOf(it, c.packageName) }?.artist,
                 art = TrackInfo.coverOf(meta),
                 playing = c.isPlaying(),
             ),

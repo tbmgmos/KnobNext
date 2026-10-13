@@ -137,7 +137,7 @@ class TrackBubble(
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             val m = metadata ?: return
             if (root == null) return
-            val t = TrackInfo.trackOf(m) ?: return
+            val t = TrackInfo.trackOf(m, watched?.packageName) ?: return
             val cover = TrackInfo.coverOf(m)
             if (same(t)) {
                 // A player (Spotify) gives the title first and the album, year and cover a moment later:
