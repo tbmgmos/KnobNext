@@ -218,9 +218,74 @@ object Journal {
     @Synchronized
     fun clear(context: Context) {
         file(context).delete()
+        seenFile(context).delete()
         covers(context).deleteRecursively()
         Prefs(context).journalVersion++
     }
+
+    // ---- Listen later ----
+
+    /** An artist (or one of their tracks, [title]) put aside from the round card; [via]: whose card named them. */
+    class Later(val artist: String, val title: String?, val via: String?, val at: Long)
+
+    /** What was put aside, the latest first. */
+    @Synchronized
+    fun later(context: Context): List<Later> {
+        val list = read(context).optJSONArray("later") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }.map { o ->
+            Later(o.optString("artist"), o.optString("title").takeIf { it.isNotEmpty() }, o.optString("via").takeIf { it.isNotEmpty() }, o.optLong("at"))
+        }.sortedByDescending { it.at }
+    }
+
+    @Synchronized
+    fun isLater(context: Context, artist: String, title: String?): Boolean =
+        later(context).any { same(it, artist, title) }
+
+    /** Puts the artist (or track) aside, or takes it back when it already was: true when it is aside now. */
+    @Synchronized
+    fun toggleLater(context: Context, artist: String, title: String?, via: String?): Boolean {
+        val root = read(context)
+        val list = root.optJSONArray("later") ?: JSONArray()
+        val kept = JSONArray()
+        var had = false
+        for (i in 0 until list.length()) {
+            val o = list.getJSONObject(i)
+            val l = Later(o.optString("artist"), o.optString("title").takeIf { it.isNotEmpty() }, null, 0)
+            if (same(l, artist, title)) had = true else kept.put(o)
+        }
+        if (!had) {
+            kept.put(
+                JSONObject().put("artist", Speech.cleanArtist(artist)).put("at", System.currentTimeMillis())
+                    .apply { title?.let { put("title", Speech.cleanTitle(it)) } }
+                    .apply { via?.let { put("via", Speech.cleanArtist(it)) } },
+            )
+            while (kept.length() > MAX_LATER) kept.remove(0)
+        }
+        root.put("later", kept)
+        write(context, root)
+        return !had
+    }
+
+    private fun same(l: Later, artist: String, title: String?) =
+        key(l.artist) == key(artist) && (l.title?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT)) == title?.let(Speech::cleanTitle)?.lowercase(Locale.ROOT)
+
+    // ---- Artists met ----
+
+    /**
+     * Whether [artist] is met for the first time: never in the history, never seen in the round card.
+     * Each artist is new once; kept apart from the history so that it does not change with every track.
+     */
+    @Synchronized
+    fun firstMeeting(context: Context, artist: String): Boolean {
+        val k = key(artist)
+        val f = seenFile(context)
+        val seen = runCatching { f.readLines() }.getOrDefault(emptyList())
+        if (k in seen) return false
+        runCatching { f.writeText((seen.takeLast(MAX_SEEN - 1) + k).joinToString("\n")) }
+        return read(context).optJSONObject("artists")?.has(k) != true
+    }
+
+    private fun seenFile(context: Context) = File(File(context.filesDir, "trackinfo").apply { mkdirs() }, "seen.txt")
 
     // ---- Covers ----
 
@@ -321,6 +386,8 @@ object Journal {
         MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private const val MAX_NOTES = 50
+    private const val MAX_LATER = 200
+    private const val MAX_SEEN = 3000
     private const val MAX_ARTISTS = 500
     private const val MAX_LINKS = 30
     private const val COVER_PX = 256

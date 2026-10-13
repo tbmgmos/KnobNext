@@ -61,6 +61,19 @@ enum class InfoLanguage(val code: String?) {
 object TrackInfo {
     data class Track(val title: String, val artist: String?, val album: String?, val year: String?)
 
+    /** The playing track as the story knows it, from the player's data. */
+    fun trackOf(meta: android.media.MediaMetadata): Track? {
+        val title = meta.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+            ?: meta.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
+        return Track(
+            title = title,
+            artist = meta.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                ?: meta.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
+            album = meta.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
+            year = meta.getLong(android.media.MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
+        )
+    }
+
     /** An article's facts (one sentence each) and the language they are in. */
     class Text(val facts: List<String>, val lang: String)
 
@@ -631,6 +644,61 @@ object TrackInfo {
         return fetched
     }
 
+    /**
+     * An artist the round card's circle named, by name alone (no track playing of theirs): who they are
+     * and the artists around them, for the next step along the circle.
+     */
+    suspend fun aboutArtist(context: Context, name: String, lang: String): Facts? {
+        val artist = Speech.cleanArtist(name).takeIf { it.isNotBlank() } ?: return null
+        val file = File(dir(context), ARTIST_PREFIX + sha1("${normalize(artist)}\u0000$lang"))
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
+            runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { return it }
+        }
+        val started = System.currentTimeMillis()
+        val found = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
+            withContext(Dispatchers.IO) {
+                val article = findArticle(lang) { l -> findArtist(l, artist) }
+                val d = runCatching {
+                    Wikidata.gather(
+                        context, lang, null, null, article?.page,
+                        deadline = started + WIKIDATA_DEADLINE_MS,
+                        said = article?.text?.facts?.joinToString(" ")?.let(::speakable).orEmpty(),
+                    )
+                }.getOrNull()
+                Facts(
+                    song = emptyList(),
+                    artist = listOfNotNull(article?.text, d?.artist),
+                    album = null,
+                    year = null,
+                    albumText = emptyList(),
+                    intro = intro(context, artist, article?.text?.takeIf { it.lang == lang }, d?.artistIntro.orEmpty(), lang),
+                    circle = d?.circle.orEmpty(),
+                    related = d?.related.orEmpty(),
+                    relatedIds = d?.relatedIds.orEmpty(),
+                    artistId = d?.artistId,
+                    mbid = d?.mbid,
+                )
+            }
+        } ?: return null
+        if (!found.empty || found.intro.isNotEmpty()) {
+            runCatching { file.writeText(writeFacts(found).toString()) }
+            trimCache(context)
+        }
+        return found
+    }
+
+    /** What a card says of the artist: who they are, then the rest of their facts, a sentence each. */
+    fun aboutLines(facts: Facts, lang: String): List<String> {
+        val seen = HashSet<String>()
+        return (facts.intro + artistFacts(facts, lang)).filter { seen.add(normalize(it).take(DUPLICATE_CHARS)) }
+    }
+
+    /** The sentence of [circle] that names [name]: why they are in it ("Dave Grohl also plays in …"). */
+    fun why(circle: List<String>, name: String): String? {
+        val n = normalize(Speech.cleanArtist(name))
+        return circle.firstOrNull { normalize(it).contains(n) }
+    }
+
     // ---- MusicBrainz, in the background ----
 
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -940,9 +1008,11 @@ object TrackInfo {
     /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {
         dir(context).listFiles { f -> f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) }?.forEach { it.delete() }
-        val files = dir(context).listFiles { f -> f.name.startsWith(FACTS_PREFIX) } ?: return
-        if (files.size <= MAX_CACHED) return
-        files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
+        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX)) {
+            val files = dir(context).listFiles { f -> f.name.startsWith(prefix) } ?: continue
+            if (files.size <= MAX_CACHED) continue
+            files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
+        }
     }
 
     private fun sha1(text: String): String =
@@ -1020,6 +1090,12 @@ object TrackInfo {
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts8-"
+
+    /** An artist's own facts, looked up from the round card's circle. */
+    private const val ARTIST_PREFIX = "artist1-"
+
+    /** Two sentences that begin with this many of the same characters are one. */
+    private const val DUPLICATE_CHARS = 60
 
     /** In the artist's story, a fact from the other sources after this many of the article's. */
     private const val WEAVE_EVERY = 3

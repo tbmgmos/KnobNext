@@ -88,6 +88,16 @@ class Extras(private val context: Context, private val media: Media, private val
     /** Speaks [text] the same way as the announcements. */
     fun say(text: String) = speaker.say(text)
 
+    /** The round card's 🔊: reads [text] aloud, or stops (null, or already reading). Whether it reads now. */
+    fun readAloud(text: String?): Boolean {
+        if (text == null || speaker.speaking) {
+            speaker.stop()
+            return false
+        }
+        speaker.say(text)
+        return true
+    }
+
     fun release() {
         scope.cancel()
         speaker.release()
@@ -181,16 +191,7 @@ class Extras(private val context: Context, private val media: Media, private val
         return Outcome.done(context.getString(R.string.log_circle_play, artist, player))
     }
 
-    /** The playing track as the story knows it, from the player's data. */
-    private fun trackOf(meta: MediaMetadata): TrackInfo.Track? {
-        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
-        return TrackInfo.Track(
-            title = title,
-            artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
-            album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
-            year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
-        )
-    }
+    private fun trackOf(meta: MediaMetadata) = TrackInfo.trackOf(meta)
 
     private fun announce(controller: MediaController?): String? {
         val meta = controller?.metadata

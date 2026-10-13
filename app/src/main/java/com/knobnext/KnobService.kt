@@ -416,7 +416,7 @@ class KnobService : AccessibilityService() {
         media = Media(this)
         media.silencePlaying = { silence.playing || ::headset.isInitialized && headset.silencePlaying }
         extras = Extras(this, media, prefs)
-        bubble = TrackBubble(this, prefs) { handler.post { log(it) } }
+        bubble = TrackBubble(this, prefs, log = { handler.post { log(it) } }, act = ::fromBubble, read = extras::readAloud)
         extras.bubble = bubble
         haptics = Haptics(this)
         proximity = ProximityProbe(this)
@@ -1291,23 +1291,60 @@ class KnobService : AccessibilityService() {
         extras.perform(Action.ANNOUNCE, now.controller)
     }
 
-    /** A new track playing: its round cover at the edge of the screen for a few seconds, when so set. */
+    /**
+     * A new track playing: its round cover at the edge of the screen for a few seconds, when so set: for
+     * every track, or only when there is something to find out (marked on the cover).
+     */
     private fun showBubbleFor(now: NowPlaying?) {
-        if (!prefs.bubbleOnTrack || !prefs.enabled || GestureTest.active || now?.playing != true) return
+        val auto = prefs.bubbleAuto
+        if (auto == BubbleAuto.OFF || !prefs.enabled || GestureTest.active || now?.playing != true) return
         val title = now.title ?: return
         val key = now.controller.packageName + "/" + now.artist + "/" + title
         if (key == bubbledTrack) return
         bubbledTrack = key
+        if (prefs.bubbleWhere == BubbleWhere.LOCKED && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return
         // An open card is being read: the next track does not take it away.
         if (bubble.open) return
-        val meta = now.controller.metadata
-        val track = TrackInfo.Track(
-            title = title,
-            artist = now.artist,
-            album = meta?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
-            year = meta?.getLong(android.media.MediaMetadata.METADATA_KEY_YEAR)?.takeIf { it > 0 }?.toString(),
-        )
-        bubble.show(track, now.art, now.controller, expand = false)
+        val track = now.controller.metadata?.let(TrackInfo::trackOf) ?: TrackInfo.Track(title, now.artist, null, null)
+        if (auto == BubbleAuto.EVERY) bubble.show(track, now.art, now.controller, expand = false)
+        scope.launch {
+            val news = newsOf(track) ?: return@launch
+            // Moved on to another track meanwhile: this one is no longer news.
+            if (bubbledTrack != key) return@launch
+            if (auto == BubbleAuto.EVERY) {
+                bubble.mark(track, news)
+            } else if (!bubble.open) {
+                bubble.show(track, now.art, now.controller, expand = false, mark = news)
+            }
+        }
+    }
+
+    /**
+     * What there is to find out about [track]: its artist met for the first time (and something known
+     * of them), or a story about this very song not yet told.
+     */
+    private suspend fun newsOf(track: TrackInfo.Track): BubbleNews? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val artist = track.artist?.takeIf { it.isNotBlank() } ?: return@withContext null
+        val first = Journal.firstMeeting(this@KnobService, artist)
+        val facts = runCatching { TrackInfo.facts(this@KnobService, track, prefs.infoLanguage.resolve()) }.getOrNull()
+        if (facts == null || facts.empty && facts.intro.isEmpty()) return@withContext null
+        if (first) return@withContext BubbleNews.NEW_ARTIST
+        val told = Journal.entry(this@KnobService, Journal.key(artist))?.notes.orEmpty()
+            .any { Speech.cleanTitle(it.track).equals(Speech.cleanTitle(track.title), ignoreCase = true) }
+        if (facts.song.isNotEmpty() && !told) BubbleNews.STORY else null
+    }
+
+    /** A touch on the round cover or its card: done as a gesture would be, with its sound and log line. */
+    private fun fromBubble(action: Action, controller: MediaController?): Outcome {
+        val player = controller ?: media.resolve(prefs)?.controller
+        val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: media.musicActive())
+        if (action == Action.PLAY_PAUSE && !pausing) resumedByUs()
+        val outcome = execute(action, player)
+        if (action == Action.PLAY_PAUSE && pausing) pausedByUs(player?.packageName)
+        val name = getString(R.string.bubble_source)
+        log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" } ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
+        playCue(action, outcome, pausing, player?.packageName)
+        return outcome
     }
 
     /** Face down pauses; turning the phone back up resumes, but only playback that we paused. */

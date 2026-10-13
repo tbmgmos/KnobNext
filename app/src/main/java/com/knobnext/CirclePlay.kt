@@ -33,22 +33,29 @@ object CirclePlay {
 
     private const val FRESH_MS = 60L * 60 * 1000
 
-    fun play(context: Context, controller: MediaController?, lastPlayer: String?, name: String): Result {
+    /** [name], the artist; with [title], that one track of theirs (one put aside to listen to later). */
+    fun play(context: Context, controller: MediaController?, lastPlayer: String?, name: String, title: String? = null): Result {
         val focus = Bundle().apply {
-            putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE)
+            if (title == null) {
+                putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE)
+            } else {
+                putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Media.ENTRY_CONTENT_TYPE)
+                putString(MediaStore.EXTRA_MEDIA_TITLE, title)
+            }
             putString(MediaStore.EXTRA_MEDIA_ARTIST, name)
         }
+        val query = if (title == null) name else "$name $title"
         // The player can search itself: nothing opens, the music just changes.
         if (controller != null && (controller.playbackState?.actions ?: 0L) and PlaybackState.ACTION_PLAY_FROM_SEARCH != 0L) {
-            val ok = runCatching { controller.transportControls.playFromSearch(name, focus) }.isSuccess
+            val ok = runCatching { controller.transportControls.playFromSearch(query, focus) }.isSuccess
             if (ok) return Result(true, name, controller.packageName)
         }
         val pkg = controller?.packageName ?: lastPlayer ?: return Result(false, name, null)
         val tries = listOf(
             // What assistants send: the player plays the artist.
-            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtras(focus).putExtra(SearchManager.QUERY, name),
+            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtras(focus).putExtra(SearchManager.QUERY, query),
             // Else its own search, on that name.
-            Intent(Intent.ACTION_SEARCH).putExtra(SearchManager.QUERY, name),
+            Intent(Intent.ACTION_SEARCH).putExtra(SearchManager.QUERY, query),
         )
         for (intent in tries) {
             try {

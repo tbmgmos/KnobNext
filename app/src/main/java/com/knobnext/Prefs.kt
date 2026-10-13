@@ -147,7 +147,9 @@ data class Settings(
     val infoLength: InfoLength,
     val infoPause: Boolean,
     val infoDelivery: InfoDelivery,
-    val bubbleOnTrack: Boolean,
+    val bubbleAuto: BubbleAuto,
+    val bubbleWhere: BubbleWhere,
+    val bubbleSide: BubbleSide,
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
     val keysOnPause: Boolean,
@@ -519,10 +521,21 @@ class Prefs(context: Context) {
         get() = InfoDelivery.entries.firstOrNull { it.name == sp.getString("info_delivery", null) } ?: InfoDelivery.VOICE
         set(v) = sp.edit().putString("info_delivery", v.name).apply()
 
-    /** The round cover appears by itself for a few seconds when a new track starts. */
-    var bubbleOnTrack: Boolean
-        get() = sp.getBoolean("bubble_on_track", false)
-        set(v) = sp.edit().putBoolean("bubble_on_track", v).apply()
+    /** When the round cover appears by itself as a new track starts (it was once a switch: on is "every"). */
+    var bubbleAuto: BubbleAuto
+        get() = BubbleAuto.entries.firstOrNull { it.name == sp.getString("bubble_auto", null) }
+            ?: if (sp.getBoolean("bubble_on_track", false)) BubbleAuto.EVERY else BubbleAuto.OFF
+        set(v) = sp.edit().putString("bubble_auto", v.name).apply()
+
+    /** Where it appears by itself: anywhere, or only over the lock screen. */
+    var bubbleWhere: BubbleWhere
+        get() = BubbleWhere.entries.firstOrNull { it.name == sp.getString("bubble_where", null) } ?: BubbleWhere.ANYWHERE
+        set(v) = sp.edit().putString("bubble_where", v.name).apply()
+
+    /** The edge of the screen it sits at. */
+    var bubbleSide: BubbleSide
+        get() = BubbleSide.entries.firstOrNull { it.name == sp.getString("bubble_side", null) } ?: BubbleSide.RIGHT
+        set(v) = sp.edit().putString("bubble_side", v.name).apply()
 
     /** Where the round cover was dragged to, from the top of the screen; -1 before it ever was. */
     var bubbleY: Int
@@ -743,7 +756,9 @@ class Prefs(context: Context) {
         infoLength = infoLength,
         infoPause = infoPause,
         infoDelivery = infoDelivery,
-        bubbleOnTrack = bubbleOnTrack,
+        bubbleAuto = bubbleAuto,
+        bubbleWhere = bubbleWhere,
+        bubbleSide = bubbleSide,
         infoLanguage = infoLanguage,
         infoSource = infoSource,
         keysOnPause = keysOnPause,

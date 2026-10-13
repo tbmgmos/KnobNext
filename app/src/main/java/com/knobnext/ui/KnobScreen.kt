@@ -1591,7 +1591,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
     item {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle(stringResource(R.string.info_title))
-            Group(7) {
+            Group(6) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(shape(0), stringResource(R.string.info_delivery), caption = stringResource(R.string.info_delivery_hint)) {
                         ConnectedChoice(
@@ -1654,16 +1654,49 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                         )
                     }
                     SwitchRow(
-                        shape(5), stringResource(R.string.bubble_on_track), s.bubbleOnTrack, { prefs.bubbleOnTrack = it },
-                        subtitle = stringResource(R.string.bubble_on_track_hint),
-                    )
-                    SwitchRow(
-                        shape(6), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
+                        shape(5), stringResource(R.string.acq_history), s.infoHistory, { prefs.infoHistory = it },
                         subtitle = stringResource(R.string.acq_history_hint),
                     )
                 }
             }
             Hint(stringResource(R.string.info_hint))
+            SectionTitle(stringResource(R.string.bubble_title))
+            Group(3) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ControlRow(shape(0), stringResource(R.string.bubble_auto), caption = stringResource(R.string.bubble_auto_hint)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.BubbleAuto.OFF to R.string.bubble_auto_off,
+                                com.knobnext.BubbleAuto.EVERY to R.string.bubble_auto_every,
+                                com.knobnext.BubbleAuto.NEWS to R.string.bubble_auto_news,
+                            ),
+                            selected = s.bubbleAuto,
+                            onSelect = { prefs.bubbleAuto = it },
+                        )
+                    }
+                    ControlRow(shape(1), stringResource(R.string.bubble_where)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.BubbleWhere.ANYWHERE to R.string.bubble_where_any,
+                                com.knobnext.BubbleWhere.LOCKED to R.string.bubble_where_locked,
+                            ),
+                            selected = s.bubbleWhere,
+                            onSelect = { prefs.bubbleWhere = it },
+                        )
+                    }
+                    ControlRow(shape(2), stringResource(R.string.bubble_side)) {
+                        ConnectedChoice(
+                            options = listOf(
+                                com.knobnext.BubbleSide.RIGHT to R.string.bubble_side_right,
+                                com.knobnext.BubbleSide.LEFT to R.string.bubble_side_left,
+                            ),
+                            selected = s.bubbleSide,
+                            onSelect = { prefs.bubbleSide = it },
+                        )
+                    }
+                }
+            }
+            Hint(stringResource(R.string.bubble_remote_hint))
             SourceKeys(prefs)
         }
     }

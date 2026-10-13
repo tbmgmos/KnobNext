@@ -67,6 +67,7 @@ fun HistoryList(version: Int, onOpen: (String) -> Unit) {
     val entries = remember(version) { Journal.entries(context) }
     LaunchedEffect(Unit) { recheckUnknown(context) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Later(context, version)
         if (entries.isEmpty()) {
             Hint(stringResource(R.string.acq_empty))
             return@Column
@@ -282,10 +283,40 @@ private fun Links(context: Context, links: List<String>, version: Int, onOpen: (
     }
 }
 
-/** Plays [name] in the player in use (or the last one), and says what happened. */
-private fun playInPlayer(context: Context, media: com.knobnext.Media, name: String) {
+/** What was put aside from the round card: ▶ plays it in the player, ✕ takes it off the list. */
+@Composable
+private fun Later(context: Context, version: Int) {
+    val list = remember(version) { Journal.later(context) }
+    if (list.isEmpty()) return
+    val media = remember { com.knobnext.Media(context) }
+    SectionTitle(stringResource(R.string.later_title))
+    Hint(stringResource(R.string.later_hint))
+    Group(list.size) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            list.forEachIndexed { i, l ->
+                ListRow(
+                    shape(i), l.title?.let { "${l.artist} — $it" } ?: l.artist,
+                    subtitle = listOfNotNull(l.via?.let { stringResource(R.string.later_from, it) }, day(l.at)).joinToString(" · "),
+                    trailing = {
+                        Row {
+                            IconButton(onClick = { playInPlayer(context, media, l.artist, l.title) }) {
+                                Icon(KnobIcons.Play, contentDescription = stringResource(R.string.acq_link_play, l.artist))
+                            }
+                            IconButton(onClick = { Journal.toggleLater(context, l.artist, l.title, null) }) {
+                                Icon(KnobIcons.Close, contentDescription = stringResource(R.string.later_remove))
+                            }
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Plays [name] (or their track [title]) in the player in use (or the last one), and says what happened. */
+private fun playInPlayer(context: Context, media: com.knobnext.Media, name: String, title: String? = null) {
     val prefs = Prefs(context)
-    val r = com.knobnext.CirclePlay.play(context, media.pick(media.controllers(), prefs.pausedPlayer), prefs.lastPlayer, name)
+    val r = com.knobnext.CirclePlay.play(context, media.pick(media.controllers(), prefs.pausedPlayer), prefs.lastPlayer, name, title)
     val player = r.player?.let { com.knobnext.appLabel(context, it) }
     val text = when {
         player == null -> context.getString(R.string.log_no_player)
