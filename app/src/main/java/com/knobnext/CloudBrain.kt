@@ -167,7 +167,7 @@ object CloudBrain {
         val body = JSONObject()
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-            .put("generationConfig", JSONObject().put("maxOutputTokens", maxTokens).put("temperature", TEMPERATURE))
+            .put("generationConfig", JSONObject().put("maxOutputTokens", maxOf(maxTokens, GEMINI_MIN_TOKENS)).put("temperature", TEMPERATURE))
         // It looks the track up in Google itself, and says where it found what it tells.
         if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
         val r = post("${CloudService.GEMINI.base}/models/$model:generateContent", mapOf("x-goog-api-key" to key), body)
@@ -178,7 +178,9 @@ object CloudBrain {
             // A thinking model's thoughts are not the answer.
             .filter { !it.optBoolean("thought") }
             .joinToString("") { it.optString("text") }.trim()
-        if (text.isEmpty()) return r.copy(said = "пустой ответ: " + candidate.optString("finishReason"))
+        // A thinking model can spend the whole allowance thinking (finishReason MAX_TOKENS), or a filter
+        // can stop it: tried another way, not given up on.
+        if (text.isEmpty()) return r.copy(code = EMPTY, said = candidate.optString("finishReason").ifBlank { "без причины" })
         val chunks = candidate.optJSONObject("groundingMetadata")?.optJSONArray("groundingChunks")
         val sources = (0 until (chunks?.length() ?: 0)).mapNotNull { chunks!!.optJSONObject(it)?.optJSONObject("web") }
             .mapNotNull { w -> w.optString("uri").takeIf { it.isNotBlank() }?.let { Source(w.optString("title").ifBlank { it }, it) } }
@@ -208,6 +210,8 @@ object CloudBrain {
             r == null -> "нет ответа"
             r.code == 0 -> said.ifBlank { "нет связи" }
             said.contains("location is not supported", ignoreCase = true) -> "Gemini недоступен из вашей страны — нужен VPN"
+            r.code == EMPTY -> "модель вернула пустой ответ (${said.take(MAX_REASON_CHARS)})"
+            r.code in 200..299 -> "модель вернула пустой ответ"
             r.code in BUSY -> "сервис модели сейчас перегружен — попробуйте чуть позже"
             // DeepSeek has no free quota: "Insufficient Balance".
             r.code == HTTP_NO_MONEY -> "на счёте сервиса нет средств — пополните баланс (бесплатного лимита у него нет)"
@@ -311,7 +315,17 @@ object CloudBrain {
     private const val HTTP_NO_MONEY = 402
 
     /** Answers worth trying another way: no quota, no such model, a feature not offered (the search). */
-    private val RETRYABLE = setOf(HTTP_QUOTA, HTTP_NO_MONEY, 404, 400, 500, 502, 503, 504)
+    private val RETRYABLE = setOf(HTTP_QUOTA, HTTP_NO_MONEY, EMPTY, 404, 400, 500, 502, 503, 504)
+
+    /** Answered, but with no text (all of it spent thinking, or stopped by a filter). */
+    private const val EMPTY = -1
+    private const val MAX_REASON_CHARS = 40
+
+    /**
+     * Gemini's newer models think before they answer, and the thinking counts against the allowance: a
+     * small one left nothing for the answer. Only what is written is paid for; the prompt keeps it short.
+     */
+    private const val GEMINI_MIN_TOKENS = 4_096
 
     /** The service is busy or briefly down: worth one more try a little later. */
     private val BUSY = setOf(500, 502, 503, 504)
