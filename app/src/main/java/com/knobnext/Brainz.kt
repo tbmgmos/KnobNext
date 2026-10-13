@@ -311,7 +311,8 @@ object Brainz {
         val title = r.optString("title").takeIf { it.isNotBlank() } ?: return null
         val credit = r.optJSONArray("artist-credit")?.let { a ->
             (0 until a.length()).mapNotNull { a.optJSONObject(it) }.joinToString("") { it.optString("name") + it.optString("joinphrase") }
-        }?.takeIf { it.isNotBlank() } ?: return null
+        }?.takeIf { it.isNotBlank() && !it.startsWith("[") } ?: return null
+        // "[unknown]", "[anonymous]": MusicBrainz's placeholders are no one to name.
         return Song(title, credit, year(r, "first-release-date"))
     }
 
