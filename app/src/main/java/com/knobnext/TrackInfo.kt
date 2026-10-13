@@ -319,8 +319,11 @@ object TrackInfo {
         firstMeet: Boolean,
     ): CloudBrain.Answer? {
         val prefs = Prefs(context)
+        // The dates it is not to guess, as far as there is time for them (the voice is waiting).
+        val dates = withTimeoutOrNull(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
         val prompt = buildString {
             appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year)
+            reference(dates, track, facts, lang)
             footing(facts, lang)
             appendLine(shape(length, facts?.album ?: track.album, lang, firstMeet, topic = null))
             appendTold(told, lang)
@@ -333,8 +336,9 @@ object TrackInfo {
         val answer = withTimeoutOrNull(CLOUD_STORY_WAIT_MS) { asked.await() } ?: return null.also {
             if (asked.isActive) CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с"
         }
-        val text = clean(answer.text, length, lang) ?: return null
-        return CloudBrain.Answer(text, answer.sources)
+        val checked = checked(answer, allowedYears(dates, track, facts)) ?: return null
+        val text = clean(checked.text, length, lang) ?: return null
+        return CloudBrain.Answer(text, checked.sources)
     }
 
     /** What the round card can ask the cloud model about the track or an artist down the circle. */
@@ -347,8 +351,11 @@ object TrackInfo {
     suspend fun ask(context: Context, track: Track?, artist: String?, question: Question, lang: String, facts: Facts?): CloudBrain.Answer? {
         val ru = lang == "ru"
         val who = artist ?: track?.artist?.let(Speech::cleanArtist) ?: return null
+        val album = if (artist == null) facts?.album ?: track?.album else null
+        val dates = withTimeoutOrNull(ASK_DATES_WAIT_MS) { reference(context, who, album, facts?.mbid) }
         val prompt = buildString {
             if (artist == null && track != null) appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year) else appendLine("Artist: $who")
+            reference(dates, track.takeIf { artist == null }, facts, lang)
             footing(facts, lang)
             appendLine(
                 when (question) {
@@ -366,7 +373,8 @@ object TrackInfo {
             )
             appendLine(if (ru) "До пяти коротких предложений." else "Five short sentences at most.")
         }
-        val answer = withContext(Dispatchers.IO) { CloudBrain.ask(Prefs(context), host(lang), prompt) } ?: return null
+        val asked = withContext(Dispatchers.IO) { CloudBrain.ask(Prefs(context), host(lang), prompt) } ?: return null
+        val answer = checked(asked, allowedYears(dates, track.takeIf { artist == null }, facts)) ?: return null
         // A list of names keeps its lines; anything else reads as one note.
         val text = if (question == Question.NEXT) answer.text.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.isNotBlank() }.joinToString("\n")
         else speakable(answer.text.replace(Regex("[*#_`]"), "")).trim()
@@ -377,16 +385,99 @@ object TrackInfo {
     private fun host(lang: String) = if (lang == "ru") {
         "Ты музыкальный журналист и радиоведущий. Отвечай только на русском языке. Говори только проверенные факты: " +
             "найди их в поиске, если можешь; если не уверен — не говори. Не противоречь фактам, которые тебе дали. " +
+            "Годы и даты называй только из «Справки» и фактов ниже; если нужной даты там нет — не называй её вовсе. " +
             "Никогда не придумывай подробности: студии, города, людей, технику записи, даты, звуки. Если в поиске и в данных фактах " +
             "о чём-то нет — так и скажи одной фразой («подробностей о записи найти не удалось») и расскажи то, что известно точно. " +
             "Не цитируй тексты песен. Не повторяй в начале название и исполнителя — их уже назвали. Без списков, ссылок и разметки, если не попросили."
     } else {
         "You are a music journalist and radio host. Answer only in English. Say only verified facts: look them up if you can; " +
-            "if unsure, leave it out. Do not contradict the facts you are given. Never invent details — studios, places, people, " +
+            "if unsure, leave it out. Do not contradict the facts you are given. Take years and dates only from the Reference and " +
+            "the facts below; if the one needed is not there, give no date at all. Never invent details — studios, places, people, " +
             "recording techniques, dates, sounds; if the search and the given facts say nothing about something, say so in one " +
             "sentence and tell what is known for sure. Do not quote lyrics. Do not repeat the title and artist " +
             "at the start — they were just said. No lists, links or markup unless asked."
     }
+
+    // ---- Dates: given, never guessed, and checked ----
+
+    private val referenceCache = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, Brainz.Dates?>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Brainz.Dates?>) = size > MAX_REFERENCES
+    })
+
+    /** [artist]'s and [album]'s verified dates (MusicBrainz), kept on disk like the facts. */
+    suspend fun reference(context: Context, artist: String?, album: String?, mbid: String?): Brainz.Dates? {
+        val who = artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
+        val key = "${normalize(who)}\u0000${album?.let { normalize(Speech.cleanTitle(it)) }.orEmpty()}"
+        referenceCache[key]?.let { return it }
+        val file = File(dir(context), DATES_PREFIX + sha1(key))
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
+            runCatching { Brainz.Dates.fromJson(JSONObject(file.readText())) }.getOrNull()?.let { referenceCache[key] = it; return it }
+        }
+        val found = withContext(Dispatchers.IO) { runCatching { Brainz.dates(who, album, mbid) }.getOrNull() } ?: return null
+        referenceCache[key] = found
+        runCatching { file.writeText(found.toJson().toString()) }
+        return found
+    }
+
+    /** The Reference: the dates as MusicBrainz and the player give them, to be used and nothing else. */
+    private fun StringBuilder.reference(dates: Brainz.Dates?, track: Track?, facts: Facts?, lang: String) {
+        val ru = lang == "ru"
+        val lines = ArrayList<String>()
+        dates?.began?.let { b -> lines += (if (ru) "Исполнитель начал в $b" else "The artist began in $b") + (dates.ended?.let { if (ru) ", закончил в $it" else ", ended in $it" } ?: "") }
+        dates?.albumDate?.let { lines += if (ru) "Альбом «${dates.album}» вышел: $it" else "The album \"${dates.album}\" came out: $it" }
+        (track?.year ?: facts?.year)?.let { lines += if (ru) "Год этого трека по данным плеера и источников: $it" else "This track's year per the player and sources: $it" }
+        if (dates != null && dates.albums.isNotEmpty()) {
+            lines += (if (ru) "Студийные альбомы: " else "Studio albums: ") + dates.albums.joinToString("; ") { (t, y) -> "$t ($y)" }
+        }
+        if (lines.isEmpty()) return
+        appendLine(if (ru) "Справка (проверено по MusicBrainz; даты — только отсюда):" else "Reference (checked against MusicBrainz; dates from here only):")
+        lines.forEach { appendLine("- $it") }
+    }
+
+    /** Every year the model may name: those of the Reference and of the facts it was given. */
+    internal fun allowedYears(dates: Brainz.Dates?, track: Track?, facts: Facts?): Set<String> {
+        val texts = buildList {
+            dates?.let { d -> addAll(listOfNotNull(d.began, d.ended, d.albumDate)); d.albums.forEach { add(it.second) } }
+            addAll(listOfNotNull(track?.year, facts?.year))
+            facts?.let { f -> (f.intro + f.circle + (f.song + f.albumText + f.artist).flatMap { it.facts }).forEach { add(it) } }
+        }
+        return texts.flatMap { t -> YEAR.findAll(t).map { it.value }.toList() }.toSet()
+    }
+
+    /**
+     * The answer with every sentence that names a year not given to it taken out: a model's memory for
+     * dates is what fails most. An answer found by a search (it names its sources) is let be.
+     */
+    internal fun checked(answer: CloudBrain.Answer, allowed: Set<String>): CloudBrain.Answer? {
+        if (answer.sources.isNotEmpty()) return answer
+        var dropped = 0
+        val lines = answer.text.lines().map { line ->
+            Regex("(?<=[.!?…])\\s+").split(line).filter { sentence ->
+                val years = YEAR.findAll(sentence).filterNot { decade(sentence, it) }.map { it.value }.toList()
+                val ok = years.all { it in allowed }
+                if (!ok) dropped++
+                ok
+            }.joinToString(" ")
+        }
+        lastDropped = dropped
+        val text = lines.filter { it.isNotBlank() }.joinToString("\n").trim()
+        if (text.isEmpty()) {
+            CloudBrain.lastError = "в ответе были только непроверенные даты"
+            return null
+        }
+        return CloudBrain.Answer(text, answer.sources)
+    }
+
+    /** "the 1990s", «в 1990-х»: a decade, not a date to check. */
+    private fun decade(sentence: String, m: MatchResult): Boolean {
+        val after = sentence.substring(m.range.last + 1).take(3).lowercase(Locale.ROOT)
+        return after.startsWith("-х") || after.startsWith("-е") || after.startsWith("х ") || after.startsWith("s") || after.startsWith("'s")
+    }
+
+    /** How many sentences the last check took out, for the log. */
+    @Volatile var lastDropped = 0
+
+    private val YEAR = Regex("(?<![\\d])(1[89]\\d\\d|20\\d\\d)(?![\\d])")
 
     /** What the open sources found, as the model's footing. */
     private fun StringBuilder.footing(facts: Facts?, lang: String) {
@@ -1200,7 +1291,7 @@ object TrackInfo {
     /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {
         dir(context).listFiles { f -> f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) }?.forEach { it.delete() }
-        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX)) {
+        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX, DATES_PREFIX)) {
             val files = dir(context).listFiles { f -> f.name.startsWith(prefix) } ?: continue
             if (files.size <= MAX_CACHED) continue
             files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
@@ -1285,6 +1376,12 @@ object TrackInfo {
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts8-"
+
+    /** Verified dates: waited for this long in a story (the voice is waiting), longer for a question. */
+    private const val STORY_DATES_WAIT_MS = 5_000L
+    private const val ASK_DATES_WAIT_MS = 10_000L
+    private const val MAX_REFERENCES = 40
+    private const val DATES_PREFIX = "dates1-"
 
     /** How long the cloud model waits for the facts before it is asked without them. */
     private const val CLOUD_FACTS_WAIT_MS = 4_000L

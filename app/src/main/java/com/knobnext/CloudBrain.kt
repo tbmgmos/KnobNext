@@ -30,7 +30,7 @@ enum class CloudService(
 ) {
     GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-flash-latest", "https://aistudio.google.com/apikey", true, listOf("AIza")),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "https://openrouter.ai/keys", false, listOf("sk-or-")),
-    GROQ("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "https://console.groq.com/keys", false, listOf("gsk_")),
+    GROQ("Groq", "https://api.groq.com/openai/v1", "moonshotai/kimi-k2-instruct", "https://console.groq.com/keys", false, listOf("gsk_")),
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/api_keys", false, listOf("sk-")),
     OPENAI("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "https://platform.openai.com/api-keys", false, listOf("sk-")),
 }
@@ -84,6 +84,8 @@ object CloudBrain {
                     service == CloudService.OPENROUTER && prefs.cloudModel(service).isBlank() -> openRouterFree(prefs, key, system, prompt, maxTokens)
                     service == CloudService.OPENROUTER -> chat(service, key, model, system, prompt, maxTokens)
                         ?: if (lastCode == 400 || lastCode == 404) openRouterFree(prefs, key, system, prompt, maxTokens) else null
+                    // Groq: with its search (Compound) when asked for, else the model that knows most of those it has.
+                    service == CloudService.GROQ -> groq(prefs, key, system, prompt, maxTokens)
                     else -> chat(service, key, model, system, prompt, maxTokens)
                 }
             } catch (e: Exception) {
@@ -259,12 +261,21 @@ object CloudBrain {
             headers["X-Title"] = "KnobNext"
         }
         val r = post("${service.base}/chat/completions", headers, body)
-        val text = r.json?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim()
+        val message = r.json?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+        val text = message?.optString("content")?.trim()
             ?.takeIf { it.isNotEmpty() } ?: return fail(r, model).also {
             if (r.code == HTTP_QUOTA) lastError = "у ключа ${service.title} закончился лимит или нет оплаты"
         }
-        used(service, model, null)
-        return Answer(text, emptyList())
+        // Groq Compound tells what its search found: the pages, as Gemini's are.
+        val sources = message?.optJSONArray("executed_tools")?.let { tools ->
+            (0 until tools.length()).mapNotNull { tools.optJSONObject(it) }.flatMap { tool ->
+                val found = tool.optJSONObject("search_results")?.optJSONArray("results") ?: tool.optJSONArray("search_results")
+                (0 until (found?.length() ?: 0)).mapNotNull { found!!.optJSONObject(it) }
+                    .mapNotNull { f -> f.optString("url").takeIf { it.startsWith("http") }?.let { Source(f.optString("title").ifBlank { it }, it) } }
+            }
+        }.orEmpty().distinctBy { it.url }
+        used(service, model, if (model == GROQ_SEARCH_MODEL) true else null)
+        return Answer(text, sources)
     }
 
     /**
@@ -287,6 +298,41 @@ object CloudBrain {
             }
         }
         return null
+    }
+
+    /**
+     * Groq: Compound (its models with a web search, paid per search) when switched on; else the model in
+     * the settings; else the one that knows most of what it serves (Kimi K2, then Llama 3.3 70B, then
+     * gpt-oss), the one that answered last first.
+     */
+    private fun groq(prefs: Prefs, key: String, system: String, prompt: String, maxTokens: Int): Answer? {
+        val service = CloudService.GROQ
+        if (prefs.groqSearch) chat(service, key, GROQ_SEARCH_MODEL, system, prompt, maxTokens)?.let { return it }
+        val named = prefs.cloudModel(service)
+        if (named.isNotBlank()) {
+            chat(service, key, named, system, prompt, maxTokens)?.let { return it }
+            if (lastCode != 400 && lastCode != 404) return null
+        }
+        val tries = LinkedHashSet<String>()
+        prefs.cloudWorking(service)?.first?.takeIf { named.isBlank() }?.let { tries += it }
+        tries += groqModels(key).take(MAX_FREE_TRIED)
+        if (tries.isEmpty()) tries += service.defaultModel
+        for (m in tries) {
+            chat(service, key, m, system, prompt, maxTokens)?.let {
+                prefs.setCloudWorking(service, m, false)
+                return it
+            }
+        }
+        return null
+    }
+
+    /** Groq's chat models, the ones that know the world best first. */
+    private fun groqModels(key: String): List<String> {
+        val list = get("${CloudService.GROQ.base}/models", mapOf("Authorization" to "Bearer $key")).json?.optJSONArray("data") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { list.optJSONObject(it)?.optString("id") }
+            .filter { id -> NOT_CHAT.none { it in id.lowercase() } && GROQ_NOT_CHAT.none { it in id.lowercase() } }
+            .filter { id -> GROQ_PREFERRED.any { it in id } }
+            .sortedBy { id -> GROQ_PREFERRED.indexOfFirst { it in id } }
     }
 
     /** OpenRouter's free text models, the better-known families first. */
@@ -390,6 +436,11 @@ object CloudBrain {
     private const val MAX_RETRY_WAIT_S = 10
     private const val MAX_OTHER_MODELS = 3
     private const val MAX_FREE_TRIED = 4
+
+    /** Groq's models with a web search (one search per answer: quick, the cheapest). */
+    private const val GROQ_SEARCH_MODEL = "groq/compound-mini"
+    private val GROQ_PREFERRED = listOf("kimi-k2", "llama-3.3-70b", "gpt-oss-120b", "qwen3", "llama-4", "gpt-oss-20b")
+    private val GROQ_NOT_CHAT = listOf("compound", "orpheus", "playai", "distil")
     private const val MAX_QUOTE_CHARS = 120
 
     /** Models by these names do not chat: embeddings, rerankers, speech, guards. */

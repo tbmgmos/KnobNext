@@ -351,6 +351,69 @@ object Brainz {
         return Recording(r.optString("id"), credit.optString("id").takeIf { it.isNotBlank() }, release?.optJSONObject("release-group")?.optString("id")?.takeIf { it.isNotBlank() })
     }
 
+    // ---- Verified dates, for the cloud model's reference ----
+
+    /**
+     * The dates a model is not to guess: when the artist began (and ended), when the album came out, and
+     * their albums with the year of each. [albumDate] is the album's first release, "1997-09-30" or "1997".
+     */
+    class Dates(
+        val began: String?,
+        val ended: String?,
+        val album: String?,
+        val albumDate: String?,
+        /** Studio albums, the earliest first: title and year. */
+        val albums: List<Pair<String, String>>,
+    ) {
+        fun toJson(): JSONObject = JSONObject()
+            .put("began", began ?: "").put("ended", ended ?: "").put("album", album ?: "").put("albumDate", albumDate ?: "")
+            .put("albums", org.json.JSONArray(albums.map { (t, y) -> JSONObject().put("t", t).put("y", y) }))
+
+        companion object {
+            fun fromJson(o: JSONObject) = Dates(
+                o.optString("began").ifBlank { null }, o.optString("ended").ifBlank { null },
+                o.optString("album").ifBlank { null }, o.optString("albumDate").ifBlank { null },
+                o.optJSONArray("albums")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { it.optString("t") to it.optString("y") } }.orEmpty(),
+            )
+        }
+    }
+
+    /** [artist]'s dates from MusicBrainz (by [mbid] when Wikidata gave it: the right one), [album]'s among them. */
+    suspend fun dates(artist: String, album: String?, mbid: String?): Dates? {
+        val id = mbid ?: artistId(Speech.cleanArtist(artist)) ?: return null
+        val a = get("$API/artist/$id?fmt=json")
+        val span = a?.optJSONObject("life-span")
+        val groups = get("$API/release-group?artist=$id&type=album&limit=100&fmt=json")?.optJSONArray("release-groups")
+        val all = (0 until (groups?.length() ?: 0)).mapNotNull { groups!!.optJSONObject(it) }
+            .mapNotNull { g ->
+                val date = g.optString("first-release-date").takeIf { it.length >= 4 } ?: return@mapNotNull null
+                // Studio albums: not live records, compilations, remixes, soundtracks.
+                val secondary = g.optJSONArray("secondary-types")
+                if ((secondary?.length() ?: 0) > 0) return@mapNotNull null
+                g.optString("title") to date
+            }
+            .sortedBy { it.second }
+        val albumName = album?.let(Speech::cleanTitle)
+        val matched = albumName?.let { n -> all.firstOrNull { sameName(it.first, n) } }
+            // Not among the studio albums (an EP, a single, a live record): its own release group.
+            ?: albumName?.let { n -> releaseGroupDate(artist, n) }
+        return Dates(
+            began = span?.let { year(it, "begin") },
+            ended = span?.let { year(it, "end") },
+            album = matched?.first ?: albumName,
+            albumDate = matched?.second,
+            albums = all.map { (t, d) -> t to d.take(4) }.distinctBy { it.first.lowercase(Locale.ROOT) }.take(MAX_ALBUMS),
+        )
+    }
+
+    private suspend fun releaseGroupDate(artist: String, album: String): Pair<String, String>? {
+        val q = "releasegroup:\"${clean(album)}\" AND artist:\"${clean(Speech.cleanArtist(artist))}\""
+        val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: return null
+        return (0 until groups.length()).mapNotNull { groups.optJSONObject(it) }
+            .firstOrNull { it.optInt("score") >= COVER_SCORE && sameName(it.optString("title"), album) }
+            ?.let { g -> g.optString("first-release-date").takeIf { it.length >= 4 }?.let { g.optString("title") to it } }
+    }
+
     private suspend fun artistId(artist: String): String? {
         val a = get("$API/artist/?fmt=json&limit=1&query=${enc("artist:\"${clean(artist)}\"")}")
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
@@ -408,6 +471,7 @@ object Brainz {
     private const val MAX_PLAYERS = 8
     private const val MAX_SAMPLES = 3
     private const val MAX_COVERS = 8
+    private const val MAX_ALBUMS = 20
 
     /** A song's recordings, a page at a time: enough pages for the earliest to be among them. */
     private const val WORK_PAGE = 100

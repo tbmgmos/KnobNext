@@ -158,6 +158,7 @@ data class Settings(
     /** The services with a key, and whether the next one is asked when one does not answer. */
     val cloudKeyed: Set<CloudService>,
     val cloudFallback: Boolean,
+    val groqSearch: Boolean,
     val devMode: Boolean,
     val storyLast: String,
     val storyLastAt: Long,
@@ -339,6 +340,11 @@ class Prefs(context: Context) {
             if (!v && infoSource == InfoSource.CLOUD) e.putString("info_source", InfoSource.GEMINI.name)
             e.apply()
         }
+
+    /** Groq answers with its web search (Compound), paid per search. */
+    var groqSearch: Boolean
+        get() = sp.getBoolean("groq_search", false)
+        set(v) = sp.edit().putBoolean("groq_search", v).apply()
 
     /** When the chosen service does not answer, the next one with a key is asked. */
     var cloudFallback: Boolean
@@ -838,6 +844,7 @@ class Prefs(context: Context) {
         cloudReady = CloudBrain.order(this).isNotEmpty(),
         cloudKeyed = CloudService.entries.filter { cloudKey(it).isNotBlank() }.toSet(),
         cloudFallback = cloudFallback,
+        groqSearch = groqSearch,
         devMode = devMode,
         storyLast = storyLast,
         storyLastAt = storyLastAt,

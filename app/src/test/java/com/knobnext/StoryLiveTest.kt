@@ -104,6 +104,28 @@ class StoryLiveTest {
         assertTrue("Nothing was told about any artist: the sources could not be reached", told > 0)
     }
 
+    /** The dates the cloud model is given and held to: MusicBrainz's, and a wrong year taken out. */
+    @Test
+    fun dates() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val context = RuntimeEnvironment.getApplication()
+        for (track in listOf(
+            TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", "Nevermind", null),
+            TrackInfo.Track("All the Small Things", "blink-182", "Enema of the State", null),
+            TrackInfo.Track("At Your Funeral", "Saves the Day", "Stay What You Are", null),
+            TrackInfo.Track("Группа крови", "Кино", "Группа крови", null),
+        )) {
+            val facts = TrackInfo.facts(context, track, "ru")
+            val d = TrackInfo.reference(context, track.artist, facts?.album ?: track.album, facts?.mbid)
+            println("\n===== Даты: ${track.artist} — ${track.album}")
+            println("начали ${d?.began}, закончили ${d?.ended}; альбом «${d?.album}» вышел ${d?.albumDate}")
+            println("альбомы: ${d?.albums?.joinToString("; ") { "${it.first} (${it.second})" }}")
+            val allowed = TrackInfo.allowedYears(d, track, facts)
+            val wrong = CloudBrain.Answer("Альбом вышел в 1993 году. Группа выступала и в 1990-х. Это одна из самых известных их песен.", emptyList())
+            println("проверка: «${wrong.text}» → «${TrackInfo.checked(wrong, allowed)?.text}» (убрано ${TrackInfo.lastDropped})")
+        }
+    }
+
     /** The cloud model, when the CI has a key for it (GEMINI_API_KEY): a story and a question. */
     @Test
     fun cloud() = runBlocking {

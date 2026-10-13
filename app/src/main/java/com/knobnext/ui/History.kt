@@ -512,6 +512,19 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
             }
         }
         Hint(stringResource(if (service.searches) R.string.cloud_searches else R.string.cloud_no_search))
+        if (service == com.knobnext.CloudService.GROQ) {
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.groq_search), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        stringResource(R.string.groq_search_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(checked = s.groqSearch, onCheckedChange = { prefs.groqSearch = it })
+            }
+        }
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.cloud_fallback), style = MaterialTheme.typography.bodyMedium)
@@ -554,8 +567,11 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
             placeholder = { Text(if (service == com.knobnext.CloudService.OPENROUTER) "…:free" else service.defaultModel) },
             supportingText = {
                 Text(
-                    if (service == com.knobnext.CloudService.OPENROUTER) stringResource(R.string.cloud_model_hint_free)
-                    else stringResource(R.string.cloud_model_hint, service.defaultModel),
+                    when (service) {
+                        com.knobnext.CloudService.OPENROUTER -> stringResource(R.string.cloud_model_hint_free)
+                        com.knobnext.CloudService.GROQ -> stringResource(R.string.cloud_model_hint_groq)
+                        else -> stringResource(R.string.cloud_model_hint, service.defaultModel)
+                    },
                 )
             },
             singleLine = true,
