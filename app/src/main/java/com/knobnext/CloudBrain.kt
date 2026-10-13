@@ -112,6 +112,11 @@ object CloudBrain {
                 Thread.sleep(r.retryAfterS * 1000L)
                 r = geminiOnce(key, m, search, system, prompt, maxTokens)
             }
+            // "The model is overloaded" (503) and the like pass in a moment: once more, then another model.
+            if (r.code in BUSY) {
+                Thread.sleep(BUSY_WAIT_MS)
+                r = geminiOnce(key, m, search, system, prompt, maxTokens)
+            }
             reply = r
             r.answer?.let {
                 prefs.setCloudWorking(CloudService.GEMINI, m, search)
@@ -178,6 +183,7 @@ object CloudBrain {
             r == null -> "нет ответа"
             r.code == 0 -> said.ifBlank { "нет связи" }
             said.contains("location is not supported", ignoreCase = true) -> "Gemini недоступен из вашей страны — нужен VPN"
+            r.code in BUSY -> "сервис модели сейчас перегружен — попробуйте чуть позже"
             r.code == HTTP_QUOTA -> "у ключа закончился бесплатный лимит Gemini (или его нет для этих моделей). Попробуйте позже или включите оплату в Google AI Studio"
             r.code == 401 || r.code == 403 || said.contains("API key", ignoreCase = true) -> "ключ не принят"
             r.code == 404 -> "модель «$model» не найдена — укажите другую в настройках"
@@ -277,7 +283,11 @@ object CloudBrain {
     private const val HTTP_QUOTA = 429
 
     /** Answers worth trying another way: no quota, no such model, a feature not offered (the search). */
-    private val RETRYABLE = setOf(HTTP_QUOTA, 404, 400)
+    private val RETRYABLE = setOf(HTTP_QUOTA, 404, 400, 500, 502, 503, 504)
+
+    /** The service is busy or briefly down: worth one more try a little later. */
+    private val BUSY = setOf(500, 502, 503, 504)
+    private const val BUSY_WAIT_MS = 2_000L
     private const val MAX_RETRY_WAIT_S = 10
     private const val MAX_OTHER_MODELS = 3
 
