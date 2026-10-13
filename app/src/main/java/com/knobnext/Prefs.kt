@@ -310,7 +310,11 @@ class Prefs(context: Context) {
      */
     var circleNames: List<String>
         get() = sp.getString("circle_names", null)?.split('\u0000')?.filter { it.isNotBlank() }.orEmpty()
-        set(v) = sp.edit().putString("circle_names", v.joinToString("\u0000")).putInt("circle_pick", 0).apply()
+        set(v) = sp.edit().putString("circle_names", v.joinToString("\u0000")).putInt("circle_pick", 0)
+            .putLong("circle_at", System.currentTimeMillis()).apply()
+
+    /** When [circleNames] were named: an hour on, they are no longer what the person just heard. */
+    val circleAt: Long get() = sp.getLong("circle_at", 0L)
 
     var circlePick: Int
         get() = sp.getInt("circle_pick", 0)

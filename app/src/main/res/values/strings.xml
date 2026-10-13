@@ -231,6 +231,11 @@
     <string name="info_note_album_unnamed">Об альбоме: %1$s</string>
     <string name="info_note_artist">Из истории исполнителя: %1$s</string>
     <string name="info_note_circle">Расширим круг: %1$s</string>
+    <string name="speak_circle_play">Включаю %1$s.</string>
+    <string name="speak_circle_none">Связанных с %1$s исполнителей пока не нашлось.</string>
+    <string name="speak_circle_cannot">%1$s не умеет включать музыку по имени исполнителя.</string>
+    <string name="speak_circle_no_player">Не нашёл плеер, в котором включить.</string>
+    <string name="speak_circle_no_track">Сейчас ничего не играет: не знаю, чей круг.</string>
     <string name="info_circle_offer">Послушать %1$s — %2$s.</string>
     <string name="info_all_told">Про %1$s я рассказал всё, что знаю.</string>
     <string name="info_remind">Напомню: %1$s</string>
@@ -515,7 +520,8 @@
     <string name="log_sleep_set">таймер на %1$d мин</string>
     <string name="log_sleep_cancelled">таймер отменён</string>
     <string name="log_no_player">не найден плеер</string>
-    <string name="log_circle_none">в рассказах ещё не звучали связанные исполнители</string>
+    <string name="log_circle_none">связанных с %1$s исполнителей не нашлось</string>
+    <string name="log_circle_looking">ищу, кого включить из круга %1$s</string>
     <string name="log_circle_play">включаю %1$s в %2$s</string>
     <string name="log_circle_cannot">%1$s не умеет включать по имени: %2$s</string>
     <string name="log_flip_paused">экраном вниз → пауза</string>

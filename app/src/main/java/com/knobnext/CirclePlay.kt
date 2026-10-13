@@ -19,17 +19,19 @@ object CirclePlay {
     /** What happened, for the log: [player] is the app asked, null when there was none. */
     class Result(val ok: Boolean, val artist: String?, val player: String?)
 
-    /**
-     * The next artist the last circle note named (each call takes the next one), in [controller]'s player
-     * or the last one used.
-     */
-    fun next(context: Context, controller: MediaController?, prefs: Prefs): Result {
-        val names = prefs.circleNames
+    /** The artists a story named lately: an hour on, they are no longer what the person just heard. */
+    fun fresh(prefs: Prefs): List<String> =
+        prefs.circleNames.takeIf { System.currentTimeMillis() - prefs.circleAt < FRESH_MS }.orEmpty()
+
+    /** The next of [names] (each call takes the next one), in [controller]'s player or the last one used. */
+    fun next(context: Context, controller: MediaController?, prefs: Prefs, names: List<String>): Result {
         if (names.isEmpty()) return Result(false, null, null)
         val name = names[prefs.circlePick % names.size]
         prefs.circlePick = prefs.circlePick + 1
         return play(context, controller, prefs.lastPlayer, name)
     }
+
+    private const val FRESH_MS = 60L * 60 * 1000
 
     fun play(context: Context, controller: MediaController?, lastPlayer: String?, name: String): Result {
         val focus = Bundle().apply {

@@ -136,12 +136,59 @@ class Extras(private val context: Context, private val media: Media, private val
         }
 
     /** The next artist the last circle note named, in the player in use. */
+    /**
+     * The next artist the last circle note named; when no story named any lately, the circle of the
+     * artist playing now, from what the story knows about them. Said aloud either way: the music changing
+     * (or not) must not leave the person guessing.
+     */
     private fun playCircle(controller: MediaController?): Outcome {
-        val r = CirclePlay.next(context, controller, prefs)
-        val artist = r.artist ?: return Outcome.failed(context.getString(R.string.log_circle_none))
-        val player = r.player?.let { appLabel(context, it) } ?: return Outcome.failed(context.getString(R.string.log_no_player))
-        return if (r.ok) Outcome.done(context.getString(R.string.log_circle_play, artist, player))
-        else Outcome.failed(context.getString(R.string.log_circle_cannot, player, artist))
+        val told = CirclePlay.fresh(prefs)
+        if (told.isNotEmpty()) return playFrom(controller, told)
+        val track = controller?.metadata?.let(::trackOf)
+        val artist = track?.artist?.let(Speech::cleanArtist)
+        if (track == null || artist == null) {
+            speaker.say(context.getString(R.string.speak_circle_no_track))
+            return Outcome.failed(context.getString(R.string.log_no_track))
+        }
+        val lang = prefs.infoLanguage.resolve()
+        scope.launch {
+            val facts = runCatching { TrackInfo.facts(context, track, lang) }.getOrNull()
+            val names = facts?.related.orEmpty().distinctBy { Journal.key(it) }.filter { Journal.key(it) != Journal.key(artist) }
+            if (names.isEmpty()) {
+                speaker.say(context.getString(R.string.speak_circle_none, artist))
+                log?.invoke(context.getString(R.string.log_circle_none, artist))
+                return@launch
+            }
+            prefs.circleNames = names
+            log?.invoke(playFrom(controller, names).message ?: return@launch)
+        }
+        return Outcome.done(context.getString(R.string.log_circle_looking, artist))
+    }
+
+    private fun playFrom(controller: MediaController?, names: List<String>): Outcome {
+        val r = CirclePlay.next(context, controller, prefs, names)
+        val artist = r.artist ?: return Outcome.failed(context.getString(R.string.log_no_track))
+        val player = r.player?.let { appLabel(context, it) } ?: run {
+            speaker.say(context.getString(R.string.speak_circle_no_player))
+            return Outcome.failed(context.getString(R.string.log_no_player))
+        }
+        if (!r.ok) {
+            speaker.say(context.getString(R.string.speak_circle_cannot, player))
+            return Outcome.failed(context.getString(R.string.log_circle_cannot, player, artist))
+        }
+        speaker.say(context.getString(R.string.speak_circle_play, artist))
+        return Outcome.done(context.getString(R.string.log_circle_play, artist, player))
+    }
+
+    /** The playing track as the story knows it, from the player's data. */
+    private fun trackOf(meta: MediaMetadata): TrackInfo.Track? {
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
+        return TrackInfo.Track(
+            title = title,
+            artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
+            album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
+            year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
+        )
     }
 
     private fun announce(controller: MediaController?): String? {
@@ -379,14 +426,7 @@ class Extras(private val context: Context, private val media: Media, private val
         }
         val c = controller ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val meta = c.metadata ?: return Outcome.failed(context.getString(R.string.log_no_track))
-        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            ?: return Outcome.failed(context.getString(R.string.log_no_track))
-        val track = TrackInfo.Track(
-            title = title,
-            artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE),
-            album = meta.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() },
-            year = meta.getLong(MediaMetadata.METADATA_KEY_YEAR).takeIf { it > 0 }?.toString(),
-        )
+        val track = trackOf(meta) ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val lang = prefs.infoLanguage.resolve()
         val length = prefs.infoLength
         val source = prefs.infoSource
