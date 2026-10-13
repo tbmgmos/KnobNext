@@ -442,8 +442,6 @@ class TrackBubble(
         }
     }
 
-    private fun circleSection(box: LinearLayout) {
-
     // ---- An artist's card, down the circle ----
 
     private fun artistCard(name: String): View {
