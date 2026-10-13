@@ -28,10 +28,13 @@ object Speech {
 
     private val NOISE_WORDS =
         "remaster(?:ed)?|official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|explicit|clean|bonus|deluxe|mono|stereo|" +
-            "version|edit|mix|prod\\.?|feat\\.?|ft\\.?|featuring|mv|clip|клип|премьера"
+            "version|edit|mix|prod\\.?|feat\\.?|ft\\.?|featuring|mv|clip|клип|премьера|" +
+            "live|unplugged|acoustic|session|concert|концерт|tour|karaoke|караоке|cover|кавер"
     private val BRACKETED_NOISE = Regex("""\s*[(\[{][^)\]}]*\b(?:$NOISE_WORDS)\b[^)\]}]*[)\]}]""", RegexOption.IGNORE_CASE)
     private val DASHED_NOISE = Regex("""\s+[-–—]\s+[^-–—]*\b(?:remaster(?:ed)?|version|edit|mix|mono|stereo|bonus)\b.*$""", RegexOption.IGNORE_CASE)
     private val FEATURING = Regex("""\s+(?:feat\.?|ft\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE)
+    private val BRACKETED_YEAR = Regex("""\s*[(\[{][^)\]}]*\b(?:19|20)\d\d\b[^)\]}]*[)\]}]""")
+    private val OPEN_BRACKET_TAIL = Regex("""\s*[(\[{][^)\]}]*$""")
     private val CHANNEL_TAIL = Regex("""\s+\|\s+.*$""")
     private val HASHTAG = Regex("""#\S+""")
     private val SPACES = Regex("""\s{2,}""")
@@ -41,12 +44,18 @@ object Speech {
     fun cleanTitle(title: String): String {
         var t = withoutSymbols(title)
         t = BRACKETED_NOISE.replace(t, "")
+        // A video's "( Santiago 2002 )": a bracket with a year is where and when, not the song.
+        t = BRACKETED_YEAR.replace(t, "")
+        // A bracket the player cut off: "Song ( Santiag".
+        t = OPEN_BRACKET_TAIL.replace(t, "")
         t = DASHED_NOISE.replace(t, "")
         t = FEATURING.replace(t, "")
         t = CHANNEL_TAIL.replace(t, "")
         t = HASHTAG.replace(t, "")
         t = SPACES.replace(t, " ")
         t = TRAILING.replace(t, "").trim()
+        // A video names the song in quotes: «Californication», "Californication".
+        t = t.trim('"', '\'', '«', '»', '“', '”', '„').trim()
         return t.ifBlank { title.trim() }
     }
 

@@ -83,11 +83,15 @@ object TrackInfo {
             // A file's name for the title: "01 - Artist - Song.mp3".
             title = title.replace(FILE_EXTENSION, "").replace(TRACK_NUMBER, "").trim().ifEmpty { title }
         }
-        // "Artist - Song" in the title: a video, a browser tab, a file; and on SoundCloud, where the
-        // artist field is whoever uploaded it (a label, a channel) and the title names the musician.
-        if (artist == null || player == SOUNDCLOUD) {
-            TITLE_DASH.find(title)?.let { m ->
-                artist = m.groupValues[1].trim()
+        // "Artist - Song" in the title: a video, a browser tab, a file. Where people upload (YouTube,
+        // SoundCloud, VK), the artist field is whoever uploaded it (a channel, a label, a fan) and the
+        // title names the musician; a music player's own artist is kept unless the title repeats it.
+        // "Song - Remastered 2011", "Song - Live" are a version, not an artist and a song.
+        TITLE_DASH.find(title)?.takeIf { m -> !VERSION_TAIL.containsMatchIn(m.groupValues[2]) }?.let { m ->
+            val before = m.groupValues[1].trim()
+            val same = artist?.let { Journal.key(it) == Journal.key(before) } == true
+            if (artist == null || same || player in UPLOADS || player.orEmpty().let { p -> BROWSERS.any { p.startsWith(it) } }) {
+                artist = before
                 title = m.groupValues[2].trim()
             }
         }
@@ -106,7 +110,23 @@ object TrackInfo {
             ?: it.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
     }
 
-    private const val SOUNDCLOUD = "com.soundcloud.android"
+    /** Where people upload what they like: the artist field names the uploader, not the musician. */
+    private val UPLOADS = setOf(
+        "com.soundcloud.android", "com.google.android.youtube", "com.google.android.apps.youtube.music",
+        "app.revanced.android.youtube", "app.revanced.android.apps.youtube.music", "com.vanced.android.youtube",
+        "org.schabi.newpipe", "com.vkontakte.android", "com.vk.music", "com.zhiliaoapp.musically",
+        "com.ss.android.ugc.trill", "org.telegram.messenger",
+    )
+    private val BROWSERS = listOf(
+        "com.android.chrome", "com.chrome.", "org.mozilla.", "com.brave.browser", "com.yandex.browser",
+        "com.opera.", "com.microsoft.emmx", "com.sec.android.app.sbrowser", "com.vivaldi.browser", "com.kiwibrowser",
+    )
+
+    /** What follows a dash when it is a version of the song, not the song after its artist. */
+    private val VERSION_TAIL = Regex(
+        """^\s*\(?\s*(remaster|live|version|edit|mix|mono|stereo|bonus|demo|acoustic|instrumental|radio|single|bonus|from |deluxe|explicit|clean|unplugged|ремастер|live|концерт)""",
+        RegexOption.IGNORE_CASE,
+    )
     private val PLACEHOLDERS = setOf(
         "<unknown>", "unknown", "unknown artist", "unknown album", "неизвестный исполнитель", "неизвестный альбом",
         "неизвестно", "various artists", "<неизвестно>",
