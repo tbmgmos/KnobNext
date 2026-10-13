@@ -305,9 +305,14 @@ object TrackInfo {
             appendLine(shape(length, facts?.album ?: track.album, lang, firstMeet, topic = null))
             appendTold(told, lang)
         }
-        val answer = withContext(Dispatchers.IO) {
+        // The voice is waiting after the opening line: the cloud gets a few seconds, then the story is told
+        // from the facts. The request is left to finish on its own (the next telling may find it working).
+        val asked = background.async {
             CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS)
-        } ?: return null
+        }
+        val answer = withTimeoutOrNull(CLOUD_STORY_WAIT_MS) { asked.await() } ?: return null.also {
+            if (asked.isActive) CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с"
+        }
         val text = clean(answer.text, length, lang) ?: return null
         return CloudBrain.Answer(text, answer.sources)
     }
@@ -1263,6 +1268,9 @@ object TrackInfo {
 
     /** How long the cloud model waits for the facts before it is asked without them. */
     private const val CLOUD_FACTS_WAIT_MS = 4_000L
+
+    /** How long a story waits for the cloud model before it is told from the facts. */
+    private const val CLOUD_STORY_WAIT_MS = 12_000L
 
     /** Facts given to the cloud model as its footing. */
     private const val FOOTING_FACTS = 14
