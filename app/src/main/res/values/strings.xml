@@ -207,6 +207,11 @@
     <string name="keys_rejected">Сервис не принял этот ключ. Проверьте, что скопирован именно ключ (у Last.fm — API key, а не Shared secret) и целиком</string>
     <string name="keys_blocked">Запрос не дошёл до сервиса (HTTP %1$d): его остановили по пути. Ключ тут ни при чём — так бывает из-за VPN или фильтра сети. Попробуйте без VPN и нажмите «Проверить снова»</string>
     <string name="keys_denied">Ключ в порядке, но сервис не пускает запросы с вашего адреса. Так бывает с VPN (его адреса часто блокируют) или из-за ограничений по стране. Попробуйте выключить VPN или сменить его сервер и нажмите «Проверить снова»</string>
+    <string name="keys_try_plain">Проверка с простой подписью приложения: %1$s</string>
+    <string name="keys_try_browser">Проверка как из браузера: %1$s</string>
+    <string name="keys_try_works">работает</string>
+    <string name="keys_try_refused">отказ «%1$s»</string>
+    <string name="keys_try_no_answer">нет ответа</string>
     <string name="keys_service_said">Ответ: «%1$s»</string>
     <string name="keys_rejected_other">Сервис ответил отказом (код %1$d)</string>
     <string name="keys_suspended">Last.fm заблокировал этот ключ</string>

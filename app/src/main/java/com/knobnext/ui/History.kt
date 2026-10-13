@@ -393,8 +393,16 @@ fun SourceKeys(prefs: Prefs) {
                 else -> null
             }
         },
-        check = { com.knobnext.MusicSources.checkLastFm(it) },
+        check = { com.knobnext.MusicSources.checkLastFm(context, it) },
     )
+}
+
+/** One more try, in a word or two: worked, refused (and what was said), or no answer. */
+@Composable
+private fun attempt(result: KeyCheck): String = when (result) {
+    is KeyCheck.Works -> stringResource(R.string.keys_try_works)
+    is KeyCheck.Rejected -> stringResource(R.string.keys_try_refused, result.message ?: "HTTP ${result.http}")
+    is KeyCheck.NoAnswer -> stringResource(R.string.keys_try_no_answer)
 }
 
 /** What to tell about a key the service did not take, or could not be asked. */
@@ -417,7 +425,13 @@ private fun keyProblem(result: KeyCheck): String = when (result) {
             else -> stringResource(R.string.keys_rejected_other, result.error ?: result.http)
         }
         // The service's own words, as it said them: the surest clue.
-        result.message?.let { reason + "\n" + stringResource(R.string.keys_service_said, it) } ?: reason
+        val said = result.message?.let { reason + "\n" + stringResource(R.string.keys_service_said, it) } ?: reason
+        // The same request signed plainly and as a browser: whether the way of asking is what is refused.
+        val tries = listOfNotNull(
+            result.plain?.let { stringResource(R.string.keys_try_plain, attempt(it)) },
+            result.browser?.let { stringResource(R.string.keys_try_browser, attempt(it)) },
+        )
+        (listOf(said) + tries).joinToString("\n")
     }
     is KeyCheck.NoAnswer -> when (result.kind) {
         KeyCheck.Kind.TIMEOUT -> stringResource(R.string.keys_no_answer_timeout)

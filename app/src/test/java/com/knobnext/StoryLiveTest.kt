@@ -47,14 +47,16 @@ class StoryLiveTest {
         // What the services say to keys that cannot work: the answers the settings screen turns into messages.
         fun show(r: KeyCheck) = when (r) {
             is KeyCheck.Works -> "работает"
-            is KeyCheck.Rejected -> "отказ: HTTP ${r.http}, код ${r.error}, от API ${r.fromApi}: ${r.message}"
+            is KeyCheck.Rejected -> "отказ: HTTP ${r.http}, код ${r.error}, от API ${r.fromApi}: ${r.message}" +
+                (r.plain?.let { " | простая подпись: ${it.javaClass.simpleName}" } ?: "") +
+                (r.browser?.let { " | как браузер: ${it.javaClass.simpleName}" } ?: "")
             is KeyCheck.NoAnswer -> "нет ответа: ${r.kind} ${r.detail}"
         }
         println("\n===== Проверка ключей")
-        println("Last.fm, 32 нуля: ${show(MusicSources.checkLastFm("0".repeat(32)))}")
-        println("Last.fm, 31 символ: ${show(MusicSources.checkLastFm("0".repeat(31)))}")
+        println("Last.fm, 32 нуля: ${show(MusicSources.checkLastFm(context, "0".repeat(32)))}")
+        println("Last.fm, 31 символ: ${show(MusicSources.checkLastFm(context, "0".repeat(31)))}")
         // The real keys, from the repository's secrets (never printed): what a server far from the phone is told.
-        BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() }?.let { println("Last.fm, ключ из секрета: ${show(MusicSources.checkLastFm(it))}") }
+        BuildConfig.LASTFM_KEY.takeIf { it.isNotBlank() }?.let { println("Last.fm, ключ из секрета: ${show(MusicSources.checkLastFm(context, it))}") }
         // MusicBrainz, deeper: what joins the facts in the background after the first telling.
         println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
         for (track in tracks) {

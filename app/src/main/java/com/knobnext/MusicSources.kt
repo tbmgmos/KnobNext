@@ -52,7 +52,11 @@ object MusicSources {
         val audioDbTrack = async { runCatching { audioDbTrack(artist, title, lang) }.getOrNull() }
         val deezer = async { runCatching { deezer(res, artist, title, lang) }.getOrNull() }
         val brainz = async { runCatching { brainzArtist(res, artist, lang) }.getOrNull() }
-        val lastFm = async { runCatching { lastFm(res, Prefs(context).lastFmKeyInUse, artist, title, album, lang) }.getOrNull() }
+        val lastFm = async {
+            val prefs = Prefs(context)
+            val agent = if (prefs.lastFmPlainAgent) TrackInfo.PLAIN_AGENT else TrackInfo.USER_AGENT
+            runCatching { lastFm(res, prefs.lastFmKeyInUse, agent, artist, title, album, lang) }.getOrNull()
+        }
         val d = deezer.await()
         // The album's description needs its name: the player's, else the one Deezer found.
         val albumName = album ?: d?.albumName
@@ -185,14 +189,33 @@ object MusicSources {
 
     // ---- Last.fm ----
 
-    /** What Last.fm says to [key]: a known artist must come back. */
-    fun checkLastFm(key: String): KeyCheck =
-        KeyCheck.ask("$LASTFM?method=artist.getinfo&artist=Radiohead&format=json&api_key=${enc(key.trim())}") { it.optJSONObject("artist") != null }
+    /**
+     * What Last.fm says to [key]: a known artist must come back. A refusal that is not "Invalid API key"
+     * may be about the way the app asks rather than the key, so the same request is tried again with a
+     * plain signature and as a browser sends it; the answers say which it is. When the plain signature
+     * works, the stories use it from then on ([Prefs.lastFmPlainAgent]). The browser's is only a clue:
+     * Last.fm asks apps to say who they are.
+     */
+    fun checkLastFm(context: Context, key: String): KeyCheck {
+        val url = "$LASTFM?method=artist.getinfo&artist=Radiohead&format=json&api_key=${enc(key.trim())}"
+        val accepts: (JSONObject) -> Boolean = { it.optJSONObject("artist") != null }
+        val prefs = Prefs(context)
+        val first = KeyCheck.ask(url, mapOf("User-Agent" to TrackInfo.USER_AGENT), accepts)
+        if (first is KeyCheck.Works) prefs.lastFmPlainAgent = false
+        if (first !is KeyCheck.Rejected || first.error == LASTFM_INVALID_KEY || !first.fromApi) return first
+        val plain = KeyCheck.ask(url, mapOf("User-Agent" to TrackInfo.PLAIN_AGENT), accepts)
+        if (plain is KeyCheck.Works) {
+            prefs.lastFmPlainAgent = true
+            return KeyCheck.Works
+        }
+        val browser = KeyCheck.ask(url, mapOf("User-Agent" to BROWSER_AGENT, "Accept" to "*/*"), accepts)
+        return KeyCheck.Rejected(first.http, first.error, first.message, first.fromApi, plain = plain, browser = browser)
+    }
 
-    private fun lastFm(res: Context, appKey: String, artist: String, title: String, album: String?, lang: String): LastFm? {
+    private fun lastFm(res: Context, appKey: String, agent: String, artist: String, title: String, album: String?, lang: String): LastFm? {
         val key = appKey.takeIf { it.isNotBlank() } ?: return null
         fun call(method: String, params: String) =
-            TrackInfo.getJson("$LASTFM?method=$method&api_key=$key&format=json&autocorrect=1&lang=$lang$params")
+            TrackInfo.getJson("$LASTFM?method=$method&api_key=$key&format=json&autocorrect=1&lang=$lang$params", agent)
         val a = call("artist.getinfo", "&artist=${enc(artist)}")?.optJSONObject("artist") ?: return null
         if (!sameName(a.optString("name"), artist)) return null
         val t = call("track.getinfo", "&artist=${enc(artist)}&track=${enc(Speech.cleanTitle(title))}")?.optJSONObject("track")
@@ -235,6 +258,11 @@ object MusicSources {
 
     private const val MIN_SCORE = 90
     private const val LASTFM = "https://ws.audioscrobbler.com/2.0/"
+    private const val LASTFM_INVALID_KEY = 10
+
+    /** A phone browser's signature: only to tell whether Last.fm refuses the app's way of asking. */
+    private const val BROWSER_AGENT =
+        "Mozilla/5.0 (Linux; Android 16; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
     private const val MIN_LISTENERS = 1_000
     private const val MAX_SIMILAR = 4
     private const val MIN_TEXT_CHARS = 60

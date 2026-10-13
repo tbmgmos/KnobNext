@@ -790,13 +790,13 @@ object TrackInfo {
         return album to year
     }
 
-    internal fun getJson(url: String): JSONObject? = runCatching {
+    internal fun getJson(url: String, userAgent: String = USER_AGENT): JSONObject? = runCatching {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = REQUEST_TIMEOUT_MS
             conn.readTimeout = REQUEST_TIMEOUT_MS
             // Both services ask apps to say who they are.
-            conn.setRequestProperty("User-Agent", "KnobNext (https://github.com/tbmgmos/KnobNext)")
+            conn.setRequestProperty("User-Agent", userAgent)
             conn.setRequestProperty("Accept", "application/json")
             if (conn.responseCode != HttpURLConnection.HTTP_OK) return@runCatching null
             JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
@@ -985,6 +985,12 @@ object TrackInfo {
     private const val MIN_ANSWER_CHARS = 20
     private const val MIN_SCORE = 90
     private const val MAX_CACHED = 300
+
+    /** How KnobNext signs its requests: the name and where it lives, as the services ask. */
+    const val USER_AGENT = "KnobNext (https://github.com/tbmgmos/KnobNext)"
+
+    /** The same, without the address: for a service that refuses the first (see [MusicSources.checkLastFm]). */
+    val PLAIN_AGENT = "KnobNext/" + BuildConfig.VERSION_NAME
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts8-"

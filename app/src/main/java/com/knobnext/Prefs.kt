@@ -301,6 +301,11 @@ class Prefs(context: Context) {
 
     val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
 
+    /** Last.fm refused the app's usual signature and took a plain one: the stories sign that way. */
+    var lastFmPlainAgent: Boolean
+        get() = sp.getBoolean("lastfm_plain_agent", false)
+        set(v) = sp.edit().putBoolean("lastfm_plain_agent", v).apply()
+
     /** Bumped on every change of the history of acquaintances, so the screen reads it again. */
     var journalVersion: Int
         get() = sp.getInt("journal_version", 0)

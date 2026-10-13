@@ -20,7 +20,15 @@ sealed interface KeyCheck {
      * it gave them, and [fromApi] false when the answer was not the API's at all (a page from a network
      * filter, a VPN's or the site's guard): then the key was never looked at.
      */
-    class Rejected(val http: Int, val error: Int?, val message: String?, val fromApi: Boolean) : KeyCheck
+    class Rejected(
+        val http: Int,
+        val error: Int?,
+        val message: String?,
+        val fromApi: Boolean,
+        /** The same request again, signed plainly and as a browser: what the service said to those. */
+        val plain: KeyCheck? = null,
+        val browser: KeyCheck? = null,
+    ) : KeyCheck
 
     /** No answer at all: [kind] says what went wrong, [detail] names the exception. */
     class NoAnswer(val kind: Kind, val detail: String) : KeyCheck
