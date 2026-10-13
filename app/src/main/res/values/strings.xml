@@ -357,7 +357,12 @@
     <string name="info_source_cloud">Облако</string>
     <string name="info_source_cloud_hint">Большая модель в облаке с вашим ключом (ниже). Gemini сам ищет в Google и показывает в кружке, где нашёл; факты из Википедии и MusicBrainz — ему в опору, чтобы не выдумывал. Без сети или если сервис не ответил — рассказ как обычно</string>
     <string name="info_source_cloud_nokey">Нужен ключ облачной модели — задайте его ниже, в разделе «Облачная модель». Пока ключа нет, рассказ как обычно</string>
-    <string name="cloud_title">Облачная модель</string>
+    <string name="cloud_title">Облачная модель (эксперимент)</string>
+    <string name="dev_build">Сборка</string>
+    <string name="dev_mode">Режим разработчика</string>
+    <string name="dev_mode_hint">Экспериментальное: облачная модель (Gemini и другие) для рассказов и вопросов в кружке, с переключением сервисов. Настраивается в «Озвучке треков»</string>
+    <string name="dev_mode_on">Режим разработчика включён</string>
+    <string name="dev_mode_left">Ещё нажатий до режима разработчика: %1$d</string>
     <string name="cloud_hint">Для рассказов из источника «Облако» и вопросов в кружке («О чём песня?», «С чего начать?»). Ключ хранится только на телефоне; сервису уходят название трека, исполнитель и найденные факты. Из России сервисам Gemini и OpenAI нужен VPN</string>
     <string name="cloud_searches">Gemini ищет в Google сам и называет источники. Ключ бесплатный, с дневным лимитом</string>
     <string name="cloud_no_search">Эта модель отвечает из своих знаний и фактов из открытых источников, без поиска в интернете</string>

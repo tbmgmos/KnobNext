@@ -1620,8 +1620,7 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                                 com.knobnext.InfoSource.GEMINI to R.string.info_source_gemini,
                                 com.knobnext.InfoSource.COMBINED to R.string.info_source_combined,
                                 com.knobnext.InfoSource.WIKI to R.string.info_source_wiki,
-                                com.knobnext.InfoSource.CLOUD to R.string.info_source_cloud,
-                            ),
+                            ) + if (s.devMode) listOf(com.knobnext.InfoSource.CLOUD to R.string.info_source_cloud) else emptyList(),
                             selected = s.infoSource,
                             onSelect = { prefs.infoSource = it },
                         )
@@ -1701,7 +1700,8 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.bubble_remote_hint))
-            CloudKeys(s, prefs)
+            // Experimental, for development: shown in developer mode only.
+            if (s.devMode) CloudKeys(s, prefs)
             SourceKeys(prefs)
         }
     }
@@ -1810,7 +1810,7 @@ private fun LazyListScope.aboutSettings(ctx: PageContext) {
     val s = ctx.s
     val prefs = ctx.prefs
     item {
-        Group(3) {
+        Group(4) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 ListRow(
                     shape(0), stringResource(R.string.diag_title),
@@ -1832,6 +1832,7 @@ private fun LazyListScope.aboutSettings(ctx: PageContext) {
                 } else {
                     ListRow(shape(2), stringResource(R.string.app_name), stringResource(R.string.version_value, ctx.versionName))
                 }
+                DevModeRow(shape(3), ctx.versionName, s.devMode, prefs)
             }
         }
     }
@@ -2084,3 +2085,36 @@ internal fun Hint(text: String) {
         modifier = Modifier.padding(horizontal = 16.dp),
     )
 }
+
+/**
+ * The build, and developer mode behind it: seven taps turn it on, as in Android's own settings; once
+ * on, the row is a switch that turns it off.
+ */
+@Composable
+private fun GroupScope.DevModeRow(shape: androidx.compose.ui.graphics.Shape, version: String, on: Boolean, prefs: Prefs) {
+    val context = LocalContext.current
+    if (on) {
+        SwitchRow(shape, stringResource(R.string.dev_mode), true, { prefs.devMode = it }, subtitle = stringResource(R.string.dev_mode_hint))
+        return
+    }
+    var taps by remember { mutableIntStateOf(0) }
+    ListRow(
+        shape, stringResource(R.string.dev_build), stringResource(R.string.version_value, version),
+        onClick = {
+            taps++
+            val left = DEV_TAPS - taps
+            when {
+                left <= 0 -> {
+                    prefs.devMode = true
+                    taps = 0
+                    android.widget.Toast.makeText(context, context.getString(R.string.dev_mode_on), android.widget.Toast.LENGTH_SHORT).show()
+                }
+                left <= DEV_TAPS_SHOWN ->
+                    android.widget.Toast.makeText(context, context.getString(R.string.dev_mode_left, left), android.widget.Toast.LENGTH_SHORT).show()
+            }
+        },
+    )
+}
+
+private const val DEV_TAPS = 7
+private const val DEV_TAPS_SHOWN = 4

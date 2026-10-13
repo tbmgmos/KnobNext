@@ -262,7 +262,7 @@ object TrackInfo {
         // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
         val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
         lastSources = emptyList()
-        if (source == InfoSource.CLOUD) {
+        if (source == InfoSource.CLOUD && CloudBrain.order(Prefs(context)).isNotEmpty()) {
             // The facts are its footing when they come quickly; the rest it looks up itself.
             val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() }
             val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet)

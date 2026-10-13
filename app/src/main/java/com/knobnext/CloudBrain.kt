@@ -59,6 +59,8 @@ object CloudBrain {
      * in the order of the list, so that one down, out of quota or overloaded does not leave the card silent.
      */
     fun order(prefs: Prefs): List<CloudService> {
+        // An experiment for development: nothing is asked outside developer mode.
+        if (!prefs.devMode) return emptyList()
         val chosen = prefs.cloudService
         val all = listOf(chosen) + if (prefs.cloudFallback) CloudService.entries.filter { it != chosen } else emptyList()
         return all.filter { prefs.cloudKey(it).isNotBlank() }

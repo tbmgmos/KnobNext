@@ -158,6 +158,7 @@ data class Settings(
     /** The services with a key, and whether the next one is asked when one does not answer. */
     val cloudKeyed: Set<CloudService>,
     val cloudFallback: Boolean,
+    val devMode: Boolean,
     val storyLast: String,
     val storyLastAt: Long,
     val cloudLast: String,
@@ -326,6 +327,18 @@ class Prefs(context: Context) {
     var cloudService: CloudService
         get() = CloudService.entries.firstOrNull { it.name == sp.getString("cloud_service", null) } ?: CloudService.GEMINI
         set(v) = sp.edit().putString("cloud_service", v.name).apply()
+
+    /**
+     * Developer mode (seven taps on the version): the experimental cloud model, its keys and its questions
+     * in the card. Off, the app is as it was without it; a story set to the cloud goes back to Gemini.
+     */
+    var devMode: Boolean
+        get() = sp.getBoolean("dev_mode", false)
+        set(v) {
+            val e = sp.edit().putBoolean("dev_mode", v)
+            if (!v && infoSource == InfoSource.CLOUD) e.putString("info_source", InfoSource.GEMINI.name)
+            e.apply()
+        }
 
     /** When the chosen service does not answer, the next one with a key is asked. */
     var cloudFallback: Boolean
@@ -825,6 +838,7 @@ class Prefs(context: Context) {
         cloudReady = CloudBrain.order(this).isNotEmpty(),
         cloudKeyed = CloudService.entries.filter { cloudKey(it).isNotBlank() }.toSet(),
         cloudFallback = cloudFallback,
+        devMode = devMode,
         storyLast = storyLast,
         storyLastAt = storyLastAt,
         cloudLast = cloudLast,
