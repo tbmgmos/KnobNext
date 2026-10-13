@@ -327,6 +327,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("circle_pick", 0)
         set(v) = sp.edit().putInt("circle_pick", v).apply()
 
+    /** Players that take a search through their session and do nothing (Spotify): opened instead. */
+    var searchDeaf: Set<String>
+        get() = sp.getStringSet("search_deaf", null).orEmpty().toSet()
+        set(v) = sp.edit().putStringSet("search_deaf", v).apply()
+
     /** Last.fm refused the app's usual signature and took a plain one: the stories sign that way. */
     var lastFmPlainAgent: Boolean
         get() = sp.getBoolean("lastfm_plain_agent", false)

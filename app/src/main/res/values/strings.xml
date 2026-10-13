@@ -575,6 +575,8 @@
     <string name="log_circle_none">связанных с %1$s исполнителей не нашлось</string>
     <string name="log_circle_looking">ищу, кого включить из круга %1$s</string>
     <string name="log_circle_play">включаю %1$s в %2$s</string>
+    <string name="log_circle_opened">открываю %2$s на %1$s: тихо он не включил</string>
+    <string name="bubble_circle_trying">ищу %1$s в плеере…</string>
     <string name="log_circle_cannot">%1$s не умеет включать по имени: %2$s</string>
     <string name="log_flip_paused">экраном вниз → пауза</string>
     <string name="log_flip_resumed">экраном вверх → продолжить</string>

@@ -437,15 +437,20 @@ class TrackBubble(
     }
 
     private fun play(name: String) {
-        val r = CirclePlay.play(service, controller, prefs.lastPlayer, name)
-        val player = r.player?.let { appLabel(service, it) }
-        val text = when {
-            player == null -> service.getString(R.string.log_no_player)
-            r.ok -> service.getString(R.string.log_circle_play, name, player)
-            else -> service.getString(R.string.log_circle_cannot, player, name)
+        status(service.getString(R.string.bubble_circle_trying, name))
+        scope.launch {
+            val r = CirclePlay.play(service, controller, prefs.lastPlayer, name)
+            val player = r.player?.let { appLabel(service, it) }
+            val text = when {
+                player == null -> service.getString(R.string.log_no_player)
+                r.ok && r.opened -> service.getString(R.string.log_circle_opened, name, player)
+                r.ok -> service.getString(R.string.log_circle_play, name, player)
+                else -> service.getString(R.string.log_circle_cannot, player, name)
+            }
+            log(text)
+            // The player came to the front: the card folds out of its way.
+            if (r.opened) collapse() else status(text)
         }
-        log(text)
-        status(text)
     }
 
     private fun like() {

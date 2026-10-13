@@ -154,7 +154,11 @@ class Extras(private val context: Context, private val media: Media, private val
      */
     private fun playCircle(controller: MediaController?): Outcome {
         val told = CirclePlay.fresh(prefs)
-        if (told.isNotEmpty()) return playFrom(controller, told)
+        if (told.isNotEmpty()) {
+            // The player is watched for a moment to see that it really plays: not on the gesture's time.
+            scope.launch { playFrom(controller, told).message?.let { log?.invoke(it) } }
+            return Outcome.DONE
+        }
         val track = controller?.metadata?.let(::trackOf)
         val artist = track?.artist?.let(Speech::cleanArtist)
         if (track == null || artist == null) {
@@ -176,7 +180,7 @@ class Extras(private val context: Context, private val media: Media, private val
         return Outcome.done(context.getString(R.string.log_circle_looking, artist))
     }
 
-    private fun playFrom(controller: MediaController?, names: List<String>): Outcome {
+    private suspend fun playFrom(controller: MediaController?, names: List<String>): Outcome {
         val r = CirclePlay.next(context, controller, prefs, names)
         val artist = r.artist ?: return Outcome.failed(context.getString(R.string.log_no_track))
         val player = r.player?.let { appLabel(context, it) } ?: run {
@@ -188,7 +192,7 @@ class Extras(private val context: Context, private val media: Media, private val
             return Outcome.failed(context.getString(R.string.log_circle_cannot, player, artist))
         }
         speaker.say(context.getString(R.string.speak_circle_play, artist))
-        return Outcome.done(context.getString(R.string.log_circle_play, artist, player))
+        return Outcome.done(context.getString(if (r.opened) R.string.log_circle_opened else R.string.log_circle_play, artist, player))
     }
 
     private fun trackOf(meta: MediaMetadata) = TrackInfo.trackOf(meta)

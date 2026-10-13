@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,7 @@ import com.knobnext.Speech
 import com.knobnext.TrackInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.graphics.Bitmap
 import java.io.File
@@ -261,6 +263,7 @@ private fun Notes(notes: List<Journal.Note>, showTrack: Boolean) {
 private fun Links(context: Context, links: List<String>, version: Int, onOpen: (String) -> Unit) {
     val known = remember(version) { Journal.entries(context).map { it.key }.toSet() }
     val media = remember { com.knobnext.Media(context) }
+    val scope = rememberCoroutineScope()
     SectionTitle(stringResource(R.string.acq_links))
     Group(links.size) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -273,7 +276,7 @@ private fun Links(context: Context, links: List<String>, version: Int, onOpen: (
                     onClick = if (inHistory) ({ onOpen(key) }) else null,
                     // Straight to the music: the artist in the player in use.
                     trailing = {
-                        IconButton(onClick = { playInPlayer(context, media, name) }) {
+                        IconButton(onClick = { scope.launch { playInPlayer(context, media, name) } }) {
                             Icon(KnobIcons.PlayPause, contentDescription = stringResource(R.string.acq_link_play, name))
                         }
                     },
@@ -289,6 +292,7 @@ private fun Later(context: Context, version: Int) {
     val list = remember(version) { Journal.later(context) }
     if (list.isEmpty()) return
     val media = remember { com.knobnext.Media(context) }
+    val scope = rememberCoroutineScope()
     SectionTitle(stringResource(R.string.later_title))
     Hint(stringResource(R.string.later_hint))
     Group(list.size) {
@@ -299,7 +303,7 @@ private fun Later(context: Context, version: Int) {
                     subtitle = listOfNotNull(l.via?.let { stringResource(R.string.later_from, it) }, day(l.at)).joinToString(" · "),
                     trailing = {
                         Row {
-                            IconButton(onClick = { playInPlayer(context, media, l.artist, l.title) }) {
+                            IconButton(onClick = { scope.launch { playInPlayer(context, media, l.artist, l.title) } }) {
                                 Icon(KnobIcons.Play, contentDescription = stringResource(R.string.acq_link_play, l.artist))
                             }
                             IconButton(onClick = { Journal.toggleLater(context, l.artist, l.title, null) }) {
@@ -314,13 +318,13 @@ private fun Later(context: Context, version: Int) {
 }
 
 /** Plays [name] (or their track [title]) in the player in use (or the last one), and says what happened. */
-private fun playInPlayer(context: Context, media: com.knobnext.Media, name: String, title: String? = null) {
+private suspend fun playInPlayer(context: Context, media: com.knobnext.Media, name: String, title: String? = null) {
     val prefs = Prefs(context)
     val r = com.knobnext.CirclePlay.play(context, media.pick(media.controllers(), prefs.pausedPlayer), prefs.lastPlayer, name, title)
     val player = r.player?.let { com.knobnext.appLabel(context, it) }
     val text = when {
         player == null -> context.getString(R.string.log_no_player)
-        r.ok -> context.getString(R.string.log_circle_play, name, player)
+        r.ok -> context.getString(if (r.opened) R.string.log_circle_opened else R.string.log_circle_play, name, player)
         else -> context.getString(R.string.log_circle_cannot, player, name)
     }
     android.widget.Toast.makeText(context, text.replaceFirstChar { it.uppercase() }, android.widget.Toast.LENGTH_SHORT).show()
