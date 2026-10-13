@@ -143,7 +143,7 @@ class StoryLiveTest {
             }
             println("играют: ${r.players.joinToString("; ") { (who, what) -> "$who — ${what.joinToString(", ")}" }}")
             println("продюсер: ${r.producers} | студия: ${r.studio} | написали: ${r.writers} | кавер: ${r.cover}")
-            println("оригинал: ${r.original?.let { "${it.artist} — ${it.title} (${it.year})" }}")
+            println("первоисточник: ${r.original?.let { "${it.artist} — ${it.title} (${it.year})" }} | своя первая запись: ${r.firstYear}")
             println("сэмплы: ${r.samples.joinToString { "${it.artist} — ${it.title}" }} | сэмплировали: ${r.sampledBy.joinToString { "${it.artist} — ${it.title}" }}")
             println("перепевали (${r.coverCount}): ${r.covers.joinToString { "${it.artist} (${it.year})" }}")
         }

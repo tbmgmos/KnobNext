@@ -419,7 +419,11 @@ class TrackBubble(
                 personChip(who, what.joinToString(", "))
             })
         }
+        // Who had the song first: someone else (the source, its own row), or the artist themselves.
         r.original?.let { songRow(box, service.getString(R.string.bubble_record_original), listOf(songChip(it))) }
+        if (r.original == null && r.firstYear != null && r.covers.isNotEmpty()) {
+            box.addView(text(service.getString(R.string.bubble_record_is_original, r.firstYear), 13f, palette.accent).apply { setPadding(0, dp(8), 0, 0) })
+        }
         if (r.samples.isNotEmpty()) songRow(box, service.getString(R.string.bubble_record_samples), r.samples.map(::songChip))
         if (r.sampledBy.isNotEmpty()) songRow(box, service.getString(R.string.bubble_record_sampled), r.sampledBy.map(::songChip))
         if (r.covers.isNotEmpty()) {

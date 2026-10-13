@@ -171,7 +171,8 @@
     <string name="bubble_record_studio">Записано: %1$s</string>
     <string name="bubble_record_writers">Песню написали: %1$s</string>
     <string name="bubble_record_players">Играют</string>
-    <string name="bubble_record_original">Это кавер. Оригинал</string>
+    <string name="bubble_record_original">Это кавер. Первоисточник</string>
+    <string name="bubble_record_is_original">Это оригинал: впервые записан в %1$s</string>
     <string name="bubble_record_samples">В ней сэмплы</string>
     <string name="bubble_record_sampled">Её сэмплировали</string>
     <string name="bubble_record_covers">Её перепевали — исполнителей: %1$d</string>

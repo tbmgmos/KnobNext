@@ -152,6 +152,8 @@ object Brainz {
         /** Others' recordings of the song, the earliest first, one each; [coverCount]: how many artists in all. */
         val covers: List<Song>,
         val coverCount: Int,
+        /** When the artist first put it out, as far as MusicBrainz knows: theirs is the original when no one was earlier. */
+        val firstYear: String? = null,
     ) {
         val empty get() = players.isEmpty() && producers.isEmpty() && studio == null && writers.isEmpty() &&
             original == null && samples.isEmpty() && sampledBy.isEmpty() && covers.isEmpty()
@@ -169,6 +171,7 @@ object Brainz {
                 .put("sampledBy", songs(sampledBy))
                 .put("covers", songs(covers))
                 .put("coverCount", coverCount)
+                .put("firstYear", firstYear ?: "")
         }
 
         companion object {
@@ -188,6 +191,7 @@ object Brainz {
                 return Record(
                     players, strings("producers"), o.optString("studio").ifBlank { null }, strings("writers"), o.optBoolean("cover"),
                     songOf(o.optJSONObject("original")), songs("samples"), songs("sampledBy"), songs("covers"), o.optInt("coverCount"),
+                    o.optString("firstYear").ifBlank { null },
                 )
             }
         }
@@ -248,6 +252,7 @@ object Brainz {
         var original: Song? = null
         var covers = emptyList<Song>()
         var coverCount = 0
+        var firstYear: String? = null
         if (workId != null) {
             val work = get("$API/work/$workId?inc=artist-rels&fmt=json")
             writers = work?.optJSONArray("relations")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
@@ -268,11 +273,23 @@ object Brainz {
                 .sortedBy { (_, s) -> s.year ?: "9999" }
                 .distinctBy { (who, _) -> who }
                 .map { (_, s) -> s }
-            if (cover) original = others.firstOrNull()
+            // The artist's own first recording of it: who came first is a matter of years.
+            val recordings = all?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+            firstYear = recordings.filter { o ->
+                firstArtist(o) == selfId || songOf(o)?.let { Journal.key(it.artist).contains(Journal.key(artist)) } == true
+            }.mapNotNull { year(it, "first-release-date") }.minOrNull() ?: year(r, "first-release-date")
+            val earliest = others.firstOrNull()
+            // Someone else had it out first (or MusicBrainz calls this a cover): theirs is the source.
+            original = earliest?.takeIf { e ->
+                cover || (e.year != null && firstYear != null && e.year < firstYear!!)
+            }
             covers = others.filter { it !== original }.take(MAX_COVERS)
             coverCount = others.size - (if (original != null) 1 else 0)
         }
-        return Record(players.entries.map { it.key to it.value }.take(MAX_PLAYERS), producers, studio, writers, cover, original, samples, sampledBy, covers, coverCount)
+        return Record(
+            players.entries.map { it.key to it.value }.take(MAX_PLAYERS), producers, studio, writers, cover || original != null, original,
+            samples, sampledBy, covers, coverCount, firstYear,
+        )
     }
 
     private suspend fun candidates(name: String, who: String, artist: String, mbid: String?): List<JSONObject> {

@@ -1302,7 +1302,7 @@ object TrackInfo {
     private const val ARTIST_PREFIX = "artist1-"
 
     /** The recording as MusicBrainz knows it, for the round card. */
-    private const val RECORD_PREFIX = "record2-"
+    private const val RECORD_PREFIX = "record3-"
 
     /** Two sentences that begin with this many of the same characters are one. */
     private const val DUPLICATE_CHARS = 60
