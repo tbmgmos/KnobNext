@@ -507,6 +507,16 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
             }
         }
         Hint(stringResource(if (service.searches) R.string.cloud_searches else R.string.cloud_no_search))
+        // What answered last (the model it settled on, with the search or not), or why nothing did.
+        if (s.cloudReady) {
+            Hint(
+                when {
+                    s.cloudLast.isBlank() -> stringResource(R.string.cloud_last_none)
+                    s.cloudLastOk -> stringResource(R.string.cloud_last_ok, s.cloudLast, clock(s.cloudLastAt))
+                    else -> stringResource(R.string.cloud_last_failed, s.cloudLast, clock(s.cloudLastAt))
+                },
+            )
+        }
     }
     androidx.compose.runtime.key(service) {
         KeyField(
@@ -530,6 +540,9 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
         )
     }
 }
+
+/** A time of day as the phone shows it: "21:41". */
+internal fun clock(at: Long): String = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(Date(at))
 
 /** One more try, in a word or two: worked, refused (and what was said), or no answer. */
 @Composable

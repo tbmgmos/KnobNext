@@ -164,6 +164,8 @@ object TrackInfo {
         // How long each way took goes to the log: the story is meant to follow the title without a pause.
         fun ready(story: String, how: String): String {
             note(context.getString(R.string.log_info_ready, (System.currentTimeMillis() - started) / 1000.0, how))
+            // For the settings: what told the last story.
+            Prefs(context).storyLast = how
             history.add(story)
             if (remember && track.artist != null) {
                 val topic = when {
@@ -209,8 +211,7 @@ object TrackInfo {
                 found = quick
                 album = quick?.album ?: album
                 lastSources = answer.sources
-                val service = Prefs(context).cloudService.title
-                return@coroutineScope ready(answer.text, if (answer.sources.isEmpty()) service else "$service + поиск")
+                return@coroutineScope ready(answer.text, CloudBrain.lastUsed ?: Prefs(context).cloudService.title)
             }
             note(context.getString(R.string.log_info_cloud_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
         }
@@ -675,20 +676,22 @@ object TrackInfo {
                 return cached
             }
         }
-        val started = System.currentTimeMillis()
         val fetched = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
                 coroutineScope {
                     val title = Speech.cleanTitle(track.title)
                     val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() }
-                    val more = async { runCatching { MusicSources.gather(context, title, artist, track.album, lang) }.getOrNull() }
-                    val song = async { findArticle(lang) { l -> findSong(l, title, artist) } }
-                    val about = async { artist?.let { a -> findArticle(lang) { l -> findArtist(l, a) } } }
-                    val brainz = async { if (artist != null && (track.album == null || track.year == null)) musicBrainz(title, artist) else null }
+                    // Each source has its own time: a slow one (a VPN, a busy server) is left out, and what the
+                    // others found is still told. One shared limit used to throw everything away.
+                    suspend fun <T> timed(block: suspend () -> T?): T? = withTimeoutOrNull(SOURCE_TIMEOUT_MS) { runCatching { block() }.getOrNull() }
+                    val more = async { timed { MusicSources.gather(context, title, artist, track.album, lang) } }
+                    val song = async { timed { findArticle(lang) { l -> findSong(l, title, artist) } } }
+                    val about = async { artist?.let { a -> timed { findArticle(lang) { l -> findArtist(l, a) } } } }
+                    val brainz = async { if (artist != null && (track.album == null || track.year == null)) timed { musicBrainz(title, artist) } else null }
                     // The album's article: right away when the player names the album, else once MusicBrainz has.
                     val albumText = async {
                         val name = track.album ?: brainz.await()?.first
-                        name?.let { a -> findArticle(lang) { l -> findAlbum(l, a, artist) } }
+                        name?.let { a -> timed { findArticle(lang) { l -> findAlbum(l, a, artist) } } }
                     }
                     // Wikidata, for the very items behind the articles found.
                     val data = async {
@@ -698,7 +701,9 @@ object TrackInfo {
                             val artistArticle = about.await()
                             Wikidata.gather(
                                 context, lang, songArticle?.page, albumArticle?.page, artistArticle?.page,
-                                deadline = started + WIKIDATA_DEADLINE_MS,
+                                // From when the articles are here, not from the start: a slow article
+                                // used to leave Wikidata no time at all.
+                                deadline = System.currentTimeMillis() + WIKIDATA_DEADLINE_MS,
                                 said = listOfNotNull(songArticle, albumArticle, artistArticle)
                                     .mapNotNull { it.text?.facts?.joinToString(" ") }.joinToString(" ").let(::speakable),
                                 albumKnown = track.album != null,
@@ -756,14 +761,13 @@ object TrackInfo {
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { return it }
         }
-        val started = System.currentTimeMillis()
         val found = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
-                val article = findArticle(lang) { l -> findArtist(l, artist) }
+                val article = withTimeoutOrNull(SOURCE_TIMEOUT_MS) { runCatching { findArticle(lang) { l -> findArtist(l, artist) } }.getOrNull() }
                 val d = runCatching {
                     Wikidata.gather(
                         context, lang, null, null, article?.page,
-                        deadline = started + WIKIDATA_DEADLINE_MS,
+                        deadline = System.currentTimeMillis() + WIKIDATA_DEADLINE_MS,
                         said = article?.text?.facts?.joinToString(" ")?.let(::speakable).orEmpty(),
                     )
                 }.getOrNull()
@@ -1155,11 +1159,14 @@ object TrackInfo {
     )
 
     private const val SEARCH_RESULTS = 2
-    private const val REQUEST_TIMEOUT_MS = 3_500
-    private const val FETCH_TIMEOUT_MS = 8_000L
+    private const val REQUEST_TIMEOUT_MS = 6_000
+    private const val FETCH_TIMEOUT_MS = 25_000L
 
-    // The last Wikidata request starts by then, each can take up to REQUEST_TIMEOUT_MS: within FETCH_TIMEOUT_MS.
-    private const val WIKIDATA_DEADLINE_MS = 4_000L
+    /** One source (an article, a database) is waited for this long; the others are not held up. */
+    private const val SOURCE_TIMEOUT_MS = 10_000L
+
+    // The last Wikidata request starts this long after the articles came, each can take up to REQUEST_TIMEOUT_MS.
+    private const val WIKIDATA_DEADLINE_MS = 6_000L
     // Past this, the story is no longer "right after the title": the facts are read as they are.
     private const val MODEL_TIMEOUT_MS = 10_000L
     private const val FACTS_FRESH_MS = 30L * 24 * 60 * 60 * 1000

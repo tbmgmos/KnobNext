@@ -155,6 +155,11 @@ data class Settings(
     val cloudService: CloudService,
     /** A key is set for the cloud model's service. */
     val cloudReady: Boolean,
+    val storyLast: String,
+    val storyLastAt: Long,
+    val cloudLast: String,
+    val cloudLastOk: Boolean,
+    val cloudLastAt: Long,
     val keysOnPause: Boolean,
     val infoHistory: Boolean,
     val journalVersion: Int,
@@ -329,6 +334,21 @@ class Prefs(context: Context) {
 
     fun setCloudModel(service: CloudService, model: String) =
         sp.edit().putString("cloud_model_" + service.name, model.trim()).remove("cloud_working_" + service.name).apply()
+
+    /** What told the last track story ("Gemini · gemini-2.5-flash · с поиском", "Википедия как есть"), and when. */
+    var storyLast: String
+        get() = sp.getString("story_last", null).orEmpty()
+        set(v) = sp.edit().putString("story_last", v).putLong("story_last_at", System.currentTimeMillis()).apply()
+
+    val storyLastAt: Long get() = sp.getLong("story_last_at", 0L)
+
+    /** The cloud model's last answer: what answered, or why nothing did ([cloudLastOk] false), and when. */
+    val cloudLast: String get() = sp.getString("cloud_last", null).orEmpty()
+    val cloudLastOk: Boolean get() = sp.getBoolean("cloud_last_ok", true)
+    val cloudLastAt: Long get() = sp.getLong("cloud_last_at", 0L)
+
+    fun setCloudLast(what: String, ok: Boolean) =
+        sp.edit().putString("cloud_last", what).putBoolean("cloud_last_ok", ok).putLong("cloud_last_at", System.currentTimeMillis()).apply()
 
     /** The model, and whether with the search, that answered last with this key: tried first. */
     fun cloudWorking(service: CloudService): Pair<String, Boolean>? =
@@ -795,6 +815,11 @@ class Prefs(context: Context) {
         infoSource = infoSource,
         cloudService = cloudService,
         cloudReady = cloudKey(cloudService).isNotBlank(),
+        storyLast = storyLast,
+        storyLastAt = storyLastAt,
+        cloudLast = cloudLast,
+        cloudLastOk = cloudLastOk,
+        cloudLastAt = cloudLastAt,
         keysOnPause = keysOnPause,
         infoHistory = infoHistory,
         journalVersion = journalVersion,

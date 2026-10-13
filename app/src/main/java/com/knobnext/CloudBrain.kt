@@ -45,6 +45,9 @@ object CloudBrain {
     /** The service's own words for it, for the log. */
     @Volatile var lastDetail: String? = null
 
+    /** What answered last: "Gemini · gemini-2.5-flash · с поиском". */
+    @Volatile var lastUsed: String? = null
+
     /** The service, key and model set in the settings, or null when there is no key. */
     fun configured(prefs: Prefs): Triple<CloudService, String, String>? {
         val service = prefs.cloudService
@@ -55,13 +58,28 @@ object CloudBrain {
     /** [prompt] to the configured model; [system]: who it is and how to answer. Null when it could not answer. */
     fun ask(prefs: Prefs, system: String, prompt: String, maxTokens: Int = MAX_TOKENS): Answer? {
         val (service, key, model) = configured(prefs) ?: return null.also { lastError = "нет ключа" }
-        return try {
+        val answer = try {
             if (service == CloudService.GEMINI) gemini(prefs, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
         } catch (e: Exception) {
             lastError = e.javaClass.simpleName
             lastDetail = e.message?.take(MAX_ERROR_CHARS)
             null
         }
+        // For the settings: what answered last, or why it did not.
+        prefs.setCloudLast(if (answer != null) lastUsed.orEmpty() else lastError.orEmpty(), ok = answer != null)
+        return answer
+    }
+
+    private fun used(service: CloudService, model: String, search: Boolean?) {
+        lastUsed = listOfNotNull(
+            service.title,
+            model,
+            when (search) {
+                true -> "с поиском"
+                false -> "без поиска"
+                null -> null
+            },
+        ).joinToString(" · ")
     }
 
     /** Whether the key opens the service: the list of its models, which costs nothing. */
@@ -95,7 +113,10 @@ object CloudBrain {
                 r = geminiOnce(key, m, search, system, prompt, maxTokens)
             }
             reply = r
-            r.answer?.let { prefs.setCloudWorking(CloudService.GEMINI, m, search) }
+            r.answer?.let {
+                prefs.setCloudWorking(CloudService.GEMINI, m, search)
+                used(CloudService.GEMINI, m, search)
+            }
             return r.answer
         }
         for ((m, search) in tries) {
@@ -189,6 +210,7 @@ object CloudBrain {
             ?.takeIf { it.isNotEmpty() } ?: return fail(r, model).also {
             if (r.code == HTTP_QUOTA) lastError = "у ключа ${service.title} закончился лимит или нет оплаты"
         }
+        used(service, model, null)
         return Answer(text, emptyList())
     }
 

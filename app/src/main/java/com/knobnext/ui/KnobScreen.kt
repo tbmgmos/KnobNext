@@ -1661,6 +1661,8 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
                     )
                 }
             }
+            // Quietly, what told the last story: the model, the facts as they are, the cloud with its search.
+            if (s.storyLast.isNotBlank()) Hint(stringResource(R.string.info_last, s.storyLast, clock(s.storyLastAt)))
             Hint(stringResource(R.string.info_hint))
             SectionTitle(stringResource(R.string.bubble_title))
             Group(3) {

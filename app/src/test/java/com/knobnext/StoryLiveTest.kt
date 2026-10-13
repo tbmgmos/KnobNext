@@ -23,6 +23,8 @@ class StoryLiveTest {
         TrackInfo.Track("Группа крови", "Кино", "Группа крови", null),
         TrackInfo.Track("Хочешь?", "Земфира", "Прости меня моя любовь", null),
         TrackInfo.Track("Creep", "Radiohead", "Pablo Honey", null),
+        // Once said "nothing is known" now and then: a slow source threw the rest away.
+        TrackInfo.Track("All the Small Things", "blink-182", "Enema of the State", null),
         TrackInfo.Track("Тает лёд", "Грибы", null, null),
         // The same band in Latin letters: one record in the history, no second introduction.
         TrackInfo.Track("Звезда по имени Солнце", "Kino", null, null),
