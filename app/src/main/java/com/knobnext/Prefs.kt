@@ -153,8 +153,11 @@ data class Settings(
     val infoLanguage: InfoLanguage,
     val infoSource: InfoSource,
     val cloudService: CloudService,
-    /** A key is set for the cloud model's service. */
+    /** A key is set for a service the cloud model may ask. */
     val cloudReady: Boolean,
+    /** The services with a key, and whether the next one is asked when one does not answer. */
+    val cloudKeyed: Set<CloudService>,
+    val cloudFallback: Boolean,
     val storyLast: String,
     val storyLastAt: Long,
     val cloudLast: String,
@@ -323,6 +326,11 @@ class Prefs(context: Context) {
     var cloudService: CloudService
         get() = CloudService.entries.firstOrNull { it.name == sp.getString("cloud_service", null) } ?: CloudService.GEMINI
         set(v) = sp.edit().putString("cloud_service", v.name).apply()
+
+    /** When the chosen service does not answer, the next one with a key is asked. */
+    var cloudFallback: Boolean
+        get() = sp.getBoolean("cloud_fallback", true)
+        set(v) = sp.edit().putBoolean("cloud_fallback", v).apply()
 
     fun cloudKey(service: CloudService): String = sp.getString("cloud_key_" + service.name, null).orEmpty()
 
@@ -814,7 +822,9 @@ class Prefs(context: Context) {
         infoLanguage = infoLanguage,
         infoSource = infoSource,
         cloudService = cloudService,
-        cloudReady = cloudKey(cloudService).isNotBlank(),
+        cloudReady = CloudBrain.order(this).isNotEmpty(),
+        cloudKeyed = CloudService.entries.filter { cloudKey(it).isNotBlank() }.toSet(),
+        cloudFallback = cloudFallback,
         storyLast = storyLast,
         storyLastAt = storyLastAt,
         cloudLast = cloudLast,

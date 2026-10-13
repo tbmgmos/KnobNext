@@ -50,24 +50,45 @@ object CloudBrain {
 
     /** The service, key and model set in the settings, or null when there is no key. */
     fun configured(prefs: Prefs): Triple<CloudService, String, String>? {
-        val service = prefs.cloudService
-        val key = prefs.cloudKey(service).takeIf { it.isNotBlank() } ?: return null
-        return Triple(service, key, prefs.cloudModel(service).ifBlank { service.defaultModel })
+        val service = order(prefs).firstOrNull() ?: return null
+        return Triple(service, prefs.cloudKey(service), prefs.cloudModel(service).ifBlank { service.defaultModel })
     }
 
-    /** [prompt] to the configured model; [system]: who it is and how to answer. Null when it could not answer. */
+    /**
+     * The services to ask, in turn: the chosen one, then (when switching is on) every other with a key,
+     * in the order of the list, so that one down, out of quota or overloaded does not leave the card silent.
+     */
+    fun order(prefs: Prefs): List<CloudService> {
+        val chosen = prefs.cloudService
+        val all = listOf(chosen) + if (prefs.cloudFallback) CloudService.entries.filter { it != chosen } else emptyList()
+        return all.filter { prefs.cloudKey(it).isNotBlank() }
+    }
+
+    /** [prompt] to the cloud model; [system]: who it is and how to answer. Null when no service could answer. */
     fun ask(prefs: Prefs, system: String, prompt: String, maxTokens: Int = MAX_TOKENS): Answer? {
-        val (service, key, model) = configured(prefs) ?: return null.also { lastError = "нет ключа" }
-        val answer = try {
-            if (service == CloudService.GEMINI) gemini(prefs, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
-        } catch (e: Exception) {
-            lastError = e.javaClass.simpleName
-            lastDetail = e.message?.take(MAX_ERROR_CHARS)
-            null
+        val services = order(prefs)
+        if (services.isEmpty()) return null.also { lastError = "нет ключа" }
+        val why = ArrayList<String>()
+        for (service in services) {
+            val key = prefs.cloudKey(service)
+            val model = prefs.cloudModel(service).ifBlank { service.defaultModel }
+            val answer = try {
+                if (service == CloudService.GEMINI) gemini(prefs, key, model, system, prompt, maxTokens) else chat(service, key, model, system, prompt, maxTokens)
+            } catch (e: Exception) {
+                lastError = e.javaClass.simpleName
+                lastDetail = e.message?.take(MAX_ERROR_CHARS)
+                null
+            }
+            if (answer != null) {
+                // For the settings: what answered last (the service it switched to, if it did).
+                prefs.setCloudLast(lastUsed.orEmpty(), ok = true)
+                return answer
+            }
+            why += "${service.title}: ${lastError ?: "нет ответа"}"
         }
-        // For the settings: what answered last, or why it did not.
-        prefs.setCloudLast(if (answer != null) lastUsed.orEmpty() else lastError.orEmpty(), ok = answer != null)
-        return answer
+        lastError = why.joinToString("; ")
+        prefs.setCloudLast(lastError.orEmpty(), ok = false)
+        return null
     }
 
     private fun used(service: CloudService, model: String, search: Boolean?) {

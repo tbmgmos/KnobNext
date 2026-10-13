@@ -503,10 +503,27 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
                     selected = option == service,
                     onClick = { prefs.cloudService = option },
                     label = { Text(option.title) },
+                    // A tick on the services that have a key: the ones switching can go to.
+                    leadingIcon = if (option in s.cloudKeyed) {
+                        { Icon(KnobIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else {
+                        null
+                    },
                 )
             }
         }
         Hint(stringResource(if (service.searches) R.string.cloud_searches else R.string.cloud_no_search))
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.cloud_fallback), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    stringResource(R.string.cloud_fallback_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = s.cloudFallback, onCheckedChange = { prefs.cloudFallback = it })
+        }
         // What answered last (the model it settled on, with the search or not), or why nothing did.
         if (s.cloudReady) {
             Hint(
