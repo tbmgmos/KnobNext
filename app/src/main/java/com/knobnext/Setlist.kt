@@ -53,8 +53,9 @@ object Setlist {
         )
     }
 
-    /** Whether setlist.fm takes [key]: a known artist's concerts must come back (Radiohead's MusicBrainz id). */
-    fun works(key: String): Boolean = get("$API/artist/a74b1b7f-71a5-4011-9441-d0b5e4122711/setlists?p=1", key.trim())?.has("setlist") == true
+    /** What setlist.fm says to [key]: a known artist's concerts must come back (Radiohead's MusicBrainz id). */
+    fun check(key: String): KeyCheck =
+        KeyCheck.ask("$API/artist/a74b1b7f-71a5-4011-9441-d0b5e4122711/setlists?p=1", mapOf("x-api-key" to key.trim())) { it.has("setlist") }
 
     /** A concert: its day (UTC midnight), where ("venue, city"), its tour, the songs played. */
     private class Show(val date: Long, val place: String, val tour: String?, val songs: List<String>) {

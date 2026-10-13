@@ -44,6 +44,16 @@ class StoryLiveTest {
                 }
             }
         }
+        // What the services say to keys that cannot work: the answers the settings screen turns into messages.
+        fun show(r: KeyCheck) = when (r) {
+            is KeyCheck.Works -> "работает"
+            is KeyCheck.Rejected -> "отказ: HTTP ${r.http}, код ${r.error}"
+            is KeyCheck.NoAnswer -> "нет ответа: ${r.kind} ${r.detail}"
+        }
+        println("\n===== Проверка ключей")
+        println("Last.fm, 32 нуля: ${show(MusicSources.checkLastFm("0".repeat(32)))}")
+        println("Last.fm, 31 символ: ${show(MusicSources.checkLastFm("0".repeat(31)))}")
+        println("setlist.fm, выдуманный ключ: ${show(Setlist.check("00000000-0000-0000-0000-000000000000"))}")
         // MusicBrainz, deeper: what joins the facts in the background after the first telling.
         println("\n===== MusicBrainz (Last.fm: ${if (Prefs(context).lastFmKeyInUse.isBlank()) "нет ключа" else "есть ключ"}, setlist.fm: ${if (Prefs(context).setlistKeyInUse.isBlank()) "нет ключа" else "есть ключ"})")
         for (track in tracks) {

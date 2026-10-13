@@ -185,9 +185,9 @@ object MusicSources {
 
     // ---- Last.fm ----
 
-    /** Whether Last.fm takes [key]: a known artist must come back. */
-    fun lastFmWorks(key: String): Boolean =
-        TrackInfo.getJson("$LASTFM?method=artist.getinfo&artist=Radiohead&format=json&api_key=${enc(key.trim())}")?.optJSONObject("artist") != null
+    /** What Last.fm says to [key]: a known artist must come back. */
+    fun checkLastFm(key: String): KeyCheck =
+        KeyCheck.ask("$LASTFM?method=artist.getinfo&artist=Radiohead&format=json&api_key=${enc(key.trim())}") { it.optJSONObject("artist") != null }
 
     private fun lastFm(res: Context, appKey: String, artist: String, title: String, album: String?, lang: String): LastFm? {
         val key = appKey.takeIf { it.isNotBlank() } ?: return null

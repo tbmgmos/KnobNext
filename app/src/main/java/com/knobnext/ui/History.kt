@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -38,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.knobnext.Brainz
 import com.knobnext.Journal
+import com.knobnext.KeyCheck
 import com.knobnext.Prefs
 import com.knobnext.R
 import com.knobnext.Speech
@@ -383,32 +385,79 @@ fun SourceKeys(prefs: Prefs) {
     KeyField(
         context, stringResource(R.string.keys_lastfm), prefs.lastFmKey, { prefs.lastFmKey = it },
         getUrl = "https://www.last.fm/api/account/create",
-        check = { com.knobnext.MusicSources.lastFmWorks(it) },
+        // A wrong length or a stray character is told at once, without asking the service.
+        format = { key ->
+            when {
+                key.length != LASTFM_KEY_CHARS -> stringResource(R.string.keys_lastfm_length, key.length)
+                !KeyCheck.LASTFM_KEY.matches(key) -> stringResource(R.string.keys_lastfm_chars)
+                else -> null
+            }
+        },
+        check = { com.knobnext.MusicSources.checkLastFm(it) },
     )
     KeyField(
         context, stringResource(R.string.keys_setlist), prefs.setlistKey, { prefs.setlistKey = it },
         getUrl = "https://www.setlist.fm/settings/api",
-        check = { com.knobnext.Setlist.works(it) },
+        format = { null },
+        check = { com.knobnext.Setlist.check(it) },
     )
 }
 
+/** What to tell about a key the service did not take, or could not be asked. */
 @Composable
-private fun KeyField(context: Context, label: String, stored: String, save: (String) -> Unit, getUrl: String, check: (String) -> Boolean) {
+private fun keyProblem(result: KeyCheck): String = when (result) {
+    is KeyCheck.Works -> stringResource(R.string.keys_works)
+    is KeyCheck.Rejected -> when {
+        // Last.fm: error 26 is a suspended key, 29 a limit; setlist.fm says 429 for a limit.
+        result.error == KEY_SUSPENDED -> stringResource(R.string.keys_suspended)
+        result.error == KEY_LIMIT || result.http == HTTP_TOO_MANY -> stringResource(R.string.keys_limit)
+        result.error == KEY_INVALID || result.http == HTTP_UNAUTHORIZED || result.http == HTTP_FORBIDDEN ->
+            stringResource(R.string.keys_rejected)
+        else -> stringResource(R.string.keys_rejected_other, result.error ?: result.http)
+    }
+    is KeyCheck.NoAnswer -> when (result.kind) {
+        KeyCheck.Kind.TIMEOUT -> stringResource(R.string.keys_no_answer_timeout)
+        KeyCheck.Kind.NO_HOST -> stringResource(R.string.keys_no_answer_host)
+        KeyCheck.Kind.TLS -> stringResource(R.string.keys_no_answer_tls)
+        KeyCheck.Kind.OTHER -> stringResource(R.string.keys_no_answer_other, result.detail)
+    }
+}
+
+@Composable
+private fun KeyField(
+    context: Context,
+    label: String,
+    stored: String,
+    save: (String) -> Unit,
+    getUrl: String,
+    format: @Composable (String) -> String?,
+    check: (String) -> KeyCheck,
+) {
     var text by remember { mutableStateOf(stored) }
-    // null: not checked; true / false: what the service said.
-    var works by remember { mutableStateOf<Boolean?>(null) }
+    // null: not checked yet; else what the service said.
+    var result by remember { mutableStateOf<KeyCheck?>(null) }
     var checking by remember { mutableStateOf(false) }
-    LaunchedEffect(text) {
-        works = null
+    // Bumped by "Check again": the same key asked once more (after the connection came back, say).
+    var again by remember { mutableIntStateOf(0) }
+    val formatProblem = if (text.isBlank()) null else format(text)
+    LaunchedEffect(text, again) {
+        result = null
         if (text.isBlank()) {
             save("")
             return@LaunchedEffect
         }
         delay(SAVE_DELAY_MS)
+        // Kept as typed even when it looks wrong: a half-pasted key is theirs to finish.
         save(text)
+        if (formatProblem != null) return@LaunchedEffect
         checking = true
-        works = withContext(Dispatchers.IO) { runCatching { check(text) }.getOrDefault(false) }
-        checking = false
+        try {
+            result = withContext(Dispatchers.IO) {
+                runCatching { check(text) }.getOrElse { KeyCheck.NoAnswer(KeyCheck.Kind.OTHER, it.javaClass.simpleName) }
+            }
+        } finally {
+            checking = false
+        }
     }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         OutlinedTextField(
@@ -417,22 +466,27 @@ private fun KeyField(context: Context, label: String, stored: String, save: (Str
             label = { Text(label) },
             singleLine = true,
             supportingText = {
+                val shown = result
+                val bad = formatProblem != null || (shown != null && shown !is KeyCheck.Works)
                 Text(
-                    stringResource(
-                        when {
-                            text.isBlank() -> R.string.keys_empty
-                            checking -> R.string.keys_checking
-                            works == true -> R.string.keys_works
-                            works == false -> R.string.keys_fails
-                            else -> R.string.keys_checking
-                        },
-                    ),
-                    color = if (works == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    when {
+                        text.isBlank() -> stringResource(R.string.keys_empty)
+                        formatProblem != null -> formatProblem
+                        shown != null -> keyProblem(shown)
+                        else -> stringResource(R.string.keys_checking)
+                    },
+                    color = if (bad) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
+            isError = formatProblem != null || (result != null && result !is KeyCheck.Works),
             modifier = Modifier.fillMaxWidth(),
         )
-        TextButton(onClick = { open(context, getUrl) }) { Text(stringResource(R.string.keys_get)) }
+        Row {
+            TextButton(onClick = { open(context, getUrl) }) { Text(stringResource(R.string.keys_get)) }
+            if (text.isNotBlank() && !checking && formatProblem == null) {
+                TextButton(onClick = { again++ }) { Text(stringResource(R.string.keys_check_again)) }
+            }
+        }
     }
 }
 
@@ -447,3 +501,12 @@ private const val SAVE_DELAY_MS = 600L
 private const val MAX_OWN_CHARS = 500
 private const val COVER_TIMEOUT_MS = 6_000
 private const val MAX_KEY_CHARS = 64
+private const val LASTFM_KEY_CHARS = 32
+
+/** Last.fm's own error codes, and the HTTP statuses the services use for a key they refuse. */
+private const val KEY_INVALID = 10
+private const val KEY_SUSPENDED = 26
+private const val KEY_LIMIT = 29
+private const val HTTP_UNAUTHORIZED = 401
+private const val HTTP_FORBIDDEN = 403
+private const val HTTP_TOO_MANY = 429
