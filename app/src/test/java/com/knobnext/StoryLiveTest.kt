@@ -154,6 +154,11 @@ class StoryLiveTest {
         // As YouTube gives it: no album. The card should still have one.
         val facts = TrackInfo.facts(context, TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", null, null), "ru")
         println("без альбома от плеера → альбом ${facts?.album}, год ${facts?.year}")
+        for ((artist, title) in listOf("Nirvana" to "Smells Like Teen Spirit", "Кино" to "Группа крови", "Radiohead" to "Creep")) {
+            kotlinx.coroutines.delay(1_500)
+            val pick = TrackInfo.musicBrainz(title, artist)
+            println("альбом по MusicBrainz: $artist — $title → ${pick?.first} (${pick?.second}); ${TrackInfo.lastAlbumSearch}")
+        }
     }
 
     /** The artist base: what MusicBrainz, Discogs and Wikipedia give for a card, and the story using it. */

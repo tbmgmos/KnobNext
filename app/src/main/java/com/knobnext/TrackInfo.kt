@@ -1189,11 +1189,15 @@ object TrackInfo {
     }
 
     /** The album and year of the earliest release with this recording. */
-    private fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
+    /** What the last album search found, for the checks. */
+    @Volatile internal var lastAlbumSearch: String? = null
+
+    internal fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
         val query = "recording:\"${title.replace("\"", "")}\" AND artist:\"${artist.replace("\"", "")}\""
         val json = getJson("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=5&query=" + URLEncoder.encode(query, "UTF-8"))
             ?: return null
         val found = json.optJSONArray("recordings") ?: return null
+        lastAlbumSearch = "${found.length()} записей, оценки ${(0 until found.length()).map { found.optJSONObject(it)?.optInt("score") }}"
         val recordings = (0 until found.length()).mapNotNull { found.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE }
         if (recordings.isEmpty()) return null
         val year = recordings.mapNotNull { r -> r.optString("first-release-date").take(4).takeIf { it.length == 4 && it.all(Char::isDigit) } }.minOrNull()
