@@ -22,9 +22,10 @@ import java.util.Locale
 
 /**
  * ListenBrainz, MusicBrainz's sister for listening: open and free.
- *  - It recognises a track from "artist + title" however a player writes them, and says which recording
- *    and album of MusicBrainz it is: an album for players that give none (YouTube, SoundCloud).
- *  - With the person's token, KnobNext writes down what they listen to in any player on the phone.
+ *  With the person's token (ListenBrainz answers its users only):
+ *  - it recognises a track from "artist + title" however a player writes them, and says which recording
+ *    and album of MusicBrainz it is: an album for players that give none (YouTube, SoundCloud);
+ *  - KnobNext writes down what they listen to in any player on the phone.
  *  - Their most listened artists come first when the artist base is gathered.
  */
 object ListenBrainz {
@@ -55,6 +56,8 @@ object ListenBrainz {
 
     /** [artist]'s [title] as MusicBrainz knows it, or null; kept on the phone either way. */
     fun lookup(context: Context, artist: String?, title: String): Match? {
+        // ListenBrainz answers this only to its users: with the person's token.
+        val token = Prefs(context).lbToken.takeIf { it.isNotBlank() } ?: return null
         val a = artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
         val t = Speech.cleanTitle(title).takeIf { it.isNotBlank() } ?: return null
         val key = "${a.lowercase(Locale.ROOT)}\u0000${t.lowercase(Locale.ROOT)}"
@@ -64,7 +67,7 @@ object ListenBrainz {
             val kept = runCatching { file.readText().takeIf { it.isNotBlank() }?.let { Match.fromJson(JSONObject(it)) } }
             if (kept.isSuccess) return kept.getOrNull().also { matches[key] = it }
         }
-        val reply = get("$API/1/metadata/lookup/?artist_name=${enc(a)}&recording_name=${enc(t)}", Prefs(context).lbToken)
+        val reply = get("$API/1/metadata/lookup/?artist_name=${enc(a)}&recording_name=${enc(t)}", token)
         // No answer at all (offline): not kept, asked again next time.
         if (reply == null) return null
         val found = reply.optString("recording_name").takeIf { it.isNotBlank() }?.let { name ->

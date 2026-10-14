@@ -134,7 +134,9 @@ class StoryLiveTest {
     fun listenBrainz() = runBlocking {
         assumeTrue(System.getenv("LIVE_STORIES") == "1")
         val context = RuntimeEnvironment.getApplication()
-        println("\n===== ListenBrainz: распознавание")
+        // Recognising needs a ListenBrainz user's token (the LISTENBRAINZ_TOKEN secret); without it, only the album fallback.
+        System.getenv("LISTENBRAINZ_TOKEN")?.takeIf { it.isNotBlank() }?.let { Prefs(context).lbToken = it }
+        println("\n===== ListenBrainz: распознавание (токен: ${if (Prefs(context).lbToken.isBlank()) "нет" else "есть"})")
         val asked = listOf(
             "Nirvana" to "Smells Like Teen Spirit (Official Music Video)",
             "Kino" to "Gruppa Krovi",

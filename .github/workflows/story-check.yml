@@ -42,4 +42,5 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LISTENBRAINZ_TOKEN: ${{ secrets.LISTENBRAINZ_TOKEN }}
         run: ./gradlew testGithubDebugUnitTest --no-daemon --tests com.knobnext.StoryLiveTest

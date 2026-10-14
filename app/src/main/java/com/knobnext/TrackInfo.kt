@@ -1191,12 +1191,20 @@ object TrackInfo {
     /** The album and year of the earliest release with this recording. */
     private fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
         val query = "recording:\"${title.replace("\"", "")}\" AND artist:\"${artist.replace("\"", "")}\""
-        val json = getJson("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=1&query=" + URLEncoder.encode(query, "UTF-8"))
+        val json = getJson("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=5&query=" + URLEncoder.encode(query, "UTF-8"))
             ?: return null
-        val recording = json.optJSONArray("recordings")?.optJSONObject(0) ?: return null
-        if (recording.optInt("score") < MIN_SCORE) return null
-        val year = recording.optString("first-release-date").take(4).takeIf { it.length == 4 }
-        val album = recording.optJSONArray("releases")?.optJSONObject(0)?.optString("title")?.takeIf { it.isNotBlank() }
+        val found = json.optJSONArray("recordings") ?: return null
+        val recordings = (0 until found.length()).mapNotNull { found.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE }
+        if (recordings.isEmpty()) return null
+        val year = recordings.mapNotNull { r -> r.optString("first-release-date").take(4).takeIf { it.length == 4 && it.all(Char::isDigit) } }.minOrNull()
+        // The album it came out on: an official studio album, the earliest; else an official EP or single.
+        // Never the first release listed, which is as often a bootleg ("1991-05-29: Jabberjaw") or a sampler.
+        val releases = recordings.flatMap { r -> r.optJSONArray("releases")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty() }
+            .filter { it.optString("status") == "Official" && it.optString("title").isNotBlank() && !DATED_BOOTLEG.containsMatchIn(it.optString("title")) }
+        fun kind(r: JSONObject) = r.optJSONObject("release-group")?.optString("primary-type")
+        fun plain(r: JSONObject) = (r.optJSONObject("release-group")?.optJSONArray("secondary-types")?.length() ?: 0) == 0
+        val album = (releases.filter { kind(it) == "Album" && plain(it) }.ifEmpty { releases.filter { kind(it) == "EP" || kind(it) == "Single" } })
+            .minByOrNull { it.optString("date").ifBlank { "9999" } }?.optString("title")
         return album to year
     }
 
@@ -1406,6 +1414,9 @@ object TrackInfo {
 
     /** The same, without the address: for a service that refuses the first (see [MusicSources.checkLastFm]). */
     val PLAIN_AGENT = "KnobNext/" + BuildConfig.VERSION_NAME
+
+    /** A live bootleg named by its date and place. */
+    private val DATED_BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
 
     /** ListenBrainz is waited for this long to say which album a track is from. */
     private const val LOOKUP_WAIT_MS = 4_000L

@@ -980,7 +980,7 @@
     <string name="base_now_hint">Пока открыт KnobNext или работает его служба. Discogs без токена отвечает медленно: около 15 секунд на исполнителя</string>
     <string name="keys_discogs">Токен Discogs (необязательно)</string>
     <string name="lb_title">ListenBrainz</string>
-    <string name="lb_hint">Открытая база прослушиваний от создателей MusicBrainz. Без токена KnobNext уже узнаёт по ней трек и альбом из любого плеера (YouTube, SoundCloud). С токеном — записывает, что вы слушаете в любом плеере, а самые слушаемые исполнители первыми попадают в свою базу</string>
+    <string name="lb_hint">Открытая база прослушиваний от создателей MusicBrainz, бесплатно. С токеном KnobNext узнаёт по ней трек и альбом из любого плеера (YouTube, SoundCloud), записывает, что вы слушаете, а самые слушаемые исполнители первыми попадают в свою базу</string>
     <string name="lb_token">Токен ListenBrainz</string>
     <string name="lb_scrobble">Записывать прослушивания</string>
     <string name="lb_scrobble_nokey">Нужен токен: listenbrainz.org → Settings → User token</string>
