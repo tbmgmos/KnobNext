@@ -53,6 +53,8 @@ object ArtistBase {
         val about: List<String>,
         val related: List<String>,
         val relatedIds: List<String>,
+        /** Every source answered: one that did not (MusicBrainz busy, say) is asked again the next night. */
+        val complete: Boolean = true,
     ) {
         val empty get() = mbid == null && discogsId == null && intro.isEmpty() && about.isEmpty()
 
@@ -65,6 +67,7 @@ object ArtistBase {
             .put("labels", JSONArray(labels)).put("profile", JSONArray(profile))
             .put("intro", JSONArray(intro)).put("about", JSONArray(about))
             .put("related", JSONArray(related)).put("relatedIds", JSONArray(relatedIds))
+            .put("complete", complete)
 
         companion object {
             fun fromJson(o: JSONObject): Card {
@@ -90,6 +93,7 @@ object ArtistBase {
                     about = strings("about"),
                     related = strings("related"),
                     relatedIds = strings("relatedIds"),
+                    complete = o.optBoolean("complete", true),
                 )
             }
         }
@@ -269,6 +273,7 @@ object ArtistBase {
             about = about.take(MAX_ABOUT),
             related = facts?.related.orEmpty(),
             relatedIds = facts?.relatedIds.orEmpty(),
+            complete = facts != null && mb != null && (discogsId == null || dArtist != null),
         )
     }
 
@@ -302,7 +307,12 @@ object ArtistBase {
                 val f = file(context, Journal.key(name))
                 if (!f.exists()) return@filter true
                 val card = runCatching { Card.fromJson(JSONObject(f.readText())) }.getOrNull() ?: return@filter true
-                now - card.at > (if (card.empty) EMPTY_FRESH_MS else FRESH_MS) || card.lang != lang
+                val fresh = when {
+                    card.empty -> EMPTY_FRESH_MS
+                    !card.complete -> DAY_MS
+                    else -> FRESH_MS
+                }
+                now - card.at > fresh || card.lang != lang
             }.take(max)
             var done = 0
             for (name in due) {
