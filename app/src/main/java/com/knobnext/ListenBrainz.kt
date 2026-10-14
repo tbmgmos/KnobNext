@@ -180,7 +180,7 @@ object ListenBrainz {
             if (!prefs.lbScrobble || prefs.lbToken.isBlank()) return reset()
             val c = now?.controller ?: return pause()
             val meta = c.metadata ?: return pause()
-            val track = TrackInfo.trackOf(meta, c.packageName)
+            val track = TrackInfo.trackOf(meta, c.packageName) ?: return pause()
             val artist = track.artist?.takeIf { it.isNotBlank() } ?: return pause()
             val k = "${c.packageName}/$artist/${track.title}"
             if (k != key) {
