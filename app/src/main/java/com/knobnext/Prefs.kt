@@ -162,6 +162,11 @@ data class Settings(
     val devMode: Boolean,
     val baseOn: Boolean,
     val baseFilledAt: Long,
+    val lbKeyed: Boolean,
+    val lbScrobble: Boolean,
+    val lbUser: String,
+    val lbSent: Int,
+    val lbQueued: Int,
     val storyLast: String,
     val storyLastAt: Long,
     val cloudLast: String,
@@ -357,6 +362,30 @@ class Prefs(context: Context) {
     var discogsToken: String
         get() = sp.getString("discogs_token", null).orEmpty()
         set(v) = sp.edit().putString("discogs_token", v.trim()).apply()
+
+    /** The person's ListenBrainz token: their listens are written down with it. */
+    var lbToken: String
+        get() = sp.getString("lb_token", null).orEmpty()
+        set(v) = sp.edit().putString("lb_token", v.trim()).apply()
+
+    /** Whose the token is (for their statistics), learned when it was checked. */
+    var lbUser: String
+        get() = sp.getString("lb_user", null).orEmpty()
+        set(v) = sp.edit().putString("lb_user", v).apply()
+
+    /** Listens are written down to ListenBrainz (with a token). */
+    var lbScrobble: Boolean
+        get() = sp.getBoolean("lb_scrobble", true)
+        set(v) = sp.edit().putBoolean("lb_scrobble", v).apply()
+
+    /** How many listens were sent, and how many wait for the network. */
+    var lbSent: Int
+        get() = sp.getInt("lb_sent", 0)
+        set(v) = sp.edit().putInt("lb_sent", v).apply()
+
+    var lbQueued: Int
+        get() = sp.getInt("lb_queued", 0)
+        set(v) = sp.edit().putInt("lb_queued", v).apply()
 
     /** Groq answers with its web search (Compound), paid per search. */
     var groqSearch: Boolean
@@ -865,6 +894,11 @@ class Prefs(context: Context) {
         devMode = devMode,
         baseOn = baseOn,
         baseFilledAt = baseFilledAt,
+        lbKeyed = lbToken.isNotBlank(),
+        lbScrobble = lbScrobble,
+        lbUser = lbUser,
+        lbSent = lbSent,
+        lbQueued = lbQueued,
         storyLast = storyLast,
         storyLastAt = storyLastAt,
         cloudLast = cloudLast,

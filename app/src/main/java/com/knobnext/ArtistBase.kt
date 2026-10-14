@@ -203,14 +203,18 @@ object ArtistBase {
 
     // ---- Gathering ----
 
-    /** Who to gather: everyone in the history (the latest first), those put aside for later, their circle. */
-    fun wanted(context: Context): List<String> {
+    /**
+     * Who to gather: [first] (their most listened, by ListenBrainz), everyone in the history (the latest
+     * first), those put aside for later, their circle.
+     */
+    fun wanted(context: Context, first: List<String> = emptyList()): List<String> {
         val entries = Journal.entries(context)
         val names = LinkedHashMap<String, String>()
         fun add(name: String?) {
             val n = name?.trim()?.takeIf { it.isNotEmpty() } ?: return
             names.putIfAbsent(Journal.key(n), n)
         }
+        first.forEach { add(it) }
         entries.forEach { add(it.name) }
         Journal.later(context).forEach { add(it.artist) }
         entries.take(CIRCLE_OF).forEach { e -> e.links.take(LINKS_EACH).forEach { add(it) } }
@@ -303,7 +307,8 @@ object ArtistBase {
             val prefs = Prefs(context)
             val lang = prefs.infoLanguage.resolve()
             val now = System.currentTimeMillis()
-            val due = wanted(context).filter { name ->
+            val top = runCatching { ListenBrainz.topArtists(context) }.getOrDefault(emptyList())
+            val due = wanted(context, top).filter { name ->
                 val f = file(context, Journal.key(name))
                 if (!f.exists()) return@filter true
                 val card = runCatching { Card.fromJson(JSONObject(f.readText())) }.getOrNull() ?: return@filter true

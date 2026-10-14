@@ -129,6 +129,30 @@ class StoryLiveTest {
         }
     }
 
+    /** ListenBrainz: tracks as players write them, recognised; an album for a player that gives none. */
+    @Test
+    fun listenBrainz() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val context = RuntimeEnvironment.getApplication()
+        println("\n===== ListenBrainz: распознавание")
+        val asked = listOf(
+            "Nirvana" to "Smells Like Teen Spirit (Official Music Video)",
+            "Kino" to "Gruppa Krovi",
+            "Кино" to "Группа крови",
+            "blink-182" to "All The Small Things",
+            "Radiohead" to "Creep",
+            "Daft Punk" to "One More Time",
+            "Nobody Knows This Band 4711" to "Nonexistent Song 4711",
+        )
+        for ((artist, title) in asked) {
+            val m = ListenBrainz.lookup(context, artist, title)
+            println("$artist — $title → ${m?.let { "${it.artist} — ${it.title} [альбом: ${it.album}] recording ${it.recordingMbid}" } ?: "не узнан"}")
+        }
+        // As YouTube gives it: no album. The card should still have one.
+        val facts = TrackInfo.facts(context, TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", null, null), "ru")
+        println("без альбома от плеера → альбом ${facts?.album}, год ${facts?.year}")
+    }
+
     /** The artist base: what MusicBrainz, Discogs and Wikipedia give for a card, and the story using it. */
     @Test
     fun base() = runBlocking {

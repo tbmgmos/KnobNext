@@ -842,8 +842,23 @@ object TrackInfo {
      * Everything found about the track, fetched all at once and kept on the phone, with what the artist
      * base gathered ahead ([ArtistBase]): its facts alone when nothing could be fetched.
      */
-    suspend fun facts(context: Context, track: Track, lang: String): Facts? =
-        ArtistBase.enrich(context, track, lang, found(context, track, lang))
+    suspend fun facts(context: Context, track: Track, lang: String): Facts? {
+        // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is.
+        val match = if (track.album == null) {
+            withTimeoutOrNull(LOOKUP_WAIT_MS) { withContext(Dispatchers.IO) { runCatching { ListenBrainz.lookup(context, track.artist, track.title) }.getOrNull() } }
+        } else {
+            null
+        }
+        val known = if (match?.album != null) track.copy(album = match.album) else track
+        var found = found(context, known, lang)
+        // Nothing under the player's spelling ("Kino", a title with a channel's additions): under MusicBrainz's.
+        if ((found == null || found.empty) && match != null &&
+            (match.artist != track.artist || match.title != Speech.cleanTitle(track.title))
+        ) {
+            found = found(context, known.copy(title = match.title, artist = match.artist), lang) ?: found
+        }
+        return ArtistBase.enrich(context, known, lang, found)
+    }
 
     private suspend fun found(context: Context, track: Track, lang: String): Facts? {
         val file = File(dir(context), FACTS_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
@@ -1391,6 +1406,9 @@ object TrackInfo {
 
     /** The same, without the address: for a service that refuses the first (see [MusicSources.checkLastFm]). */
     val PLAIN_AGENT = "KnobNext/" + BuildConfig.VERSION_NAME
+
+    /** ListenBrainz is waited for this long to say which album a track is from. */
+    private const val LOOKUP_WAIT_MS = 4_000L
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts8-"

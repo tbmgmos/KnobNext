@@ -521,6 +521,36 @@ fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
     Hint(stringResource(R.string.base_now_hint))
 }
 
+/**
+ * ListenBrainz: the token, whether listens are written down, and how many went. Recognising tracks and
+ * the statistics need nothing more.
+ */
+@Composable
+fun ListenBrainzCard(s: com.knobnext.Settings, prefs: Prefs) {
+    val context = LocalContext.current
+    SectionTitle(stringResource(R.string.lb_title))
+    Hint(stringResource(R.string.lb_hint))
+    KeyField(
+        context, stringResource(R.string.lb_token), prefs.lbToken, { prefs.lbToken = it },
+        getUrl = "https://listenbrainz.org/settings/",
+        format = { null },
+        check = { com.knobnext.ListenBrainz.check(context, it) },
+        formatBlocks = false,
+    )
+    Group(1) {
+        SwitchRow(
+            shape(0), stringResource(R.string.lb_scrobble), s.lbScrobble, { prefs.lbScrobble = it },
+            subtitle = when {
+                !s.lbKeyed -> stringResource(R.string.lb_scrobble_nokey)
+                s.lbQueued > 0 -> stringResource(R.string.lb_status_queued, s.lbSent, s.lbQueued)
+                else -> stringResource(R.string.lb_status, s.lbSent)
+            },
+            enabled = s.lbKeyed,
+        )
+    }
+    if (s.lbUser.isNotBlank()) Hint(stringResource(R.string.lb_user, s.lbUser))
+}
+
 private fun dayAndTime(at: Long): String =
     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(Date(at))
 

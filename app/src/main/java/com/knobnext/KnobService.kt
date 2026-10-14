@@ -321,6 +321,7 @@ class KnobService : AccessibilityService() {
 
     // Follows every player: which one plays now, and new tracks to speak when that option is on.
     private var trackWatcher: NowPlayingTracker? = null
+    private val scrobbler by lazy { ListenBrainz.Scrobbler(this) }
     private var announcedTrack: String? = null
     private var trackPlayer: String? = null
 
@@ -1268,6 +1269,8 @@ class KnobService : AccessibilityService() {
     /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
     private fun onTrack(now: NowPlaying?) {
         headset.mirror(now?.controller)
+        // Written down to ListenBrainz when so set, whatever player it is.
+        scrobbler.onTrack(now)
         // Playing again, whichever way: the silence that kept the keys alive is no longer needed.
         if (now?.playing == true && silence.playing) stopSilence(R.string.log_silence_resumed)
         val pkg = now?.controller?.packageName

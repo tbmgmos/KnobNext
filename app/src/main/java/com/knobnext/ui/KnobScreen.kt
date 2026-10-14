@@ -1729,6 +1729,7 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
             if (s.storyLast.isNotBlank()) Hint(stringResource(R.string.info_last, s.storyLast, clock(s.storyLastAt)))
             SourceKeys(prefs)
             BaseCard(s, prefs)
+            ListenBrainzCard(s, prefs)
         }
     }
 }
