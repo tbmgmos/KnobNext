@@ -320,6 +320,9 @@
     <string name="src_formed">Группа образована в %1$s году.</string>
     <string name="src_style">Стиль — %1$s.</string>
     <string name="src_album_date">Альбом вышел %1$s.</string>
+    <string name="base_members">В разное время в группе играли: %1$s.</string>
+    <string name="base_labels">Пластинки выходили на лейблах: %1$s.</string>
+    <string name="base_since">с %1$s</string>
     <string name="src_label">Альбом выпущен на лейбле %1$s.</string>
     <string name="src_genres">Жанры: %1$s.</string>
     <string name="src_band_from">Родина группы — %1$s.</string>
@@ -967,4 +970,13 @@
     <string name="diag_fix_hint">Нажмите на строку с ошибкой — откроется место, где это исправить</string>
     <string name="tile_on_screen_off">Вкл · без экрана</string>
     <string name="tile_on_always">Вкл · подряд всегда</string>
+    <string name="base_title">Своя база исполнителей</string>
+    <string name="base_on">Собирать базу</string>
+    <string name="base_on_hint">Ночью, на Wi‑Fi и при зарядке телефон сам собирает сведения о тех, кого вы слушаете, и об их круге: даты всех альбомов, составы, лейблы, биографии (MusicBrainz, Discogs, Википедия). Рассказ начинается сразу, работает без сети, а облачная модель получает точные даты</string>
+    <string name="base_count">В базе: %1$d · собрано %2$s</string>
+    <string name="base_count_never">В базе пока никого: соберётся ночью или по кнопке</string>
+    <string name="base_running">Собираю: %1$d из %2$d — %3$s</string>
+    <string name="base_now">Собрать сейчас</string>
+    <string name="base_now_hint">Пока открыт KnobNext или работает его служба. Discogs без токена отвечает медленно: около 15 секунд на исполнителя</string>
+    <string name="keys_discogs">Токен Discogs (необязательно)</string>
 </resources>

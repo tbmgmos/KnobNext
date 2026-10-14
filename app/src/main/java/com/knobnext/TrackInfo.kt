@@ -264,7 +264,8 @@ object TrackInfo {
         lastSources = emptyList()
         if (source == InfoSource.CLOUD && CloudBrain.order(Prefs(context)).isNotEmpty()) {
             // The facts are its footing when they come quickly; the rest it looks up itself.
-            val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() }
+            // Slow to come: what the artist base has, at once.
+            val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() } ?: ArtistBase.enrich(context, track, lang, null)
             val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet)
             if (answer != null) {
                 found = quick
@@ -409,6 +410,11 @@ object TrackInfo {
         val who = artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
         val key = "${normalize(who)}\u0000${album?.let { normalize(Speech.cleanTitle(it)) }.orEmpty()}"
         referenceCache[key]?.let { return it }
+        // Gathered ahead: at once, and without the network. An album the base does not know is looked up.
+        ArtistBase.card(context, who)?.let { ArtistBase.dates(it, album) }?.takeIf { album == null || it.albumDate != null }?.let {
+            referenceCache[key] = it
+            return it
+        }
         val file = File(dir(context), DATES_PREFIX + sha1(key))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { Brainz.Dates.fromJson(JSONObject(file.readText())) }.getOrNull()?.let { referenceCache[key] = it; return it }
@@ -832,8 +838,14 @@ object TrackInfo {
 
     // ---- Facts ----
 
-    /** Everything found about the track, fetched all at once and kept on the phone. */
-    suspend fun facts(context: Context, track: Track, lang: String): Facts? {
+    /**
+     * Everything found about the track, fetched all at once and kept on the phone, with what the artist
+     * base gathered ahead ([ArtistBase]): its facts alone when nothing could be fetched.
+     */
+    suspend fun facts(context: Context, track: Track, lang: String): Facts? =
+        ArtistBase.enrich(context, track, lang, found(context, track, lang))
+
+    private suspend fun found(context: Context, track: Track, lang: String): Facts? {
         val file = File(dir(context), FACTS_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { cached ->

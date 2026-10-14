@@ -129,6 +129,35 @@ class StoryLiveTest {
         }
     }
 
+    /** The artist base: what MusicBrainz, Discogs and Wikipedia give for a card, and the story using it. */
+    @Test
+    fun base() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val context = RuntimeEnvironment.getApplication()
+        for (name in listOf("Nirvana", "Кино", "blink-182")) {
+            val started = System.currentTimeMillis()
+            val card = ArtistBase.build(context, name, "ru")
+            ArtistBase.keep(context, name, card)
+            println("\n===== База: $name (${(System.currentTimeMillis() - started) / 1000} с)")
+            println("MusicBrainz ${card.mbid}, Discogs ${card.discogsId}, Wikidata ${card.wikidata}; группа ${card.band}, ${card.began}–${card.ended.orEmpty()}")
+            println("состав: ${card.members.joinToString { it.name + (it.years?.let { y -> " ($y)" } ?: "") }}")
+            println("лейблы: ${card.labels}")
+            println("записей ${card.albums.size}, студийных ${card.albums.count { it.studio }}:")
+            card.albums.take(14).forEach { println("   ${it.date ?: "????"}  ${it.title}  [${it.kind ?: "Discogs"}${if (it.studio) ", студийный" else ""}]") }
+            println("Discogs о них: ${card.profile.take(2).joinToString(" ")}")
+            println("вступление: ${card.intro.firstOrNull()}")
+            println("фактов из Википедии: ${card.about.size}")
+        }
+        println("\n===== Справка из базы")
+        val d = TrackInfo.reference(context, "Nirvana", "Nevermind", null)
+        println("Nevermind: ${d?.albumDate}; альбомы: ${d?.albums?.joinToString { "${it.first} (${it.second})" }}")
+        val k = TrackInfo.reference(context, "Кино", "Группа крови", null)
+        println("Группа крови: ${k?.albumDate}")
+        val facts = TrackInfo.facts(context, TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", "Nevermind", null), "ru")
+        println("из базы в фактах: ${facts?.artist?.takeLast(2)?.joinToString(" | ") { t -> "[${t.lang}] " + t.facts.take(2).joinToString(" ") }}")
+        assertTrue("карточка Nirvana пуста", ArtistBase.card(context, "Nirvana") != null)
+    }
+
     /** The cloud models the CI has keys for (GEMINI_API_KEY, GROQ_API_KEY): a story and a question each. */
     @Test
     fun cloud() = runBlocking {

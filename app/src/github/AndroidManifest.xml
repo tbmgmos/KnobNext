@@ -17,5 +17,11 @@
             android:name="com.knobnext.UpdateJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- The artist base, gathered at night on Wi-Fi while charging (needs the network, so here). -->
+        <service
+            android:name="com.knobnext.BaseJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

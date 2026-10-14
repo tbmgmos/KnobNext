@@ -222,6 +222,8 @@ object Journal {
         file(context).delete()
         seenFile(context).delete()
         covers(context).deleteRecursively()
+        // Gathered from the history: it goes with it.
+        ArtistBase.clear(context)
         Prefs(context).journalVersion++
     }
 

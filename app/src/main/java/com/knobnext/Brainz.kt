@@ -406,6 +406,66 @@ object Brainz {
         )
     }
 
+    /** A member of a band, with the years they were in it. */
+    class Member(val name: String, val began: String?, val ended: String?, val roles: List<String>)
+
+    /** One of the artist's records: its kind ("Album", "EP", "Single"), and what else it is ("Live", "Compilation"). */
+    class Group(val title: String, val date: String?, val kind: String?, val also: List<String>) {
+        val studio get() = kind == "Album" && also.isEmpty()
+    }
+
+    /** What the artist base keeps from MusicBrainz: the artist, the band's members, every record. */
+    class ArtistInfo(
+        val id: String,
+        val name: String,
+        val band: Boolean,
+        val began: String?,
+        val ended: String?,
+        val area: String?,
+        val discogs: String?,
+        val members: List<Member>,
+        val groups: List<Group>,
+    )
+
+    /** [artist] (by [mbid] when known) as the artist base keeps them: a few requests, a second apart. */
+    suspend fun artistInfo(artist: String, mbid: String?): ArtistInfo? {
+        val id = mbid ?: artistId(Speech.cleanArtist(artist)) ?: return null
+        val a = get("$API/artist/$id?inc=url-rels+artist-rels&fmt=json") ?: return null
+        val rels = a.optJSONArray("relations")?.let { r -> (0 until r.length()).mapNotNull { r.optJSONObject(it) } }.orEmpty()
+        val members = rels.filter { it.optString("type") == "member of band" && it.optString("direction") == "backward" }
+            .mapNotNull { r -> name(r, "artist")?.let { Member(it, year(r, "begin"), year(r, "end"), attributes(r)) } }
+            .distinctBy { it.name }
+        val discogs = rels.filter { it.optString("type") == "discogs" }
+            .firstNotNullOfOrNull { it.optJSONObject("url")?.optString("resource")?.takeIf { u -> u.isNotBlank() } }
+        val groups = ArrayList<Group>()
+        for (page in 0 until MAX_GROUP_PAGES) {
+            val o = get("$API/release-group?artist=$id&type=album%7Cep&limit=$WORK_PAGE&offset=${page * WORK_PAGE}&fmt=json") ?: break
+            val list = o.optJSONArray("release-groups") ?: break
+            (0 until list.length()).mapNotNull { list.optJSONObject(it) }.forEach { g ->
+                val also = g.optJSONArray("secondary-types")?.let { s -> (0 until s.length()).map { s.optString(it) } }.orEmpty()
+                groups += Group(
+                    g.optString("title"),
+                    g.optString("first-release-date").takeIf { it.length >= 4 && it.take(4).all(Char::isDigit) },
+                    g.optString("primary-type").takeIf { it.isNotBlank() && it != "null" },
+                    also,
+                )
+            }
+            if (groups.size >= o.optInt("release-group-count")) break
+        }
+        val span = a.optJSONObject("life-span")
+        return ArtistInfo(
+            id = id,
+            name = a.optString("name"),
+            band = a.optString("type") == "Group",
+            began = span?.let { year(it, "begin") },
+            ended = span?.let { year(it, "end") },
+            area = (a.optJSONObject("begin-area") ?: a.optJSONObject("area"))?.optString("name")?.takeIf { it.isNotBlank() },
+            discogs = discogs,
+            members = members,
+            groups = groups.filter { it.title.isNotBlank() }.sortedBy { it.date ?: "9999" },
+        )
+    }
+
     private suspend fun releaseGroupDate(artist: String, album: String): Pair<String, String>? {
         val q = "releasegroup:\"${clean(album)}\" AND artist:\"${clean(Speech.cleanArtist(artist))}\""
         val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: return null
@@ -476,6 +536,7 @@ object Brainz {
     /** A song's recordings, a page at a time: enough pages for the earliest to be among them. */
     private const val WORK_PAGE = 100
     private const val MAX_WORK_PAGES = 3
+    private const val MAX_GROUP_PAGES = 3
 
     /** Versions of a recording looked at for its credits: a request each. */
     private const val LOOKED_AT = 3

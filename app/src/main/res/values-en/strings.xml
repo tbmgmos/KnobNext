@@ -71,4 +71,7 @@
         <item quantity="one">Deezer lists %1$d album by the artist.</item>
         <item quantity="other">Deezer lists %1$d albums by the artist.</item>
     </plurals>
+    <string name="base_members">Over the years the band included %1$s.</string>
+    <string name="base_labels">Their records came out on %1$s.</string>
+    <string name="base_since">since %1$s</string>
 </resources>

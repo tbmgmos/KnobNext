@@ -43,10 +43,12 @@ class MainActivity : ComponentActivity() {
             openAutostart = Setup.autostartIntents().takeIf { it.isNotEmpty() }?.let { intents -> { openFirst(intents) } },
         )
         UpdateJob.sync(this)
+        ArtistBase.sync(this)
         askForNotifications(prefs)
         var shouldRun = ScreenOffService.shouldRun(this)
         stopObserving = prefs.observe {
             UpdateJob.sync(this)
+            ArtistBase.sync(this)
             val now = ScreenOffService.shouldRun(this)
             if (now != shouldRun) {
                 shouldRun = now

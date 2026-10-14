@@ -160,6 +160,8 @@ data class Settings(
     val cloudFallback: Boolean,
     val groqSearch: Boolean,
     val devMode: Boolean,
+    val baseOn: Boolean,
+    val baseFilledAt: Long,
     val storyLast: String,
     val storyLastAt: Long,
     val cloudLast: String,
@@ -340,6 +342,21 @@ class Prefs(context: Context) {
             if (!v && infoSource == InfoSource.CLOUD) e.putString("info_source", InfoSource.GEMINI.name)
             e.apply()
         }
+
+    /** The phone's own base of artists, gathered at night ([ArtistBase]). */
+    var baseOn: Boolean
+        get() = sp.getBoolean("base_on", true)
+        set(v) = sp.edit().putBoolean("base_on", v).apply()
+
+    /** When the base was last gathered. */
+    var baseFilledAt: Long
+        get() = sp.getLong("base_filled_at", 0L)
+        set(v) = sp.edit().putLong("base_filled_at", v).apply()
+
+    /** The person's Discogs token: optional, for Discogs' search and quicker gathering. */
+    var discogsToken: String
+        get() = sp.getString("discogs_token", null).orEmpty()
+        set(v) = sp.edit().putString("discogs_token", v.trim()).apply()
 
     /** Groq answers with its web search (Compound), paid per search. */
     var groqSearch: Boolean
@@ -846,6 +863,8 @@ class Prefs(context: Context) {
         cloudFallback = cloudFallback,
         groqSearch = groqSearch,
         devMode = devMode,
+        baseOn = baseOn,
+        baseFilledAt = baseFilledAt,
         storyLast = storyLast,
         storyLastAt = storyLastAt,
         cloudLast = cloudLast,

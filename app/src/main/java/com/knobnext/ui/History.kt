@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -483,7 +484,45 @@ fun SourceKeys(prefs: Prefs) {
         },
         check = { com.knobnext.MusicSources.checkLastFm(context, it) },
     )
+    KeyField(
+        context, stringResource(R.string.keys_discogs), prefs.discogsToken, { prefs.discogsToken = it },
+        getUrl = "https://www.discogs.com/settings/developers",
+        format = { null },
+        check = { com.knobnext.Discogs.check(it) },
+        formatBlocks = false,
+    )
 }
+
+/**
+ * The phone's own base of artists: on or off, how many it knows and since when, and "gather now" (with
+ * how far it got while it runs).
+ */
+@Composable
+fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
+    val context = LocalContext.current
+    val progress by com.knobnext.ArtistBase.progress.collectAsState()
+    // Counted again when a gathering ends.
+    val count = remember(progress.running, s.baseFilledAt, s.baseOn) { com.knobnext.ArtistBase.count(context) }
+    SectionTitle(stringResource(R.string.base_title))
+    Group(2) {
+        SwitchRow(shape(0), stringResource(R.string.base_on), s.baseOn, { prefs.baseOn = it }, subtitle = stringResource(R.string.base_on_hint))
+        ListRow(
+            shape(1),
+            stringResource(R.string.base_now),
+            subtitle = when {
+                progress.running -> stringResource(R.string.base_running, progress.done + 1, progress.total, progress.current.orEmpty())
+                count > 0 && s.baseFilledAt > 0 -> stringResource(R.string.base_count, count, day(s.baseFilledAt))
+                else -> stringResource(R.string.base_count_never)
+            },
+            enabled = s.baseOn && !progress.running,
+            onClick = { com.knobnext.ArtistBase.fillNow(context) },
+        )
+    }
+    Hint(stringResource(R.string.base_now_hint))
+}
+
+private fun day(at: Long): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(Date(at))
 
 /**
  * The cloud model: which service, its key (checked at once), and the model if not its usual one. Gemini

@@ -12,6 +12,8 @@ on:
       - 'app/src/main/java/com/knobnext/Wikidata.kt'
       - 'app/src/main/java/com/knobnext/Brainz.kt'
       - 'app/src/main/java/com/knobnext/Journal.kt'
+      - 'app/src/main/java/com/knobnext/ArtistBase.kt'
+      - 'app/src/main/java/com/knobnext/Discogs.kt'
       - 'app/src/main/res/values/strings.xml'
       - 'app/src/test/**'
       - 'app/build.gradle.kts'
