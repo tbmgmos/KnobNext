@@ -1202,7 +1202,7 @@ object TrackInfo {
     }
 
     private fun albumSearch(query: String): Pair<String?, String?>? {
-        val json = getJson("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"))
+        val json = brainzSpaced("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"))
             ?: return null
         val found = json.optJSONArray("recordings") ?: return null
         val recordings = (0 until found.length()).mapNotNull { found.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE }
@@ -1214,9 +1214,25 @@ object TrackInfo {
         fun kind(r: JSONObject) = r.optJSONObject("release-group")?.optString("primary-type")
         fun plain(r: JSONObject) = (r.optJSONObject("release-group")?.optJSONArray("secondary-types")?.length() ?: 0) == 0
         // The earliest official studio album; else an EP or a single.
-        val album = (releases.filter { kind(it) == "Album" && plain(it) }.ifEmpty { releases.filter { kind(it) == "EP" || kind(it) == "Single" } })
-            .minByOrNull { it.optString("date").ifBlank { "9999" } }?.optString("title")
-        return album to year
+        val first = (releases.filter { kind(it) == "Album" && plain(it) }.ifEmpty { releases.filter { kind(it) == "EP" || kind(it) == "Single" } })
+            .minByOrNull { it.optString("date").ifBlank { "9999" } }
+        // The year it came out on that album: a remaster's recording says 2011 for Nevermind.
+        val released = first?.optString("date")?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+        return first?.optString("title") to (released ?: year)
+    }
+
+    /** MusicBrainz allows a request a second: these searches keep to it (two can follow one another). */
+    private val brainzLock = Any()
+    private var brainzLast = 0L
+
+    private fun brainzSpaced(url: String): JSONObject? = synchronized(brainzLock) {
+        val wait = brainzLast + BRAINZ_SPACING_MS - System.currentTimeMillis()
+        if (wait > 0) Thread.sleep(wait)
+        try {
+            getJson(url)
+        } finally {
+            brainzLast = System.currentTimeMillis()
+        }
     }
 
     internal fun getJson(url: String, userAgent: String = USER_AGENT): JSONObject? = runCatching {
@@ -1427,6 +1443,7 @@ object TrackInfo {
     val PLAIN_AGENT = "KnobNext/" + BuildConfig.VERSION_NAME
 
     private const val ALBUM_SEARCH_LIMIT = 25
+    private const val BRAINZ_SPACING_MS = 1_100L
 
     /** A live bootleg named by its date and place. */
     private val DATED_BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
