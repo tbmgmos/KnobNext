@@ -147,6 +147,7 @@ class StoryLiveTest {
         for ((artist, title) in asked) {
             val m = ListenBrainz.lookup(context, artist, title)
             println("$artist — $title → ${m?.let { "${it.artist} — ${it.title} [альбом: ${it.album}] recording ${it.recordingMbid}" } ?: "не узнан"}")
+            if (m == null) println("   ответ: ${ListenBrainz.lastReply}")
         }
         // As YouTube gives it: no album. The card should still have one.
         val facts = TrackInfo.facts(context, TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", null, null), "ru")

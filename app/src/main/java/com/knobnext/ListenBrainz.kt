@@ -263,8 +263,13 @@ object ListenBrainz {
             conn.setRequestProperty("User-Agent", TrackInfo.USER_AGENT)
             conn.setRequestProperty("Accept", "application/json")
             if (token.isNotBlank()) conn.setRequestProperty("Authorization", "Token ${token.trim()}")
-            when (conn.responseCode) {
-                HttpURLConnection.HTTP_OK -> JSONObject(conn.inputStream.bufferedReader().use { it.readText() }.ifBlank { "{}" })
+            val code = conn.responseCode
+            if (code != HttpURLConnection.HTTP_OK) {
+                lastReply = "HTTP $code: " + conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty().take(MAX_REPLY_CHARS)
+            }
+            when (code) {
+                HttpURLConnection.HTTP_OK -> conn.inputStream.bufferedReader().use { it.readText() }.ifBlank { "{}" }
+                    .also { lastReply = "HTTP 200: " + it.take(MAX_REPLY_CHARS) }.let(::JSONObject)
                 // Asked and answered "nothing like it": an empty answer, not a failure.
                 HttpURLConnection.HTTP_NO_CONTENT, HttpURLConnection.HTTP_NOT_FOUND -> JSONObject()
                 else -> null
@@ -273,6 +278,9 @@ object ListenBrainz {
             conn.disconnect()
         }
     }.getOrNull()
+
+    /** What ListenBrainz last said, short: for the log and the checks. */
+    @Volatile var lastReply: String? = null
 
     private fun dir(context: Context) = File(context.filesDir, "listenbrainz").apply { mkdirs() }
 
@@ -316,4 +324,5 @@ object ListenBrainz {
     private const val MAX_NEEDED_MS = 4L * 60 * 1000
     private const val CHECK_SLACK_MS = 1_000L
     private const val TOP_ARTISTS = 50
+    private const val MAX_REPLY_CHARS = 300
 }
