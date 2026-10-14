@@ -225,7 +225,9 @@ object ArtistBase {
     suspend fun build(context: Context, name: String, lang: String): Card {
         val token = Prefs(context).discogsToken
         val facts = runCatching { TrackInfo.aboutArtist(context, name, lang) }.getOrNull()
+        // MusicBrainz turns away a burst of requests ("busy"): once more, a few seconds later.
         val mb = runCatching { Brainz.artistInfo(name, facts?.mbid) }.getOrNull()
+            ?: run { kotlinx.coroutines.delay(BUSY_RETRY_MS); runCatching { Brainz.artistInfo(name, facts?.mbid) }.getOrNull() }
         val discogsId = Discogs.idOf(mb?.discogs)
             ?: facts?.artistId?.let { runCatching { discogsOfWikidata(it) }.getOrNull() }
             ?: runCatching { Discogs.search(name, token) }.getOrNull()
@@ -277,7 +279,7 @@ object ArtistBase {
             about = about.take(MAX_ABOUT),
             related = facts?.related.orEmpty(),
             relatedIds = facts?.relatedIds.orEmpty(),
-            complete = facts != null && mb != null && (discogsId == null || dArtist != null),
+            complete = facts != null && mb != null && mb.groups.isNotEmpty() && (discogsId == null || dArtist != null),
         )
     }
 
@@ -397,6 +399,7 @@ object ArtistBase {
     private const val MAX_MEMBERS_SAID = 6
     private const val MAX_LABELS = 4
     private const val MAX_ALBUMS = 200
+    private const val BUSY_RETRY_MS = 3_000L
     private val BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
     private const val MAX_STUDIO = 20
     private const val MAX_ABOUT = 30

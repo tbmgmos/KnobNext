@@ -411,7 +411,9 @@ object TrackInfo {
         val key = "${normalize(who)}\u0000${album?.let { normalize(Speech.cleanTitle(it)) }.orEmpty()}"
         referenceCache[key]?.let { return it }
         // Gathered ahead: at once, and without the network. An album the base does not know is looked up.
-        ArtistBase.card(context, who)?.let { ArtistBase.dates(it, album) }?.takeIf { album == null || it.albumDate != null }?.let {
+        // A card MusicBrainz did not answer for has no studio albums to give: then MusicBrainz is asked now.
+        ArtistBase.card(context, who)?.takeIf { it.complete || it.albums.any { a -> a.studio } }
+            ?.let { ArtistBase.dates(it, album) }?.takeIf { album == null || it.albumDate != null }?.let {
             referenceCache[key] = it
             return it
         }
