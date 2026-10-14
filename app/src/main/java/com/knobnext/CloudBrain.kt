@@ -30,7 +30,7 @@ enum class CloudService(
 ) {
     GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-flash-latest", "https://aistudio.google.com/apikey", true, listOf("AIza")),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1", "openrouter/auto", "https://openrouter.ai/keys", false, listOf("sk-or-")),
-    GROQ("Groq", "https://api.groq.com/openai/v1", "moonshotai/kimi-k2-instruct", "https://console.groq.com/keys", false, listOf("gsk_")),
+    GROQ("Groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", "https://console.groq.com/keys", false, listOf("gsk_")),
     DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/api_keys", false, listOf("sk-")),
     OPENAI("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "https://platform.openai.com/api-keys", false, listOf("sk-")),
 }
@@ -68,8 +68,32 @@ object CloudBrain {
         return all.filter { prefs.cloudKey(it).isNotBlank() }
     }
 
-    /** [prompt] to the cloud model; [system]: who it is and how to answer. Null when no service could answer. */
+    /**
+     * [prompt] to the cloud model; [system]: who it is and how to answer. Null when no service could answer.
+     * The same question asked twice at once (the spoken story and the round card's, for one track) is asked
+     * once: free plans count tokens by the minute, and a second request would only use them up.
+     */
     fun ask(prefs: Prefs, system: String, prompt: String, maxTokens: Int = MAX_TOKENS): Answer? {
+        val key = "${order(prefs).joinToString { it.name }}:${system.hashCode()}:${prompt.hashCode()}:${prompt.length}:$maxTokens"
+        val lock = synchronized(asking) {
+            if (asking.size > MAX_REMEMBERED) asking.clear()
+            asking.getOrPut(key) { Any() }
+        }
+        synchronized(lock) {
+            synchronized(answered) { answered[key] }?.takeIf { System.currentTimeMillis() - it.first < SAME_ANSWER_MS }?.let { return it.second }
+            val answer = askNow(prefs, system, prompt, maxTokens) ?: return null
+            synchronized(answered) {
+                if (answered.size > MAX_REMEMBERED) answered.clear()
+                answered[key] = System.currentTimeMillis() to answer
+            }
+            return answer
+        }
+    }
+
+    private val asking = HashMap<String, Any>()
+    private val answered = HashMap<String, Pair<Long, Answer>>()
+
+    private fun askNow(prefs: Prefs, system: String, prompt: String, maxTokens: Int): Answer? {
         val services = order(prefs)
         if (services.isEmpty()) return null.also { lastError = "нет ключа" }
         val why = ArrayList<String>()
@@ -252,19 +276,27 @@ object CloudBrain {
                     .put(JSONObject().put("role", "user").put("content", prompt)),
             )
             // Thinking models (gpt-oss, DeepSeek R1, o-series) spend part of it thinking: room for the answer too.
-            .put("max_tokens", maxOf(maxTokens, CHAT_MIN_TOKENS))
+            // Groq counts what may be written against its tokens per minute (8000 for gpt-oss-120b, free): less there.
+            .put("max_tokens", maxOf(maxTokens, if (service == CloudService.GROQ) GROQ_MIN_TOKENS else CHAT_MIN_TOKENS))
             .put("temperature", TEMPERATURE)
+        // gpt-oss on Groq: brief thinking is enough for a few sentences, and quicker (the voice is waiting).
+        if (service == CloudService.GROQ && "gpt-oss" in model) body.put("reasoning_effort", "low")
         val headers = mutableMapOf("Authorization" to "Bearer $key")
         // OpenRouter asks apps to say who they are.
         if (service == CloudService.OPENROUTER) {
             headers["HTTP-Referer"] = "https://github.com/tbmgmos/KnobNext"
             headers["X-Title"] = "KnobNext"
         }
-        val r = post("${service.base}/chat/completions", headers, body)
+        var r = post("${service.base}/chat/completions", headers, body)
+        // Should the service no longer take the thinking setting, the same request without it.
+        if (r.code == 400 && body.has("reasoning_effort") && "reasoning" in r.said.lowercase()) {
+            body.remove("reasoning_effort")
+            r = post("${service.base}/chat/completions", headers, body)
+        }
         val message = r.json?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
         val text = message?.optString("content")?.trim()
             ?.takeIf { it.isNotEmpty() } ?: return fail(r, model).also {
-            if (r.code == HTTP_QUOTA) lastError = "у ключа ${service.title} закончился лимит или нет оплаты"
+            if (r.code == HTTP_QUOTA || r.code == HTTP_TOO_LARGE) lastError = limitSaid(service, r.code, r.said)
         }
         // Groq Compound tells what its search found: the pages, as Gemini's are.
         val sources = message?.optJSONArray("executed_tools")?.let { tools ->
@@ -276,6 +308,18 @@ object CloudBrain {
         }.orEmpty().distinctBy { it.url }
         used(service, model, if (model == GROQ_SEARCH_MODEL) true else null)
         return Answer(text, sources)
+    }
+
+    /** Which limit ran out, said plainly: by the minute it comes back by itself, by the day only tomorrow. */
+    private fun limitSaid(service: CloudService, code: Int, said: String): String {
+        val words = said.lowercase()
+        val quoted = said.takeIf { it.isNotBlank() }?.let { " — «${it.take(MAX_QUOTE_CHARS)}»" }.orEmpty()
+        return when {
+            code == HTTP_TOO_LARGE -> "запрос больше поминутного лимита ${service.title}$quoted"
+            "per minute" in words -> "поминутный лимит ${service.title} исчерпан — через минуту снова заработает$quoted"
+            "per day" in words -> "дневной лимит ${service.title} исчерпан — заработает завтра$quoted"
+            else -> "у ключа ${service.title} закончился лимит или нет оплаты$quoted"
+        }
     }
 
     /**
@@ -302,8 +346,9 @@ object CloudBrain {
 
     /**
      * Groq: Compound (its models with a web search, paid per search) when switched on; else the model in
-     * the settings; else the one that knows most of what it serves (Kimi K2, then Llama 3.3 70B, then
-     * gpt-oss), the one that answered last first.
+     * the settings; else the one that knows most of what it serves (gpt-oss-120b, then Kimi K2, Qwen 3,
+     * Llama), the one that answered last first. Each model has its own limits by the minute: one out of
+     * them, retired or refusing gives way to the next. Only a key refused stops it.
      */
     private fun groq(prefs: Prefs, key: String, system: String, prompt: String, maxTokens: Int): Answer? {
         val service = CloudService.GROQ
@@ -311,29 +356,39 @@ object CloudBrain {
         val named = prefs.cloudModel(service)
         if (named.isNotBlank()) {
             chat(service, key, named, system, prompt, maxTokens)?.let { return it }
-            if (lastCode != 400 && lastCode != 404) return null
+            if (lastCode in KEY_REFUSED) return null
         }
         val tries = LinkedHashSet<String>()
         prefs.cloudWorking(service)?.first?.takeIf { named.isBlank() }?.let { tries += it }
         tries += groqModels(key).take(MAX_FREE_TRIED)
-        if (tries.isEmpty()) tries += service.defaultModel
+        tries += service.defaultModel
+        tries -= named
+        // Kept, so that the card says why the first one failed rather than the last.
+        var first: Pair<String?, String?>? = null
         for (m in tries) {
             chat(service, key, m, system, prompt, maxTokens)?.let {
                 prefs.setCloudWorking(service, m, false)
                 return it
             }
+            if (first == null) first = lastError to lastDetail
+            if (lastCode in KEY_REFUSED) break
         }
+        first?.let { (e, d) -> lastError = e; lastDetail = d }
         return null
     }
 
-    /** Groq's chat models, the ones that know the world best first. */
+    /** Groq's chat models, the ones that know the world best first (the list kept for an hour). */
     private fun groqModels(key: String): List<String> {
+        groqList?.takeIf { it.first == key.hashCode() && System.currentTimeMillis() - it.second < MODELS_KEPT_MS }?.let { return it.third }
         val list = get("${CloudService.GROQ.base}/models", mapOf("Authorization" to "Bearer $key")).json?.optJSONArray("data") ?: return emptyList()
         return (0 until list.length()).mapNotNull { list.optJSONObject(it)?.optString("id") }
             .filter { id -> NOT_CHAT.none { it in id.lowercase() } && GROQ_NOT_CHAT.none { it in id.lowercase() } }
             .filter { id -> GROQ_PREFERRED.any { it in id } }
             .sortedBy { id -> GROQ_PREFERRED.indexOfFirst { it in id } }
+            .also { groqList = Triple(key.hashCode(), System.currentTimeMillis(), it) }
     }
+
+    @Volatile private var groqList: Triple<Int, Long, List<String>>? = null
 
     /** OpenRouter's free text models, the better-known families first. */
     private fun freeModels(key: String): List<String> {
@@ -415,9 +470,16 @@ object CloudBrain {
     private const val MAX_ERROR_CHARS = 200
     private const val HTTP_QUOTA = 429
     private const val HTTP_NO_MONEY = 402
+    private const val HTTP_TOO_LARGE = 413
+    private val KEY_REFUSED = setOf(401, 403)
+
+    /** An answer to the same question within this long is the same answer. */
+    private const val SAME_ANSWER_MS = 60_000L
+    private const val MAX_REMEMBERED = 50
+    private const val MODELS_KEPT_MS = 60L * 60 * 1000
 
     /** Answers worth trying another way: no quota, no such model, a feature not offered (the search). */
-    private val RETRYABLE = setOf(HTTP_QUOTA, HTTP_NO_MONEY, EMPTY, 404, 400, 500, 502, 503, 504)
+    private val RETRYABLE = setOf(HTTP_QUOTA, HTTP_NO_MONEY, HTTP_TOO_LARGE, EMPTY, 404, 400, 500, 502, 503, 504)
 
     /** Answered, but with no text (all of it spent thinking, or stopped by a filter). */
     private const val EMPTY = -1
@@ -429,6 +491,7 @@ object CloudBrain {
      */
     private const val GEMINI_MIN_TOKENS = 4_096
     private const val CHAT_MIN_TOKENS = 2_048
+    private const val GROQ_MIN_TOKENS = 1_536
 
     /** The service is busy or briefly down: worth one more try a little later. */
     private val BUSY = setOf(500, 502, 503, 504)
@@ -439,7 +502,8 @@ object CloudBrain {
 
     /** Groq's models with a web search (one search per answer: quick, the cheapest). */
     private const val GROQ_SEARCH_MODEL = "groq/compound-mini"
-    private val GROQ_PREFERRED = listOf("kimi-k2", "llama-3.3-70b", "gpt-oss-120b", "qwen3", "llama-4", "gpt-oss-20b")
+    // Kimi K2 and Llama 3.3 70B were retired from Groq in 2026; should they (or newer ones) return, they are taken.
+    private val GROQ_PREFERRED = listOf("gpt-oss-120b", "kimi-k2", "qwen3", "llama-4-maverick", "llama-3.3-70b", "llama-4", "gpt-oss-20b")
     private val GROQ_NOT_CHAT = listOf("compound", "orpheus", "playai", "distil")
     private const val MAX_QUOTE_CHARS = 120
 

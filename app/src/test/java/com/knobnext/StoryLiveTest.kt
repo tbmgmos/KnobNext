@@ -129,23 +129,30 @@ class StoryLiveTest {
         }
     }
 
-    /** The cloud model, when the CI has a key for it (GEMINI_API_KEY): a story and a question. */
+    /** The cloud models the CI has keys for (GEMINI_API_KEY, GROQ_API_KEY): a story and a question each. */
     @Test
     fun cloud() = runBlocking {
-        val key = System.getenv("GEMINI_API_KEY").orEmpty()
-        assumeTrue(System.getenv("LIVE_STORIES") == "1" && key.isNotBlank())
+        val keys = mapOf(CloudService.GEMINI to "GEMINI_API_KEY", CloudService.GROQ to "GROQ_API_KEY")
+            .mapValues { System.getenv(it.value).orEmpty() }.filterValues { it.isNotBlank() }
+        assumeTrue(System.getenv("LIVE_STORIES") == "1" && keys.isNotEmpty())
         val context = RuntimeEnvironment.getApplication()
         val prefs = Prefs(context)
         prefs.devMode = true
-        prefs.cloudService = CloudService.GEMINI
-        prefs.setCloudKey(CloudService.GEMINI, key)
-        println("\n===== Облако: ключ ${CloudBrain.check(CloudService.GEMINI, key).javaClass.simpleName}")
-        val track = TrackInfo.Track("The Man Who Sold the World", "Nirvana", "MTV Unplugged in New York", null)
-        val story = TrackInfo.story(context, track, InfoLength.NORMAL, "ru", InfoSource.CLOUD) { println("   · $it") }
-        println("рассказ: $story")
-        println("источники: ${TrackInfo.lastSources.joinToString { it.title }}")
-        val next = TrackInfo.ask(context, track, null, TrackInfo.Question.NEXT, "ru", null)
-        println("что дальше: ${next?.text ?: CloudBrain.lastError}")
+        // Each service on its own: no switching to another, so that its own answer (or failure) shows.
+        prefs.cloudFallback = false
+        for ((service, key) in keys) {
+            prefs.cloudService = service
+            prefs.setCloudKey(service, key)
+            println("\n===== Облако ${service.title}: ключ ${CloudBrain.check(service, key).javaClass.simpleName}")
+            val track = TrackInfo.Track("The Man Who Sold the World", "Nirvana", "MTV Unplugged in New York", null)
+            val story = TrackInfo.story(context, track, InfoLength.NORMAL, "ru", InfoSource.CLOUD) { println("   · $it") }
+            println("рассказ: $story")
+            println("ответила: ${CloudBrain.lastUsed}; ошибка: ${CloudBrain.lastError} ${CloudBrain.lastDetail.orEmpty()}")
+            println("источники: ${TrackInfo.lastSources.joinToString { it.title }}")
+            val next = TrackInfo.ask(context, track, null, TrackInfo.Question.NEXT, "ru", null)
+            println("что дальше: ${next?.text ?: CloudBrain.lastError}")
+            prefs.setCloudKey(service, "")
+        }
     }
 
     /** The round card's "about the recording": who plays, who produced, samples, covers. */

@@ -365,7 +365,7 @@
     <string name="cloud_no_search">Эта модель отвечает из своих знаний и фактов из открытых источников, без поиска в интернете</string>
     <string name="cloud_key">Ключ %1$s</string>
     <string name="cloud_model">Модель</string>
-    <string name="cloud_model_hint_groq">Лучше оставить пустым: возьмётся модель Groq, которая лучше знает музыку (Kimi K2, иначе Llama 3.3 70B, иначе gpt-oss)</string>
+    <string name="cloud_model_hint_groq">Лучше оставить пустым: возьмётся модель Groq, которая лучше знает музыку (gpt-oss-120b; не ответит — Qwen 3 или Llama)</string>
     <string name="groq_search">С поиском в интернете (Groq Compound)</string>
     <string name="groq_search_hint">Groq сам ищет в интернете и показывает источники — точнее с датами и свежими релизами. Платно: около $5 за 1000 поисков сверх бесплатного лимита. Не ответит — возьмётся обычная модель</string>
     <string name="cloud_key_prefix">Ключи %1$s обычно начинаются с «%2$s» — проверьте, что скопирован нужный ключ и целиком. Всё равно проверяю…</string>
