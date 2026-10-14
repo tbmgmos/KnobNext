@@ -226,7 +226,9 @@ object ArtistBase {
 
         // MusicBrainz's records first (it knows what each is and the exact day); Discogs adds what it lacks.
         val albums = ArrayList<Album>()
-        mb?.groups?.forEach { g -> albums += Album(g.title, g.date, g.kind, g.studio) }
+        // Not the bootlegs named by their date and place ("1990-05-13: Duffy's Tavern, Lincoln, NE"): they
+        // would crowd out the records themselves.
+        mb?.groups?.filterNot { BOOTLEG.containsMatchIn(it.title) }?.forEach { g -> albums += Album(g.title, g.date, g.kind, g.studio) }
         val known = albums.map { norm(it.title) }.toMutableSet()
         dRecords.filter { it.master && it.year != null }.forEach { r ->
             val n = norm(r.title)
@@ -379,7 +381,8 @@ object ArtistBase {
     private const val MAX_MEMBERS = 15
     private const val MAX_MEMBERS_SAID = 6
     private const val MAX_LABELS = 4
-    private const val MAX_ALBUMS = 80
+    private const val MAX_ALBUMS = 200
+    private val BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
     private const val MAX_STUDIO = 20
     private const val MAX_ABOUT = 30
 }
