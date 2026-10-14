@@ -1216,9 +1216,13 @@ object TrackInfo {
         // The earliest official studio album; else an EP or a single.
         val first = (releases.filter { kind(it) == "Album" && plain(it) }.ifEmpty { releases.filter { kind(it) == "EP" || kind(it) == "Single" } })
             .minByOrNull { it.optString("date").ifBlank { "9999" } }
-        // The year it came out on that album: a remaster's recording says 2011 for Nevermind.
-        val released = first?.optString("date")?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
-        return first?.optString("title") to (released ?: year)
+        // The year the album first came out: its release group's. The releases found are often reissues
+        // (Nevermind's 2011 remaster), and a recording's own date is the remaster's.
+        val released = first?.optJSONObject("release-group")?.optString("id")?.takeIf { it.isNotBlank() }?.let { id ->
+            brainzSpaced("https://musicbrainz.org/ws/2/release-group/$id?fmt=json")?.optString("first-release-date")
+                ?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+        }
+        return first?.optString("title") to (released ?: year.takeIf { first == null })
     }
 
     /** MusicBrainz allows a request a second: these searches keep to it (two can follow one another). */
