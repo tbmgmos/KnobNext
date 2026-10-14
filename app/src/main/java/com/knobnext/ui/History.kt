@@ -511,7 +511,7 @@ fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
             stringResource(R.string.base_now),
             subtitle = when {
                 progress.running -> stringResource(R.string.base_running, progress.done + 1, progress.total, progress.current.orEmpty())
-                count > 0 && s.baseFilledAt > 0 -> stringResource(R.string.base_count, count, day(s.baseFilledAt))
+                count > 0 && s.baseFilledAt > 0 -> stringResource(R.string.base_count, count, dayAndTime(s.baseFilledAt))
                 else -> stringResource(R.string.base_count_never)
             },
             enabled = s.baseOn && !progress.running,
@@ -521,7 +521,7 @@ fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
     Hint(stringResource(R.string.base_now_hint))
 }
 
-private fun day(at: Long): String =
+private fun dayAndTime(at: Long): String =
     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(Date(at))
 
 /**
