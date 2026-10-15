@@ -427,12 +427,16 @@ object Brainz {
         val discogs: String?,
         val members: List<Member>,
         val groups: List<Group>,
+        /** Genres as MusicBrainz's listeners voted them, the most voted first ("grunge", "alternative rock"). */
+        val genres: List<String> = emptyList(),
     )
 
     /** [artist] (by [mbid] when known) as the artist base keeps them: a few requests, a second apart. */
     suspend fun artistInfo(artist: String, mbid: String?): ArtistInfo? {
         val id = mbid ?: artistId(Speech.cleanArtist(artist)) ?: return null
-        val a = get("$API/artist/$id?inc=url-rels+artist-rels&fmt=json") ?: return null
+        val a = get("$API/artist/$id?inc=url-rels+artist-rels+genres&fmt=json") ?: return null
+        val genres = a.optJSONArray("genres")?.let { g -> (0 until g.length()).mapNotNull { g.optJSONObject(it) } }.orEmpty()
+            .sortedByDescending { it.optInt("count") }.map { it.optString("name") }.filter { it.isNotBlank() }.take(MAX_GENRES)
         val rels = a.optJSONArray("relations")?.let { r -> (0 until r.length()).mapNotNull { r.optJSONObject(it) } }.orEmpty()
         val members = rels.filter { it.optString("type") == "member of band" && it.optString("direction") == "backward" }
             .mapNotNull { r -> name(r, "artist")?.let { Member(it, year(r, "begin"), year(r, "end"), attributes(r)) } }
@@ -465,6 +469,7 @@ object Brainz {
             discogs = discogs,
             members = members,
             groups = groups.filter { it.title.isNotBlank() }.sortedBy { it.date ?: "9999" },
+            genres = genres,
         )
     }
 
@@ -548,6 +553,7 @@ object Brainz {
     private const val WORK_PAGE = 100
     private const val MAX_WORK_PAGES = 3
     private const val MAX_GROUP_PAGES = 3
+    private const val MAX_GENRES = 3
 
     /** Versions of a recording looked at for its credits: a request each. */
     private const val LOOKED_AT = 3

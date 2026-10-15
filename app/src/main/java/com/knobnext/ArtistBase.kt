@@ -54,6 +54,8 @@ object ArtistBase {
         val about: List<String>,
         val related: List<String>,
         val relatedIds: List<String>,
+        /** Their genres, in English as MusicBrainz names them. */
+        val genres: List<String> = emptyList(),
         /** Every source answered: one that did not (MusicBrainz busy, say) is asked again the next night. */
         val complete: Boolean = true,
     ) {
@@ -69,6 +71,7 @@ object ArtistBase {
             .put("intro", JSONArray(intro)).put("about", JSONArray(about))
             .put("related", JSONArray(related)).put("relatedIds", JSONArray(relatedIds))
             .put("complete", complete)
+            .put("genres", JSONArray(genres))
 
         companion object {
             fun fromJson(o: JSONObject): Card {
@@ -95,6 +98,7 @@ object ArtistBase {
                     related = strings("related"),
                     relatedIds = strings("relatedIds"),
                     complete = o.optBoolean("complete", true),
+                    genres = strings("genres"),
                 )
             }
         }
@@ -287,6 +291,7 @@ object ArtistBase {
             about = about.take(MAX_ABOUT),
             related = facts?.related.orEmpty(),
             relatedIds = facts?.relatedIds.orEmpty(),
+            genres = mb?.genres.orEmpty(),
             complete = facts != null && mb != null && mb.groups.isNotEmpty() && (discogsId == null || dArtist != null),
         )
     }
@@ -358,8 +363,10 @@ object ArtistBase {
         val f = file(app, key)
         if (f.exists()) {
             val card = runCatching { Card.fromJson(JSONObject(f.readText())) }.getOrNull()
+            // A card from before genres were kept is gathered again for them.
+            val old = card != null && !card.empty && card.genres.isEmpty() && card.mbid != null
             val fresh = if (card == null || card.empty) EMPTY_FRESH_MS else DAY_MS
-            if (card != null && System.currentTimeMillis() - card.at < fresh) return null
+            if (card != null && !old && System.currentTimeMillis() - card.at < fresh) return null
         }
         return synchronized(building) {
             building[key]?.takeIf { it.isActive } ?: scope.async {

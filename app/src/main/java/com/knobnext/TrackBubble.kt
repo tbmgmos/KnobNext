@@ -90,6 +90,47 @@ class TrackBubble(
     private var subView: TextView? = null
     private var askJob: Job? = null
 
+    private var activeView: TextView? = null
+    private var lineJob: Job? = null
+
+    /**
+     * "Grunge, alternative rock · 1987–1994" under the track's name: the genres and years from the artist
+     * base (gathered now when the artist has no card yet, or one from before genres were kept), the years
+     * from the dates meanwhile.
+     */
+    private fun loadArtistLine(t: TrackInfo.Track) {
+        val artist = t.artist?.takeIf { it.isNotBlank() } ?: return
+        lineJob?.cancel()
+        lineJob = scope.launch {
+            val lang = prefs.infoLanguage.resolve()
+            var card = withContext(Dispatchers.IO) { ArtistBase.card(service, artist) }
+            card?.let { showArtistLine(t, it.genres, it.began, it.ended, lang) }
+            if (card != null && card.genres.isNotEmpty()) return@launch
+            if (card == null) {
+                val dates = withContext(Dispatchers.IO) { runCatching { TrackInfo.reference(service, artist, null, null) }.getOrNull() }
+                if (dates != null) showArtistLine(t, emptyList(), dates.began, dates.ended, lang)
+            }
+            card = ArtistBase.buildSoon(service, artist, lang)?.await() ?: return@launch
+            showArtistLine(t, card.genres, card.began, card.ended, lang)
+        }
+    }
+
+    private suspend fun showArtistLine(t: TrackInfo.Track, genres: List<String>, began: String?, ended: String?, lang: String) {
+        // MusicBrainz names genres in English: in the story's language when the phone can translate them.
+        val named = genres.takeIf { it.isNotEmpty() }?.let { Translate.sentences(it, "en", lang) ?: it }.orEmpty()
+        val years = when {
+            began != null && ended != null -> if (began == ended) began else service.getString(R.string.bubble_years, began, ended)
+            began != null -> service.getString(R.string.bubble_years_since, began)
+            else -> null
+        }
+        val line = listOfNotNull(named.joinToString(", ").ifBlank { null }, years).joinToString(" · ")
+        if (line.isBlank() || !same(t) || path.isNotEmpty()) return
+        activeView?.apply {
+            text = line.replaceFirstChar { it.uppercase() }
+            visibility = View.VISIBLE
+        }
+    }
+
     /** The facts are on the card while the cloud model still tells the story. */
     private var refining = false
 
@@ -243,6 +284,7 @@ class TrackBubble(
         // A question asked on the card before belongs to it: its answer must not land on this one.
         askJob?.cancel()
         shownCard++
+        lineJob?.cancel()
         watch(null)
         root?.let { runCatching { windows.removeView(it) } }
         root = null
@@ -284,6 +326,7 @@ class TrackBubble(
         // A question asked on the card before belongs to it: its answer must not land on this one.
         askJob?.cancel()
         shownCard++
+        lineJob?.cancel()
         path.clear()
         reasons.clear()
         trailAt = 0L
@@ -338,6 +381,11 @@ class TrackBubble(
         val sub = text(subtitle(t, trackFacts), 13f, MUTED, lines = 2)
         subView = sub
         names.addView(sub)
+        // Genres and years of activity, as soon as they are known.
+        val active = text("", 12f, palette.accent, lines = 2).apply { visibility = View.GONE }
+        activeView = active
+        names.addView(active)
+        loadArtistLine(t)
         news?.let { names.addView(text(service.getString(newsLabel(it)), 12f, palette.accent, bold = true)) }
         noteSection(box)
         askSection(box, TRACK_QUESTIONS)

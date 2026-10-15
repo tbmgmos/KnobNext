@@ -973,4 +973,6 @@
     <string name="sum_pocket_short">карман по кнопке питания</string>
     <string name="bubble_refining">Это первые факты — облачная модель ещё рассказывает…</string>
     <string name="bubble_fact_sources">Сведения: %1$s</string>
+    <string name="bubble_years">%1$s–%2$s</string>
+    <string name="bubble_years_since">с %1$s</string>
 </resources>

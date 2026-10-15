@@ -174,6 +174,7 @@ class StoryLiveTest {
             println("MusicBrainz ${card.mbid}, Discogs ${card.discogsId}, Wikidata ${card.wikidata}; группа ${card.band}, ${card.began}–${card.ended.orEmpty()}")
             println("состав: ${card.members.joinToString { it.name + (it.years?.let { y -> " ($y)" } ?: "") }}")
             println("лейблы: ${card.labels}")
+            println("жанры: ${card.genres}")
             println("записей ${card.albums.size}, студийных ${card.albums.count { it.studio }}:")
             card.albums.take(14).forEach { println("   ${it.date ?: "????"}  ${it.title}  [${it.kind ?: "Discogs"}${if (it.studio) ", студийный" else ""}]") }
             println("Discogs о них: ${card.profile.take(2).joinToString(" ")}")
