@@ -156,7 +156,7 @@ class TrackBubble(
 
     private suspend fun showArtistLine(t: TrackInfo.Track, genres: List<String>, began: String?, ended: String?, lang: String) {
         // MusicBrainz names genres in English: in the story's language when the phone can translate them.
-        val named = genres.takeIf { it.isNotEmpty() }?.let { Translate.sentences(it, "en", lang) ?: it }.orEmpty()
+        val named = genres.takeIf { it.isNotEmpty() }?.let { g -> Translate.known(g, "en", lang) ?: g.also { Translate.later(g, "en", lang) } }.orEmpty()
         val years = when {
             began != null && ended != null -> if (began == ended) began else service.getString(R.string.bubble_years, began, ended)
             began != null -> service.getString(R.string.bubble_years_since, began)

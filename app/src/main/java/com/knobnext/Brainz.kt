@@ -546,6 +546,8 @@ object Brainz {
      * those go first.
      */
     internal suspend fun get(url: String, urgent: Boolean = false): JSONObject? {
+        // Asked ahead for a track not playing yet: behind whatever the playing one needs.
+        val urgent = urgent && kotlin.coroutines.coroutineContext[Quiet]?.on != true
         if (urgent) urgentWaiting.incrementAndGet()
         try {
             if (!urgent) while (urgentWaiting.get() > 0) delay(YIELD_MS)
@@ -564,6 +566,15 @@ object Brainz {
     }
 
     private val urgentWaiting = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Work for a track that is not playing yet (the next in the queue): its requests wait behind the
+     * playing track's. [on] goes off when someone starts waiting for that very work.
+     */
+    class Quiet : kotlin.coroutines.AbstractCoroutineContextElement(Quiet) {
+        @Volatile var on = true
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<Quiet>
+    }
     private const val YIELD_MS = 200L
 
 

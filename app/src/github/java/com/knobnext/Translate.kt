@@ -5,6 +5,10 @@ import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -19,29 +23,51 @@ object Translate {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > MAX_KEPT
     })
 
-    /** [sentences] from [from] into [to], or null when it cannot be done now (no model yet, an error). */
-    suspend fun sentences(sentences: List<String>, from: String, to: String): List<String>? {
+    /** [sentences] already translated from [from] into [to] (this run of the app), or null. Never waits. */
+    fun known(sentences: List<String>, from: String, to: String): List<String>? {
         if (from == to) return sentences
-        val source = TranslateLanguage.fromLanguageTag(from) ?: return null
-        val target = TranslateLanguage.fromLanguageTag(to) ?: return null
+        return sentences.map { done["$from>$to:$it"] ?: return null }
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val asked = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * [sentences] translated in the background, for [known] to give next time: a story never waits for
+     * the translation (it used to wait for the model on every telling, seconds each, without Wi-Fi forever).
+     * Without the language pair's model, it is fetched on Wi-Fi, once.
+     */
+    fun later(sentences: List<String>, from: String, to: String) {
+        if (from == to || known(sentences, from, to) != null) return
+        val job = "$from>$to:${sentences.hashCode()}"
+        if (!asked.add(job)) return
+        scope.launch {
+            try {
+                translate(sentences, from, to)
+            } finally {
+                asked.remove(job)
+            }
+        }
+    }
+
+    private suspend fun translate(sentences: List<String>, from: String, to: String) {
+        val source = TranslateLanguage.fromLanguageTag(from) ?: return
+        val target = TranslateLanguage.fromLanguageTag(to) ?: return
         // Not available at all (no Google Play services, a test): left as it is.
         val translator = runCatching {
             Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(source).setTargetLanguage(target).build())
-        }.getOrNull() ?: return null
-        return try {
-            // The model: there already, or fetched now on Wi-Fi; not waited for long (the next story has it).
+        }.getOrNull() ?: return
+        try {
+            // The model: there already, or fetched on Wi-Fi (waited for here, in the background only).
             val ready = withTimeoutOrNull(MODEL_WAIT_MS) {
                 translator.downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build()).outcome().isSuccess
             } == true
-            if (!ready) return null
-            withTimeoutOrNull(TRANSLATE_WAIT_MS) {
-                sentences.map { s ->
-                    val key = "$from>$to:$s"
-                    done[key] ?: translator.translate(s).outcome().getOrNull()?.also { done[key] = it } ?: s
-                }
+            if (!ready) return
+            for (s in sentences) {
+                val key = "$from>$to:$s"
+                if (done[key] == null) translator.translate(s).outcome().getOrNull()?.let { done[key] = it }
             }
         } catch (_: Exception) {
-            null
         } finally {
             translator.close()
         }
@@ -54,7 +80,7 @@ object Translate {
         addOnCanceledListener { if (cont.isActive) cont.resume(Result.failure(IllegalStateException("cancelled"))) }
     }
 
-    private const val MODEL_WAIT_MS = 3_000L
-    private const val TRANSLATE_WAIT_MS = 6_000L
+    /** A model being downloaded on Wi-Fi is waited for this long in the background. */
+    private const val MODEL_WAIT_MS = 120_000L
     private const val MAX_KEPT = 1_000
 }

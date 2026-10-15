@@ -1355,7 +1355,7 @@ class KnobService : AccessibilityService() {
         if (prefs.bubbleAuto == BubbleAuto.OFF) {
             c.metadata?.let { TrackInfo.trackOf(it, c.packageName) }?.let { TrackInfo.prefetch(this, it, lang) }
         }
-        nextInQueue(c)?.let { TrackInfo.prefetch(this, it, lang) }
+        nextInQueue(c)?.let { TrackInfo.prefetch(this, it, lang, later = true) }
     }
 
     /** The track after this one in the player's queue, when the player shows its queue. */

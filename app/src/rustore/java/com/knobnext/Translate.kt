@@ -5,6 +5,8 @@ package com.knobnext
  * (some 28 MB) is left out of it. Facts in another language stay as they are.
  */
 object Translate {
+    fun known(sentences: List<String>, from: String, to: String): List<String>? = if (from == to) sentences else null
+
     @Suppress("UNUSED_PARAMETER")
-    suspend fun sentences(sentences: List<String>, from: String, to: String): List<String>? = if (from == to) sentences else null
+    fun later(sentences: List<String>, from: String, to: String) = Unit
 }

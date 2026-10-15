@@ -379,9 +379,12 @@ object TrackInfo {
         return lines.joinToString(" ").takeIf { it.isNotBlank() }
     }
 
-    /** The track's facts fetched ahead, on a track change: the card then opens with them at hand. */
-    fun prefetch(context: Context, track: Track, lang: String) {
-        background.launch { runCatching { facts(context, track, lang) } }
+    /**
+     * The track's facts fetched ahead, on a track change: the card then opens with them at hand. [later]:
+     * a track not playing yet, whose MusicBrainz requests wait behind the playing one's.
+     */
+    fun prefetch(context: Context, track: Track, lang: String, later: Boolean = false) {
+        background.launch(if (later) Brainz.Quiet() else kotlin.coroutines.EmptyCoroutineContext) { runCatching { facts(context, track, lang) } }
     }
 
     private const val PREVIEW_FACTS = 2
@@ -916,17 +919,21 @@ object TrackInfo {
         attachBrainz(context)
         // The story, the card and the "news" mark ask about the same track at once: it is fetched once.
         val key = "${track.artist}\u0000${track.title}\u0000${track.album}\u0000$lang"
+        val quiet = kotlin.coroutines.coroutineContext[Brainz.Quiet]?.takeIf { it.on }
         val running = synchronized(fetching) {
-            fetching[key]?.takeIf { it.isActive } ?: background.async { translated(factsNow(context, track, lang), lang) }.also { fetching[key] = it }
+            fetching[key]?.takeIf { it.isActive }?.also { if (quiet == null) quietOf.remove(key)?.on = false }
+                ?: background.async(quiet ?: kotlin.coroutines.EmptyCoroutineContext) { translated(factsNow(context, track, lang), lang) }
+                    .also { fetching[key] = it; if (quiet != null) quietOf[key] = quiet else quietOf.remove(key) }
         }
         return try {
             running.await()
         } finally {
-            synchronized(fetching) { if (fetching[key] === running && !running.isActive) fetching.remove(key) }
+            synchronized(fetching) { if (fetching[key] === running && !running.isActive) { fetching.remove(key); quietOf.remove(key) } }
         }
     }
 
     private val fetching = HashMap<String, kotlinx.coroutines.Deferred<Facts?>>()
+    private val quietOf = HashMap<String, Brainz.Quiet>()
 
     private suspend fun factsNow(context: Context, track: Track, lang: String): Facts? {
         // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is.
@@ -954,16 +961,18 @@ object TrackInfo {
 
     /**
      * Facts in another language than the story's (Last.fm's and Discogs' biographies, an English article)
-     * translated on the phone, so that a story without a model and the card can use them too. Left as they
-     * are when that cannot be done (no translation model yet).
+     * translated on the phone, so that a story without a model and the card can use them too. Never
+     * waited for: what is not translated yet is left as it is now and translated in the background, for
+     * the next time.
      */
-    private suspend fun translated(facts: Facts?, lang: String): Facts? {
+    private fun translated(facts: Facts?, lang: String): Facts? {
         facts ?: return null
         val all = facts.song + facts.artist + facts.albumText
         if (all.all { it.lang == lang }) return facts
-        suspend fun tr(list: List<Text>) = list.map { t ->
+        fun tr(list: List<Text>) = list.map { t ->
+            val part = t.facts.take(MAX_TRANSLATED)
             if (t.lang == lang) t
-            else Translate.sentences(t.facts.take(MAX_TRANSLATED), t.lang, lang)?.let { Text(it, lang, t.source) } ?: t
+            else Translate.known(part, t.lang, lang)?.let { Text(it, lang, t.source) } ?: t.also { Translate.later(part, t.lang, lang) }
         }
         return facts.withTexts(tr(facts.song), tr(facts.artist), tr(facts.albumText))
     }
@@ -1133,7 +1142,7 @@ object TrackInfo {
      * not stop when cancelled, so a plain timeout would wait it out anyway: this one leaves it to finish.
      */
     private suspend fun <T> within(ms: Long, block: suspend () -> T?): T? {
-        val running = background.async { runCatching { block() }.getOrNull() }
+        val running = background.async(kotlin.coroutines.coroutineContext[Brainz.Quiet] ?: kotlin.coroutines.EmptyCoroutineContext) { runCatching { block() }.getOrNull() }
         return withTimeoutOrNull(ms) { running.await() }
     }
     private val deepening = java.util.Collections.synchronizedSet(HashSet<String>())
