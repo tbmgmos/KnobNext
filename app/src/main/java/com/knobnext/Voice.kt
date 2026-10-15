@@ -61,6 +61,8 @@ object CommandRules {
         if (has("что играет", "что за песн", "что за трек", "что это", "какой трек", "какая песня", "кто поет", "what's playing", "what is playing")) {
             return Command.Run(Action.ANNOUNCE)
         }
+        // "Не нравится", "dislike": not a like (they contain the word), but "not this one": the next track.
+        if (has("не нравится", "не нравиться", "не люблю", "dislike", "don't like", "do not like")) return Command.Run(Action.NEXT)
         if (has("лайк", "нравится", "в избранное", "сохрани трек", "like")) return Command.Run(Action.LIKE)
         if (has("перемеша", "вперемешку", "шафл", "случайн", "shuffle")) return Command.Run(Action.SHUFFLE)
         if (has("повтор", "repeat")) return Command.Run(Action.REPEAT)

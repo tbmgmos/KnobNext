@@ -259,8 +259,9 @@ object TrackInfo {
             if (!wasUnknown) return spoken
             return localized(context, lang).getString(R.string.info_found_now, Speech.cleanArtist(track.artist!!)) + " " + spoken
         }
-        // The facts are fetched while Gemini thinks, not after it: when it refuses, they are already here.
-        val factsAhead = async { runCatching { facts(context, track, lang) }.getOrNull() }
+        // The facts are fetched while the model thinks, not after it: when it refuses, they are already here.
+        // Apart from the story: an answer from the model does not wait for them, and they are still kept.
+        val factsAhead = background.async { runCatching { facts(context, track, lang) }.getOrNull() }
         lastSources = emptyList()
         if (source == InfoSource.CLOUD && CloudBrain.order(Prefs(context)).isNotEmpty()) {
             // The facts are its footing when they come quickly; the rest it looks up itself.
@@ -277,7 +278,6 @@ object TrackInfo {
         }
         if (source == InfoSource.GEMINI) {
             fromGemini(track, length, lang, history.told(), firstMeet)?.let {
-                factsAhead.cancel()
                 return@coroutineScope ready(it, "Gemini Nano")
             }
             note(context.getString(R.string.log_info_gemini_failed, NanoBrain.lastError ?: "-"))
@@ -321,7 +321,7 @@ object TrackInfo {
     ): CloudBrain.Answer? {
         val prefs = Prefs(context)
         // The dates it is not to guess, as far as there is time for them (the voice is waiting).
-        val dates = withTimeoutOrNull(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
+        val dates = within(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
         val prompt = buildString {
             appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year)
             reference(dates, track, facts, lang)
@@ -330,17 +330,26 @@ object TrackInfo {
             appendTold(told, lang)
         }
         // The voice is waiting after the opening line: the cloud gets a few seconds, then the story is told
-        // from the facts. The request is left to finish on its own (the next telling may find it working).
-        val asked = background.async {
+        // from the facts. A late answer is not lost: the next telling about this track takes it.
+        val key = "${track.artist}\u0000${track.title}\u0000$lang"
+        val late = lateAnswers.remove(key)?.takeIf { System.currentTimeMillis() - it.first < LATE_ANSWER_MS }?.second
+        val asked = late ?: background.async {
             CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS)
         }
         val answer = withTimeoutOrNull(CLOUD_STORY_WAIT_MS) { asked.await() } ?: return null.also {
-            if (asked.isActive) CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с"
+            if (asked.isActive) {
+                lateAnswers[key] = System.currentTimeMillis() to asked
+                CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с — ответ возьмётся в следующий раз"
+            }
         }
         val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
         val text = clean(checked.text, length, lang) ?: return null
         return CloudBrain.Answer(text, checked.sources)
     }
+
+    /** Cloud answers that came too late for their telling, by track: the next telling takes them. */
+    private val lateAnswers = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, kotlinx.coroutines.Deferred<CloudBrain.Answer?>>>()
+    private const val LATE_ANSWER_MS = 30L * 60 * 1000
 
     /** What the round card can ask the cloud model about the track or an artist down the circle. */
     enum class Question { SONG, MAKING, START, ROOTS, NEXT, WHO }
@@ -353,7 +362,7 @@ object TrackInfo {
         val ru = lang == "ru"
         val who = artist ?: track?.artist?.let(Speech::cleanArtist) ?: return null
         val album = if (artist == null) facts?.album ?: track?.album else null
-        val dates = withTimeoutOrNull(ASK_DATES_WAIT_MS) { reference(context, who, album, facts?.mbid) }
+        val dates = within(ASK_DATES_WAIT_MS) { reference(context, who, album, facts?.mbid) }
         val prompt = buildString {
             if (artist == null && track != null) appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year) else appendLine("Artist: $who")
             reference(dates, track.takeIf { artist == null }, facts, lang)
@@ -523,7 +532,7 @@ object TrackInfo {
             appendLine(shape(length, track.album, lang, firstMeet, topic = null))
             appendTold(told, lang)
         }
-        val answer = withTimeoutOrNull(MODEL_TIMEOUT_MS) {
+        val answer = within(MODEL_TIMEOUT_MS) {
             nano.complete(prompt, length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS, creative = true)
         } ?: return null
         return clean(answer, length, lang)
@@ -544,8 +553,26 @@ object TrackInfo {
         keep: (Plan) -> Unit,
     ): String? {
         if (onlyBackground && brain == null) return null
-        // The same choice as without a model: the introduction, then one subject's untold facts.
-        val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL).also(keep)
+        // The same choice as without a model: the introduction, then one subject's untold facts. Moved on
+        // only when the model really tells them: else the plain story takes the same facts.
+        val rotation = Rotation(context)
+        val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL, rotation = rotation)
+        val said = retold(context, track, facts, length, lang, told, brain, firstMeet, plan)
+        if (said == null) rotation.undo() else keep(plan)
+        return said
+    }
+
+    private suspend fun retold(
+        context: Context,
+        track: Track,
+        facts: Facts,
+        length: InfoLength,
+        lang: String,
+        told: List<String>,
+        brain: Brain?,
+        firstMeet: Boolean,
+        plan: Plan,
+    ): String? {
         if (plan.intro.isEmpty() && plan.facts.isEmpty()) return null
         // Everything told: the model would only make something up. The plain story says so.
         if (plan.exhausted) return null
@@ -581,7 +608,8 @@ object TrackInfo {
             }
         }
         val tokens = length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS
-        val answer = withTimeoutOrNull(MODEL_TIMEOUT_MS) {
+        // A model on the phone does not stop when asked: it is waited for this long, and left to finish.
+        val answer = within(MODEL_TIMEOUT_MS) {
             if (brain != null) brain.complete(prompt, tokens, creative = true) else Brains.ask(context, prompt, tokens, creative = true)?.second
         } ?: return null
         return clean(answer, length, lang)
@@ -663,8 +691,8 @@ object TrackInfo {
         lang: String?,
         firstMeet: Boolean,
         perFact: Int,
+        rotation: Rotation = Rotation(context),
     ): Plan {
-        val rotation = Rotation(context)
         val intro = if (firstMeet) facts.intro.take(INTRO_SENTENCES) else emptyList()
         fun clean(list: List<String>) = brief(list).filter { standsAlone(it) }
         val artist = artistFacts(facts, lang)
@@ -846,11 +874,7 @@ object TrackInfo {
      */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
         // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is.
-        val match = if (track.album == null) {
-            withTimeoutOrNull(LOOKUP_WAIT_MS) { withContext(Dispatchers.IO) { runCatching { ListenBrainz.lookup(context, track.artist, track.title) }.getOrNull() } }
-        } else {
-            null
-        }
+        val match = if (track.album == null) within(LOOKUP_WAIT_MS) { ListenBrainz.lookup(context, track.artist, track.title) } else null
         val known = if (match?.album != null) track.copy(album = match.album) else track
         var found = found(context, known, lang)
         // Nothing under the player's spelling ("Kino", a title with a channel's additions): under MusicBrainz's.
@@ -876,8 +900,9 @@ object TrackInfo {
                     val title = Speech.cleanTitle(track.title)
                     val artist = track.artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() }
                     // Each source has its own time: a slow one (a VPN, a busy server) is left out, and what the
-                    // others found is still told. One shared limit used to throw everything away.
-                    suspend fun <T> timed(block: suspend () -> T?): T? = withTimeoutOrNull(SOURCE_TIMEOUT_MS) { runCatching { block() }.getOrNull() }
+                    // others found is still told. One shared limit used to throw everything away. A request
+                    // does not stop when cancelled: it is left to finish on its own, not waited for.
+                    suspend fun <T> timed(block: suspend () -> T?): T? = within(SOURCE_TIMEOUT_MS, block)
                     val more = async { timed { MusicSources.gather(context, title, artist, track.album, lang) } }
                     val song = async { timed { findArticle(lang) { l -> findSong(l, title, artist) } } }
                     val about = async { artist?.let { a -> timed { findArticle(lang) { l -> findArtist(l, a) } } } }
@@ -889,10 +914,10 @@ object TrackInfo {
                     }
                     // Wikidata, for the very items behind the articles found.
                     val data = async {
-                        runCatching {
-                            val songArticle = song.await()
-                            val albumArticle = albumText.await()
-                            val artistArticle = about.await()
+                        val songArticle = song.await()
+                        val albumArticle = albumText.await()
+                        val artistArticle = about.await()
+                        timed {
                             Wikidata.gather(
                                 context, lang, songArticle?.page, albumArticle?.page, artistArticle?.page,
                                 // From when the articles are here, not from the start: a slow article
@@ -902,7 +927,7 @@ object TrackInfo {
                                     .mapNotNull { it.text?.facts?.joinToString(" ") }.joinToString(" ").let(::speakable),
                                 albumKnown = track.album != null,
                             )
-                        }.getOrNull()
+                        }
                     }
                     val b = brainz.await()
                     val m = more.await()
@@ -937,7 +962,7 @@ object TrackInfo {
             val old = if (file.exists()) runCatching { readFacts(JSONObject(file.readText())) }.getOrNull() else null
             if (old != null || fetched == null) return old
             // Nothing quick at all: a small artist may still be in MusicBrainz, worth the wait.
-            return withTimeoutOrNull(DEEP_WAIT_MS) { deepen(context, track, lang, file, fetched) }?.takeIf { !it.empty } ?: fetched
+            return within(DEEP_WAIT_MS) { deepen(context, track, lang, file, fetched) }?.takeIf { !it.empty } ?: fetched
         }
         runCatching { file.writeText(writeFacts(fetched).toString()) }
         trimCache(context)
@@ -957,14 +982,14 @@ object TrackInfo {
         }
         val found = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
-                val article = withTimeoutOrNull(SOURCE_TIMEOUT_MS) { runCatching { findArticle(lang) { l -> findArtist(l, artist) } }.getOrNull() }
-                val d = runCatching {
+                val article = within(SOURCE_TIMEOUT_MS) { findArticle(lang) { l -> findArtist(l, artist) } }
+                val d = within(SOURCE_TIMEOUT_MS) {
                     Wikidata.gather(
                         context, lang, null, null, article?.page,
                         deadline = System.currentTimeMillis() + WIKIDATA_DEADLINE_MS,
                         said = article?.text?.facts?.joinToString(" ")?.let(::speakable).orEmpty(),
                     )
-                }.getOrNull()
+                }
                 Facts(
                     song = emptyList(),
                     artist = listOfNotNull(article?.text, d?.artist),
@@ -1020,6 +1045,15 @@ object TrackInfo {
     // ---- MusicBrainz, in the background ----
 
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * [block] in the background, waited for at most [ms]. A network request or a model on the phone does
+     * not stop when cancelled, so a plain timeout would wait it out anyway: this one leaves it to finish.
+     */
+    private suspend fun <T> within(ms: Long, block: suspend () -> T?): T? {
+        val running = background.async { runCatching { block() }.getOrNull() }
+        return withTimeoutOrNull(ms) { running.await() }
+    }
     private val deepening = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /** MusicBrainz's facts join the cached ones for the next telling (it allows a request a second). */
@@ -1262,6 +1296,22 @@ object TrackInfo {
     private class Rotation(context: Context) {
         private val sp = context.getSharedPreferences("trackinfo_rotation", Context.MODE_PRIVATE)
 
+        /** The counters as they were before this telling moved them, for [undo]. */
+        private val before = HashMap<String, Int>()
+
+        private fun moving(k: String) {
+            if (k !in before) before[k] = sp.getInt(k, 0)
+        }
+
+        /** The telling did not happen (the model gave nothing): its facts were not told after all. */
+        fun undo() {
+            if (before.isEmpty()) return
+            val e = sp.edit()
+            before.forEach { (k, v) -> e.putInt(k, v) }
+            e.apply()
+            before.clear()
+        }
+
         /** How many of [size] facts under [key] have not been told yet. */
         fun left(key: String, size: Int): Int = (size - sp.getInt(sha1(key), 0)).coerceAtLeast(0)
 
@@ -1269,6 +1319,7 @@ object TrackInfo {
         fun bump(key: String): Int {
             val k = sha1(key)
             val v = sp.getInt(k, 0)
+            moving(k)
             sp.edit().putInt(k, v + 1).apply()
             return v
         }
@@ -1283,6 +1334,7 @@ object TrackInfo {
             // The first sentence usually just says what the thing is; start after it, come back to it last.
             val start = (sp.getInt(k, 0) + 1) % facts.size
             val taken = (0 until minOf(n, facts.size)).map { facts[(start + it) % facts.size] }
+            moving(k)
             sp.edit().putInt(k, sp.getInt(k, 0) + taken.size).apply()
             return taken
         }
@@ -1393,7 +1445,11 @@ object TrackInfo {
 
     private const val SEARCH_RESULTS = 2
     private const val REQUEST_TIMEOUT_MS = 6_000
-    private const val FETCH_TIMEOUT_MS = 25_000L
+    /**
+     * A safety net only: every source has its own [SOURCE_TIMEOUT_MS], and the longest chain (MusicBrainz's
+     * album, its article, then Wikidata) is three of them. Past this everything found would be lost.
+     */
+    private const val FETCH_TIMEOUT_MS = 35_000L
 
     /** One source (an article, a database) is waited for this long; the others are not held up. */
     private const val SOURCE_TIMEOUT_MS = 10_000L

@@ -271,8 +271,12 @@ class HeadsetButtons(
         val code = event.keyCode
         // A call has its own use of the headset button.
         if (media.isInCall()) return false
-        // KnobNext sent this key itself (no player to ask): it must not become a gesture again.
-        if (Media.justSent(code)) return true
+        // KnobNext sent this key itself (the sleep timer's pause, a flip): it must not become a gesture
+        // again, and it still has to reach the player, or the pause would end here.
+        if (Media.justSent(code)) {
+            passThrough(event)
+            return true
+        }
         val down = event.action == KeyEvent.ACTION_DOWN
         // Who sent the key: Quick Tap's come from the system's interface, the headphones' through Bluetooth.
         val sender = if (android.os.Build.VERSION.SDK_INT >= 28) runCatching { session?.currentControllerInfo?.packageName }.getOrNull() else null

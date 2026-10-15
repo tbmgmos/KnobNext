@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
@@ -215,9 +216,11 @@ class Extras(private val context: Context, private val media: Media, private val
             return null
         }
         scope.launch {
-            val cleaned = kotlinx.coroutines.withTimeoutOrNull(SMART_TITLE_WAIT_MS) {
-                Brains.ask(context, TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.second?.let(TitleBrain::parse)
+            // A model on the phone does not stop when cancelled: it is left to finish, not waited out.
+            val asking = async(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { Brains.ask(context, TitleBrain.prompt(title, artist), SMART_TITLE_TOKENS)?.second?.let(TitleBrain::parse) }.getOrNull()
             }
+            val cleaned = kotlinx.coroutines.withTimeoutOrNull(SMART_TITLE_WAIT_MS) { asking.await() }
             if (cleaned != null) smartTitles[key] = cleaned
             val (t, a) = cleaned ?: (title to artist)
             speaker.say(Speech.announcement(t, a, clean = true))
