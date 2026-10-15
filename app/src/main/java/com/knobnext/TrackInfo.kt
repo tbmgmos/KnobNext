@@ -27,10 +27,11 @@ enum class InfoLength(val sentences: Int, val noteSentences: Int, val introNote:
 
 /** Where the story comes from. */
 enum class InfoSource {
-    /** Gemini Nano tells what it knows itself; when the system refuses it, Wikipedia steps in. */
-    GEMINI,
-
-    /** Facts from Wikipedia and MusicBrainz, retold by a model on the phone. */
+    /**
+     * Facts from Wikipedia, MusicBrainz and the rest, retold by a model on the phone (Gemini Nano with the
+     * app open, the downloaded one from the background), else read as they are. Without facts (offline,
+     * a build without network), Gemini Nano tells what it knows itself. Once "Gemini", now one choice.
+     */
     COMBINED,
 
     /** The Wikipedia facts as they are, no model. */
@@ -276,15 +277,14 @@ object TrackInfo {
             }
             note(context.getString(R.string.log_info_cloud_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
         }
-        if (source == InfoSource.GEMINI) {
-            fromGemini(track, length, lang, history.told(), firstMeet)?.let {
-                return@coroutineScope ready(it, "Gemini Nano")
-            }
-            note(context.getString(R.string.log_info_gemini_failed, NanoBrain.lastError ?: "-"))
-        }
         val facts = factsAhead.await()
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
+            // Nothing found (offline, a build without network): Gemini Nano may know the artist itself.
+            if (source != InfoSource.WIKI) {
+                fromGemini(track, length, lang, history.told(), firstMeet)?.let { return@coroutineScope ready(it, "Gemini Nano") }
+                note(context.getString(R.string.log_info_gemini_failed, NanoBrain.lastError ?: "-"))
+            }
             // Without the network nothing could be found: that says nothing about the artist.
             if (remember && track.artist != null && online(context)) {
                 Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), track.album, null, null)
@@ -297,10 +297,8 @@ object TrackInfo {
         if (firstMeet && remember && facts.artistId != null && Journal.knows(context, facts.artistId)) firstMeet = false
         val keep = { plan: Plan -> told = plan }
         if (source != InfoSource.WIKI) {
-            // Gemini already said no (or can't run from the background): only the downloaded model is left.
-            val brain = if (source == InfoSource.GEMINI) Brains.background(context) else null
-            retell(context, track, facts, length, lang, history.told(), brain, onlyBackground = source == InfoSource.GEMINI, firstMeet, keep)
-                ?.let { return@coroutineScope ready(it, brain?.name ?: context.getString(R.string.log_info_way_model)) }
+            retell(context, track, facts, length, lang, history.told(), firstMeet, keep)
+                ?.let { return@coroutineScope ready(it, context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
         }
         plainStory(context, track, facts, length, lang, firstMeet, keep) { bare = it }?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
@@ -548,17 +546,14 @@ object TrackInfo {
         length: InfoLength,
         lang: String,
         told: List<String>,
-        brain: Brain?,
-        onlyBackground: Boolean,
         firstMeet: Boolean,
         keep: (Plan) -> Unit,
     ): String? {
-        if (onlyBackground && brain == null) return null
         // The same choice as without a model: the introduction, then one subject's untold facts. Moved on
         // only when the model really tells them: else the plain story takes the same facts.
         val rotation = Rotation(context)
         val plan = plan(context, track, facts, length, lang = null, firstMeet, perFact = FACTS_FOR_MODEL, rotation = rotation)
-        val said = retold(context, track, facts, length, lang, told, brain, firstMeet, plan)
+        val said = retold(context, track, facts, length, lang, told, firstMeet, plan)
         if (said == null) rotation.undo() else keep(plan)
         return said
     }
@@ -570,7 +565,6 @@ object TrackInfo {
         length: InfoLength,
         lang: String,
         told: List<String>,
-        brain: Brain?,
         firstMeet: Boolean,
         plan: Plan,
     ): String? {
@@ -611,7 +605,7 @@ object TrackInfo {
         val tokens = length.sentences * TOKENS_PER_SENTENCE + EXTRA_TOKENS
         // A model on the phone does not stop when asked: it is waited for this long, and left to finish.
         val answer = within(MODEL_TIMEOUT_MS) {
-            if (brain != null) brain.complete(prompt, tokens, creative = true) else Brains.ask(context, prompt, tokens, creative = true)?.second
+            Brains.ask(context, prompt, tokens, creative = true)?.second
         } ?: return null
         return clean(answer, length, lang)
     }

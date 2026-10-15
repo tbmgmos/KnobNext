@@ -363,7 +363,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("dev_mode", false)
         set(v) {
             val e = sp.edit().putBoolean("dev_mode", v)
-            if (!v && infoSource == InfoSource.CLOUD) e.putString("info_source", InfoSource.GEMINI.name)
+            if (!v && infoSource == InfoSource.CLOUD) e.putString("info_source", InfoSource.COMBINED.name)
             e.apply()
         }
 
@@ -669,7 +669,8 @@ class Prefs(context: Context) {
 
     /** Where the story about a track comes from. */
     var infoSource: InfoSource
-        get() = InfoSource.entries.firstOrNull { it.name == sp.getString("info_source", null) } ?: InfoSource.GEMINI
+        // "GEMINI", a choice of old, is now part of COMBINED: anything unknown becomes it.
+        get() = InfoSource.entries.firstOrNull { it.name == sp.getString("info_source", null) } ?: InfoSource.COMBINED
         set(v) = sp.edit().putString("info_source", v.name).apply()
 
     /** The language of the story about a track. */

@@ -144,9 +144,6 @@ object Brains {
         }
         return null
     }
-
-    /** The models that work with the app in the background: the system keeps Gemini Nano to the app on screen. */
-    fun background(context: Context): Brain? = Offline.brain(context)
 }
 
 /**

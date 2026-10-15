@@ -112,10 +112,9 @@ private enum class Page(val title: Int) {
     SETTINGS_SOUNDS(R.string.settings_sounds),
     SETTINGS_SPEECH(R.string.settings_speech),
     SETTINGS_STORY(R.string.settings_story),
-    SETTINGS_BUBBLE(R.string.settings_bubble),
     SETTINGS_VOICE(R.string.settings_voice),
+    SETTINGS_SERVICES(R.string.settings_services),
     SETTINGS_PAUSE(R.string.settings_pause),
-    SETTINGS_POCKET(R.string.settings_pocket),
     SETTINGS_ABOUT(R.string.settings_about),
     TEST(R.string.test_title),
     DIAGNOSTICS(R.string.diag_title),
@@ -127,7 +126,7 @@ private val Page.parent: Page
         Page.PROFILE -> Page.PLAYERS
         Page.ARTIST -> Page.ACQUAINT
         Page.SETTINGS_GENERAL, Page.SETTINGS_ACTIONS, Page.SETTINGS_SOUNDS, Page.SETTINGS_SPEECH, Page.SETTINGS_STORY,
-        Page.SETTINGS_BUBBLE, Page.SETTINGS_VOICE, Page.SETTINGS_PAUSE, Page.SETTINGS_POCKET, Page.SETTINGS_ABOUT -> Page.SETTINGS
+        Page.SETTINGS_VOICE, Page.SETTINGS_SERVICES, Page.SETTINGS_PAUSE, Page.SETTINGS_ABOUT -> Page.SETTINGS
         Page.DIAGNOSTICS -> Page.SETTINGS_ABOUT
         else -> Page.HOME
     }
@@ -276,19 +275,34 @@ fun KnobScreen(
                     Page.PLAYERS -> playersPage(ctx)
                     Page.PROFILE -> profilePkg?.let { profilePage(ctx, it) } ?: playersPage(ctx)
                     Page.SETTINGS -> settingsPage(ctx)
-                    Page.SETTINGS_GENERAL -> generalSettings(ctx)
+                    Page.SETTINGS_GENERAL -> {
+                        generalSettings(ctx)
+                        // Pocket mode: two switches, kept with the other everyday ones.
+                        item { SectionTitle(stringResource(R.string.settings_pocket)) }
+                        pocketSettings(ctx)
+                    }
                     Page.SETTINGS_ACTIONS -> actionSettings(ctx)
                     Page.SETTINGS_SOUNDS -> item { CueCard(ctx) }
                     Page.SETTINGS_SPEECH -> speechSettings(ctx)
-                    Page.SETTINGS_STORY -> storySettings(ctx)
-                    Page.SETTINGS_BUBBLE -> bubbleSettings(ctx)
+                    Page.SETTINGS_STORY -> {
+                        storySettings(ctx)
+                        // The round card is the story shown: on the same page.
+                        item { SectionTitle(stringResource(R.string.settings_bubble)) }
+                        bubbleSettings(ctx)
+                    }
+                    Page.SETTINGS_SERVICES -> item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            BaseCard(ctx.s, ctx.prefs)
+                            ListenBrainzCard(ctx.s, ctx.prefs)
+                            SourceKeys(ctx.prefs)
+                        }
+                    }
                     Page.SETTINGS_VOICE -> {
                         item { VoiceCard(ctx) }
                         item { BrainCard(ctx) }
                         item { CloudCard(ctx) }
                     }
                     Page.SETTINGS_PAUSE -> pauseSettings(ctx)
-                    Page.SETTINGS_POCKET -> pocketSettings(ctx)
                     Page.SETTINGS_ABOUT -> aboutSettings(ctx)
                     Page.TEST -> testPage(ctx, check ?: CheckState())
                     Page.DIAGNOSTICS -> {
@@ -1414,6 +1428,7 @@ private fun SettingsHub(ctx: PageContext) {
                         if (s.onlyWhenPlaying) add(stringResource(R.string.sum_when_playing))
                         if (s.headphonesOnly) add(stringResource(R.string.sum_headphones))
                         if (s.vibrate) add(stringResource(R.string.sum_vibrate))
+                        if (s.pocketAuto) add(stringResource(R.string.sum_pocket_short))
                     }.ifEmpty { listOf(stringResource(R.string.sum_no_limits)) },
                 ),
             ),
@@ -1456,32 +1471,19 @@ private fun SettingsHub(ctx: PageContext) {
                         ),
                         stringResource(
                             when (s.infoSource) {
-                                com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini
                                 com.knobnext.InfoSource.COMBINED -> R.string.info_source_combined
                                 com.knobnext.InfoSource.WIKI -> R.string.info_source_wiki
                                 com.knobnext.InfoSource.CLOUD -> R.string.info_source_cloud
                             },
                         ),
+                        stringResource(
+                            when (s.bubbleAuto) {
+                                com.knobnext.BubbleAuto.OFF -> R.string.sum_bubble_gesture
+                                com.knobnext.BubbleAuto.EVERY -> R.string.sum_bubble_every
+                                com.knobnext.BubbleAuto.NEWS -> R.string.sum_bubble_news
+                            },
+                        ),
                     ),
-                ),
-            ),
-            Category(
-                Page.SETTINGS_BUBBLE, KnobIcons.MusicNote,
-                sentence(
-                    buildList {
-                        add(
-                            stringResource(
-                                when (s.bubbleAuto) {
-                                    com.knobnext.BubbleAuto.OFF -> R.string.sum_bubble_gesture
-                                    com.knobnext.BubbleAuto.EVERY -> R.string.sum_bubble_every
-                                    com.knobnext.BubbleAuto.NEWS -> R.string.sum_bubble_news
-                                },
-                            ),
-                        )
-                        if (s.bubbleAuto != com.knobnext.BubbleAuto.OFF && s.bubbleWhere == com.knobnext.BubbleWhere.LOCKED) {
-                            add(stringResource(R.string.sum_bubble_locked))
-                        }
-                    },
                 ),
             ),
             Category(
@@ -1493,7 +1495,21 @@ private fun SettingsHub(ctx: PageContext) {
                     },
                 ),
             ),
-        ),
+        ) + if (context.resources.getBoolean(R.bool.network)) {
+            listOf(
+                Category(
+                    Page.SETTINGS_SERVICES, KnobIcons.Info,
+                    sentence(
+                        buildList {
+                            add(stringResource(if (s.baseOn) R.string.sum_base_on else R.string.sum_off))
+                            if (s.lbKeyed && s.lbScrobble) add(stringResource(R.string.sum_lb_on))
+                        },
+                    ),
+                ),
+            )
+        } else {
+            emptyList()
+        },
         listOf(
             Category(
                 Page.SETTINGS_PAUSE, KnobIcons.Bedtime,
@@ -1514,15 +1530,6 @@ private fun SettingsHub(ctx: PageContext) {
                                 ),
                             )
                         }
-                    },
-                ),
-            ),
-            Category(
-                Page.SETTINGS_POCKET, KnobIcons.PhoneDark,
-                sentence(
-                    buildList {
-                        add(stringResource(if (s.pocketAuto) R.string.sum_pocket_power else R.string.sum_pocket_manual))
-                        if (s.pocketGuard) add(stringResource(R.string.sum_pocket_guard))
                     },
                 ),
             ),
@@ -1712,7 +1719,6 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
                         shape(0), stringResource(R.string.info_source),
                         caption = stringResource(
                             when (s.infoSource) {
-                                com.knobnext.InfoSource.GEMINI -> R.string.info_source_gemini_hint
                                 com.knobnext.InfoSource.COMBINED -> R.string.info_source_combined_hint
                                 com.knobnext.InfoSource.WIKI -> R.string.info_source_wiki_hint
                                 com.knobnext.InfoSource.CLOUD -> if (s.cloudReady) R.string.info_source_cloud_hint else R.string.info_source_cloud_nokey
@@ -1721,7 +1727,6 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
                     ) {
                         ConnectedChoice(
                             options = listOf(
-                                com.knobnext.InfoSource.GEMINI to R.string.info_source_gemini,
                                 com.knobnext.InfoSource.COMBINED to R.string.info_source_combined,
                                 com.knobnext.InfoSource.WIKI to R.string.info_source_wiki,
                             ) + if (s.devMode) listOf(com.knobnext.InfoSource.CLOUD to R.string.info_source_cloud) else emptyList(),
@@ -1733,9 +1738,6 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
             }
             // Quietly, what told the last story: the model, the facts as they are, the cloud with its search.
             if (s.storyLast.isNotBlank()) Hint(stringResource(R.string.info_last, s.storyLast, clock(s.storyLastAt)))
-            SourceKeys(prefs)
-            BaseCard(s, prefs)
-            ListenBrainzCard(s, prefs)
         }
     }
 }

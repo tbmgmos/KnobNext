@@ -344,8 +344,7 @@
     </plurals>
     <string name="info_year">%1$s год</string>
     <string name="info_source">Как рассказывать</string>
-    <string name="info_source_gemini">Gemini</string>
-    <string name="info_source_combined">Факты + модель</string>
+    <string name="info_source_combined">С моделью</string>
     <string name="info_source_wiki">Без модели</string>
     <string name="info_source_cloud">Облако</string>
     <string name="info_source_cloud_hint">Большая модель в облаке с вашим ключом (ниже). Gemini сам ищет в Google и показывает в кружке, где нашёл; факты из Википедии и MusicBrainz — ему в опору, чтобы не выдумывал. Без сети или если сервис не ответил — рассказ как обычно</string>
@@ -370,8 +369,7 @@
     <string name="info_last">Последний рассказ: %1$s, %2$s</string>
     <string name="cloud_model_hint">Пусто — %1$s</string>
     <string name="cloud_model_hint_free">Лучше оставить пустым: бесплатная чат-модель подберётся сама (около 50 запросов в день). Вписывать только модели для чата (не embed)</string>
-    <string name="info_source_gemini_hint">Gemini Nano рассказывает сам, из своих знаний. Но система разрешает его только открытому приложению: из жеста в фоне факты берутся из Википедии и других источников и пересказываются скачанной моделью (или читаются как есть). Каждый раз — другие факты</string>
-    <string name="info_source_combined_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz, пересказ — модель на телефоне (в фоне — скачанная). Каждый раз — другие факты. Нужен интернет (найденное сохраняется)</string>
+    <string name="info_source_combined_hint">Факты из Википедии, MusicBrainz, Discogs и других источников пересказывает модель на телефоне: Gemini Nano, пока открыт KnobNext, из фона — скачанная. Без модели факты читаются как есть, без сети — Gemini Nano рассказывает сам. Каждый раз — другие факты</string>
     <string name="info_source_wiki_hint">Факты из Википедии, TheAudioDB, Deezer и MusicBrainz как есть, без модели; каждый раз — следующие. Нужен интернет (найденное сохраняется)</string>
     <string name="info_language">Язык рассказа</string>
     <string name="info_language_ru">Русский</string>
@@ -449,9 +447,6 @@
     <string name="sum_resume">снять паузу жестом — %1$d мин</string>
     <string name="sum_resume_off">снятие паузы жестом выключено</string>
     <string name="sum_sleep_until">таймер до %1$s</string>
-    <string name="sum_pocket_power">включается кнопкой питания</string>
-    <string name="sum_pocket_manual">вручную или жестом</string>
-    <string name="sum_pocket_guard">защита в кармане</string>
     <string name="sum_about">Версия %1$s · диагностика · журнал</string>
     <string name="offline_llm">Локальная модель</string>
     <string name="offline_llm_hint">Для телефонов без Gemini Nano: Qwen2.5 1.5B, около 1,5 ГБ, скачивается по Wi-Fi. Нажмите, чтобы скачать</string>
@@ -971,5 +966,9 @@
     <string name="keys_show">Показать</string>
     <string name="keys_hide">Скрыть</string>
     <string name="brain_titles_needs_clean">Работает вместе с «Чистить названия» в «Озвучке треков»: сначала включите её</string>
-    <string name="info_no_network">В версии из RuStore у приложения нет доступа к интернету: рассказ — только от Gemini Nano на телефоне, пока открыт KnobNext. Полная версия — на GitHub</string>
+    <string name="info_no_network">В версии из RuStore у приложения нет доступа к интернету: рассказывает только Gemini Nano на телефоне, пока открыт KnobNext. Полная версия — на GitHub</string>
+    <string name="settings_services">Сервисы и ключи</string>
+    <string name="sum_base_on">своя база</string>
+    <string name="sum_lb_on">ListenBrainz</string>
+    <string name="sum_pocket_short">карман по кнопке питания</string>
 </resources>
