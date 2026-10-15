@@ -953,11 +953,23 @@ object TrackInfo {
                     .also { fetching[key] = it; if (quiet != null) quietOf[key] = quiet else quietOf.remove(key) }
         }
         return try {
-            running.await()
+            running.await()?.also { synchronized(recent) { recent[key] = it } }
         } finally {
             synchronized(fetching) { if (fetching[key] === running && !running.isActive) { fetching.remove(key); quietOf.remove(key) } }
         }
     }
+
+    /** The facts last fetched about [track], if any: for the card's line about the artist. Never fetches. */
+    fun recent(track: Track, lang: String): Facts? =
+        synchronized(recent) { recent["${track.artist}\u0000${track.title}\u0000${track.album}\u0000$lang"] }
+
+    private val recent = object : LinkedHashMap<String, Facts>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Facts>) = size > MAX_EARLY
+    }
+
+    /** Who the artist is, in a sentence: the article's opening definition, else its first fact about them. */
+    fun summary(facts: Facts, lang: String): String? =
+        aboutLines(facts, lang).firstOrNull()?.takeIf { inLanguage(it, lang) }
 
     private val fetching = HashMap<String, kotlinx.coroutines.Deferred<Facts?>>()
     private val quietOf = HashMap<String, Brainz.Quiet>()
@@ -1094,10 +1106,11 @@ object TrackInfo {
                     val more = async { timed("Last.fm, Deezer, TheAudioDB") { MusicSources.gather(context, title, artist, track.album, lang) } }
                     val song = async { timed("Википедия: песня") { findArticle(lang) { l -> findSong(l, title, artist) } } }
                     val about = async { artist?.let { a -> timed("Википедия: исполнитель") { findArticle(lang) { l -> findArtist(l, a) } } } }
-                    // The articles are here first: the card shows them while the rest is still on its way.
+                    // The articles are here first: the card shows them while the rest is still on its way. Who
+                    // the artist is comes first, as soon as their article is here; the song's only without one.
                     launch {
-                        val songArticle = song.await()?.text
                         val artistArticle = about.await()?.text
+                        val songArticle = if (artistArticle == null) song.await()?.text else null
                         if (songArticle != null || artistArticle != null) runCatching {
                             early(
                                 Facts(

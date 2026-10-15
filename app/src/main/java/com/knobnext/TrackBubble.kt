@@ -494,23 +494,48 @@ class TrackBubble(
                 runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
             }
             val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
-            fun preview(facts: TrackInfo.Facts) {
-                val first = TrackInfo.preview(facts, lang) ?: return
-                if (telling.isActive && note == null && path.isEmpty() && same(t)) {
-                    noteView?.text = first
-                    status(service.getString(if (cloud) R.string.bubble_refining else R.string.bubble_more_coming))
-                    refining = true
+            // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
+            var lead: String? = null
+            fun show(text: String?, isLead: Boolean) {
+                text ?: return
+                if (!telling.isActive || note != null || path.isNotEmpty() || !same(t)) return
+                if (isLead) lead = text
+                noteView?.text = text
+                status(service.getString(if (cloud) R.string.bubble_refining else R.string.bubble_more_coming))
+                refining = true
+            }
+            // At once: what the artist base already knows about them.
+            launch {
+                val known = withContext(Dispatchers.IO) { ArtistBase.card(service, t.artist) }
+                    ?.takeIf { it.lang == lang }?.intro?.firstOrNull()
+                if (lead == null) show(known, isLead = true)
+            }
+            // The Wikipedia article about the artist, in a second or two: shown while the other sources answer.
+            val early = launch {
+                val facts = TrackInfo.earlyOf(t, lang).filterNotNull().first()
+                if (lead == null) {
+                    val about = TrackInfo.summary(facts, lang)
+                    if (about != null) show(about, isLead = true) else show(TrackInfo.preview(facts, lang), isLead = false)
                 }
             }
-            // The Wikipedia articles come first, in a second or two: shown while the other sources answer.
-            val early = launch { TrackInfo.earlyOf(t, lang).filterNotNull().first().let(::preview) }
             if (cloud) launch {
                 val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
                 early.cancel()
-                preview(facts)
+                if (lead == null) TrackInfo.summary(facts, lang)?.let { lead = it }
+                show(listOfNotNull(lead, TrackInfo.preview(facts, lang)?.takeUnless { p -> lead?.let { p.startsWith(it.take(LEAD_MATCH)) } == true })
+                    .joinToString("\n\n").ifBlank { null }, isLead = false)
             }
             telling.invokeOnCompletion { early.cancel() }
-            setNote(telling.await())
+            val told = telling.await()
+            // The note under the line about the artist, unless it begins with it already.
+            val first = TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
+            setNote(
+                when {
+                    told == null -> first
+                    first == null || told.contains(first.take(LEAD_MATCH)) -> told
+                    else -> first + "\n\n" + told
+                },
+            )
         }
     }
 
@@ -1390,6 +1415,9 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
+        /** A note beginning with these many characters of the line about the artist has it already. */
+        const val LEAD_MATCH = 40
+
         /** How the sources are named on the card. */
         val SOURCE_NAMES = mapOf(
             TrackInfo.WIKIPEDIA to "Википедия", TrackInfo.WIKIDATA to "Wikidata", TrackInfo.LASTFM to "Last.fm",
