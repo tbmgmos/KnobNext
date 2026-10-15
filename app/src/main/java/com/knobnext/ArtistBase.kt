@@ -191,7 +191,14 @@ object ArtistBase {
         if (card.band && card.members.isNotEmpty()) {
             // "1987–": still in the band, "since 1987".
             fun years(y: String) = if (y.endsWith("–")) res.getString(R.string.base_since, y.dropLast(1)) else y
-            val names = card.members.take(MAX_MEMBERS_SAID).joinToString(", ") { m -> m.name + (m.years?.let { " (${years(it)})" } ?: "") }
+            // "Kurt Cobain (вокал, гитара; 1987–1994)": what they played, when MusicBrainz says.
+            val names = card.members.take(MAX_MEMBERS_SAID).joinToString(", ") { m ->
+                val about = listOfNotNull(
+                    m.roles.mapNotNull { Brainz.instrument(it, lang) }.distinct().take(MAX_ROLES).joinToString(", ").ifBlank { null },
+                    m.years?.let { years(it) },
+                ).joinToString("; ")
+                m.name + if (about.isNotBlank()) " ($about)" else ""
+            }
             said += res.getString(R.string.base_members, names)
         }
         if (card.labels.isNotEmpty()) said += res.getString(R.string.base_labels, card.labels.joinToString(", "))
@@ -238,7 +245,7 @@ object ArtistBase {
         val albums = ArrayList<Album>()
         // Not the bootlegs named by their date and place ("1990-05-13: Duffy's Tavern, Lincoln, NE"): they
         // would crowd out the records themselves.
-        mb?.groups?.filterNot { BOOTLEG.containsMatchIn(it.title) }?.forEach { g -> albums += Album(g.title, g.date, g.kind, g.studio) }
+        mb?.groups?.filterNot { DATED_BOOTLEG.containsMatchIn(it.title) }?.forEach { g -> albums += Album(g.title, g.date, g.kind, g.studio) }
         val known = albums.map { norm(it.title) }.toMutableSet()
         dRecords.filter { it.master && it.year != null }.forEach { r ->
             val n = norm(r.title)
@@ -377,10 +384,7 @@ object ArtistBase {
 
     private fun file(context: Context, key: String) = File(dir(context), sha1(key) + ".json")
 
-    private fun sha1(text: String): String =
-        MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    private fun norm(s: String) = s.lowercase(Locale.ROOT).replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     private const val JOB_ID = 43
     private const val DAY_MS = 24L * 60 * 60 * 1000
@@ -397,10 +401,10 @@ object ArtistBase {
     private const val LINKS_EACH = 3
     private const val MAX_MEMBERS = 15
     private const val MAX_MEMBERS_SAID = 6
+    private const val MAX_ROLES = 2
     private const val MAX_LABELS = 4
     private const val MAX_ALBUMS = 200
     private const val BUSY_RETRY_MS = 3_000L
-    private val BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
     private const val MAX_STUDIO = 20
     private const val MAX_ABOUT = 30
 }

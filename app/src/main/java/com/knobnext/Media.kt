@@ -124,21 +124,13 @@ class Media(private val context: Context) {
         val state = controller?.playbackState ?: return null
         val duration = controller.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         if (duration <= 0) return null
-        var position = state.position
-        if (state.state == PlaybackState.STATE_PLAYING) {
-            position += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
-        }
-        return position.coerceIn(0, duration) to duration
+        return controller.position().coerceIn(0, duration) to duration
     }
 
     private fun seekBy(controller: MediaController?, deltaMs: Long): Unit? {
         val state = controller?.playbackState ?: return null
         if (state.actions and PlaybackState.ACTION_SEEK_TO == 0L) return null
-        var position = state.position
-        if (state.state == PlaybackState.STATE_PLAYING) {
-            position += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
-        }
-        var target = (position + deltaMs).coerceAtLeast(0)
+        var target = (controller.position() + deltaMs).coerceAtLeast(0)
         val duration = controller.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         if (duration > 0) target = target.coerceAtMost(duration - 1000)
         controller.transportControls.seekTo(target)
@@ -180,6 +172,13 @@ class Media(private val context: Context) {
             AudioDeviceInfo.TYPE_BLE_BROADCAST,
         )
     }
+}
+
+/** Where the player is now: its last reported position, moved on by the time since while it plays. */
+fun MediaController.position(): Long {
+    val state = playbackState ?: return 0L
+    if (state.state != PlaybackState.STATE_PLAYING || state.lastPositionUpdateTime <= 0) return state.position
+    return state.position + ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
 }
 
 fun MediaController.isPlaying(): Boolean = when (playbackState?.state) {

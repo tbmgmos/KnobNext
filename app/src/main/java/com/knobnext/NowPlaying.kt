@@ -124,13 +124,14 @@ class NowPlayingTracker(
             prefs.lastPlayer = c.packageName
         }
         val meta = c.metadata
+        // Read the same way for every player (see TrackInfo.trackOf), once.
+        val read = meta?.let { TrackInfo.trackOf(it, c.packageName) }
         onChange(
             NowPlaying(
                 controller = c,
                 appLabel = appLabel(context, c.packageName),
-                // Read the same way for every player (see TrackInfo.trackOf).
-                title = meta?.let { TrackInfo.trackOf(it, c.packageName) }?.title,
-                artist = meta?.let { TrackInfo.trackOf(it, c.packageName) }?.artist,
+                title = read?.title,
+                artist = read?.artist,
                 art = TrackInfo.coverOf(meta),
                 playing = c.isPlaying(),
             ),

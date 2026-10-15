@@ -80,8 +80,6 @@ class BackTapDetector(
         }
     }
 
-    val available: Boolean get() = accelerometer != null
-
     /** Registered, yet nothing has come from the sensor for a while. */
     fun starved(): Boolean = running && SystemClock.elapsedRealtime() - lastEventAt > STARVED_MS
 

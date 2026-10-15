@@ -134,8 +134,6 @@ object Brains {
     /** The models this phone has right now, best first; empty: only the rules work. */
     suspend fun all(context: Context): List<Brain> = listOfNotNull(NanoBrain.ready(), Offline.brain(context))
 
-    suspend fun best(context: Context): Brain? = all(context).firstOrNull()
-
     /**
      * Asks the models in turn until one answers: Gemini Nano may refuse (the system can block its use
      * from the background), and then the downloaded model still can.

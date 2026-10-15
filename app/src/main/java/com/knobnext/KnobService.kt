@@ -1351,12 +1351,21 @@ class KnobService : AccessibilityService() {
     /** A touch on the round cover or its card: done as a gesture would be, with its sound and log line. */
     private fun fromBubble(action: Action, controller: MediaController?): Outcome {
         val player = controller ?: media.resolve(prefs)?.controller
+        return perform(getString(R.string.bubble_source), action, player)
+    }
+
+    /**
+     * [action] done for [source] (a gesture's name, the round card) on [player]: play/pause decided as
+     * Media.perform does (the player's state, or the audio when there is none), remembered for the pause
+     * window, logged and given its sound.
+     */
+    private fun perform(source: String, action: Action, player: MediaController?): Outcome {
         val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: media.musicActive())
         if (action == Action.PLAY_PAUSE && !pausing) resumedByUs()
         val outcome = execute(action, player)
         if (action == Action.PLAY_PAUSE && pausing) pausedByUs(player?.packageName)
-        val name = getString(R.string.bubble_source)
-        log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" } ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
+        log(outcome.message?.let { "$source → ${getString(actionLabel(action))}: $it" }
+            ?: getString(R.string.log_fired, source, getString(actionLabel(action))))
         playCue(action, outcome, pausing, player?.packageName)
         return outcome
     }
@@ -1438,14 +1447,7 @@ class KnobService : AccessibilityService() {
             playCue(action, Outcome.DONE, pausing = false, pkg = player?.packageName)
             return true
         }
-        // Same decision as Media.perform: the player's own state, or the audio when there is no player.
-        val pausing = action == Action.PLAY_PAUSE && (player?.isPlaying() ?: media.musicActive())
-        if (action == Action.PLAY_PAUSE && !pausing) resumedByUs()
-        val outcome = execute(action, player)
-        if (action == Action.PLAY_PAUSE && pausing) pausedByUs(player?.packageName)
-        log(outcome.message?.let { "$name → ${getString(actionLabel(action))}: $it" }
-            ?: getString(R.string.log_fired, name, getString(actionLabel(action))))
-        playCue(action, outcome, pausing, player?.packageName)
+        perform(name, action, player)
         // With "every new track" on, the track watcher speaks anyway.
         val skipped = action == Action.NEXT || action == Action.PREVIOUS
         if (skipped && prefs.announceSkips && !prefs.announceAllTracks && screenDark()) {

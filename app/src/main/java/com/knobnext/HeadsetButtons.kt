@@ -66,8 +66,6 @@ class HeadsetButtons(
     /** Whether that silence plays now: the system then can't tell music from it. */
     val silencePlaying: Boolean get() = silence.playing
 
-    val active: Boolean get() = session != null
-
     // Counting presses of the play/pause button.
     private var presses = 0
     private var lastKey = 0

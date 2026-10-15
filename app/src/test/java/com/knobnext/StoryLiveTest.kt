@@ -157,7 +157,7 @@ class StoryLiveTest {
         for ((artist, title) in listOf("Nirvana" to "Smells Like Teen Spirit", "Кино" to "Группа крови", "Radiohead" to "Creep")) {
             kotlinx.coroutines.delay(1_500)
             val pick = TrackInfo.musicBrainz(title, artist)
-            println("альбом по MusicBrainz: $artist — $title → ${pick?.first} (${pick?.second}); ${TrackInfo.lastAlbumSearch}")
+            println("альбом по MusicBrainz: $artist — $title → ${pick?.first} (${pick?.second})")
         }
     }
 

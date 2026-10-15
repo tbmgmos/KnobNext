@@ -1241,10 +1241,7 @@ object TrackInfo {
     }
 
     /** The album and year of the earliest release with this recording. */
-    /** What the last album search found, for the checks. */
-    @Volatile internal var lastAlbumSearch: String? = null
-
-    internal fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
+    internal suspend fun musicBrainz(title: String, artist: String): Pair<String?, String?>? {
         val song = "recording:\"${title.replace("\"", "")}\" AND artist:\"${artist.replace("\"", "")}\""
         // The song's many versions (live, compilations) all score 100: the studio album's is asked for first,
         // then any official release, so that the first listed is not a bootleg or a sampler.
@@ -1253,12 +1250,11 @@ object TrackInfo {
         return albumSearch("$song AND status:official") ?: studio
     }
 
-    private fun albumSearch(query: String): Pair<String?, String?>? {
-        val json = brainzSpaced("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"))
+    private suspend fun albumSearch(query: String): Pair<String?, String?>? {
+        val json = Brainz.get("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"))
             ?: return null
         val found = json.optJSONArray("recordings") ?: return null
         val recordings = (0 until found.length()).mapNotNull { found.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE }
-        lastAlbumSearch = "${recordings.size} из ${found.length()} записей"
         if (recordings.isEmpty()) return null
         val year = recordings.mapNotNull { r -> r.optString("first-release-date").take(4).takeIf { it.length == 4 && it.all(Char::isDigit) } }.minOrNull()
         val releases = recordings.flatMap { r -> r.optJSONArray("releases")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty() }
@@ -1271,24 +1267,10 @@ object TrackInfo {
         // The year the album first came out: its release group's. The releases found are often reissues
         // (Nevermind's 2011 remaster), and a recording's own date is the remaster's.
         val released = first?.optJSONObject("release-group")?.optString("id")?.takeIf { it.isNotBlank() }?.let { id ->
-            brainzSpaced("https://musicbrainz.org/ws/2/release-group/$id?fmt=json")?.optString("first-release-date")
+            Brainz.get("https://musicbrainz.org/ws/2/release-group/$id?fmt=json")?.optString("first-release-date")
                 ?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
         }
         return first?.optString("title") to (released ?: year.takeIf { first == null })
-    }
-
-    /** MusicBrainz allows a request a second: these searches keep to it (two can follow one another). */
-    private val brainzLock = Any()
-    private var brainzLast = 0L
-
-    private fun brainzSpaced(url: String): JSONObject? = synchronized(brainzLock) {
-        val wait = brainzLast + BRAINZ_SPACING_MS - System.currentTimeMillis()
-        if (wait > 0) Thread.sleep(wait)
-        try {
-            getJson(url)
-        } finally {
-            brainzLast = System.currentTimeMillis()
-        }
     }
 
     internal fun getJson(url: String, userAgent: String = USER_AGENT): JSONObject? = runCatching {
@@ -1447,8 +1429,6 @@ object TrackInfo {
         }
     }
 
-    private fun sha1(text: String): String =
-        MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private fun normalize(text: String) = text.lowercase(Locale.ROOT).replace('ё', 'е')
         .replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
@@ -1528,10 +1508,7 @@ object TrackInfo {
     val PLAIN_AGENT = "KnobNext/" + BuildConfig.VERSION_NAME
 
     private const val ALBUM_SEARCH_LIMIT = 25
-    private const val BRAINZ_SPACING_MS = 1_100L
 
-    /** A live bootleg named by its date and place. */
-    private val DATED_BOOTLEG = Regex("^\\d{4}[-‐]\\d\\d[-‐]\\d\\d:")
 
     /** ListenBrainz is waited for this long to say which album a track is from. */
     private const val LOOKUP_WAIT_MS = 4_000L

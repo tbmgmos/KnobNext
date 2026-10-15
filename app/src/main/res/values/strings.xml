@@ -28,14 +28,8 @@
     <string name="open_accessibility_hint">Включить или выключить службу KnobNext</string>
     <string name="more_gestures">Ещё жесты</string>
     <string name="more_gestures_hide">Скрыть</string>
-    <string name="status_off_title">Выключено</string>
-    <string name="status_off_body">Включите службу KnobNext в разделе «Специальные возможности» → «Скачанные приложения».</string>
-    <string name="enable_service">Включить</string>
     <string name="open_accessibility">Специальные возможности</string>
 
-    <string name="restricted_title">Переключатель серый?</string>
-    <string name="restricted_hint">Android блокирует службы у приложений, установленных из APK. Откройте «О приложении» → ⋮ → «Разрешить доступ к настройкам с ограниченным доступом», затем включите службу снова.</string>
-    <string name="open_app_info">О приложении</string>
 
     <string name="setup_title">Настройка</string>
     <string name="setup_steps_left">Обязательных шагов осталось: %1$d</string>
@@ -66,7 +60,6 @@
 
     <string name="update_title">Доступно обновление</string>
     <string name="update_body">Версия %1$s</string>
-    <string name="update_download">Скачать</string>
     <string name="update_install">Обновить</string>
     <string name="update_whats_new">Что нового</string>
     <string name="update_downloading_start">Загрузка…</string>
@@ -86,7 +79,6 @@
     <string name="now_playing_unknown">Без названия</string>
 
     <string name="gestures_title">Жесты</string>
-    <string name="gestures_hint">Нажмите на жест, чтобы выбрать действие. Двойное нажатие включается в настройках. На максимальной и нулевой громкости двойное нажатие в эту сторону не сработает — громкость просто не меняется.</string>
     <string name="gesture_hold_up">Удерживать «+»</string>
     <string name="gesture_hold_down">Удерживать «−»</string>
     <string name="gesture_both">«+» и «−» вместе</string>
@@ -122,7 +114,6 @@
     <string name="info_delivery_voice">Голосом</string>
     <string name="info_delivery_bubble">Кружком</string>
     <string name="info_delivery_both">Оба</string>
-    <string name="bubble_title">Кружок</string>
     <string name="bubble_auto">Сам на смене трека</string>
     <string name="bubble_auto_hint">Обложка нового трека на несколько секунд у края экрана. «Когда интересно» — только если исполнитель вам новый или есть история о самой песне: на обложке будет метка.</string>
     <string name="bubble_auto_off">Нет</string>
@@ -352,7 +343,6 @@
         <item quantity="other">В каталоге Deezer у исполнителя %1$d альбома.</item>
     </plurals>
     <string name="info_year">%1$s год</string>
-    <string name="info_title">Рассказ о треке</string>
     <string name="info_source">Как рассказывать</string>
     <string name="info_source_gemini">Gemini</string>
     <string name="info_source_combined">Факты + модель</string>
@@ -482,7 +472,6 @@
     <string name="brain_nano_ready">Готов — работает на телефоне, без интернета</string>
     <string name="brain_nano_downloadable">Можно загрузить модель. Нажмите, чтобы начать</string>
     <string name="brain_nano_downloading">Загружается системой…</string>
-    <string name="brain_nano_unavailable">Недоступен на этом телефоне — работают правила</string>
     <string name="brain_nano_no_aicore">Нет системной службы AICore (или она выключена) — в ней живёт Gemini Nano. Нажмите, чтобы открыть её в Google Play</string>
     <string name="brain_nano_error">Система отказала: %1$s (AICore %2$s). Нажмите, чтобы проверить снова</string>
     <string name="brain_nano_refused">AICore %1$s сообщает, что Gemini Nano для приложений недоступен. Частые причины: регион (в т.ч. через VPN), разблокированный загрузчик или root, устаревший AICore, модель ещё не загружена системой. Нажмите, чтобы проверить снова</string>
@@ -545,14 +534,12 @@
     <string name="double_when">Когда работает</string>
     <string name="section_double_pause_hint">Пока ничего не играет и экран выключен, Android не реагирует на кнопки громкости, поэтому так паузу можно только поставить. Снять её — теми же нажатиями при включённом экране (см. «Снять паузу жестом» в настройках) или «+» и «−» вместе.</string>
     <string name="section_double_hint">Быстрые нажатия подряд, в том числе при выключенном экране. Громкость после жеста возвращается обратно. На максимальной и нулевой громкости нажатия в эту сторону не видны.</string>
-    <string name="section_back_tap">Постукивание по корпусу</string>
     <string name="back_tap_title">Постукивание по задней панели</string>
     <string name="back_tap_subtitle">Датчик включается, только пока играет музыка</string>
     <string name="back_tap_sensitivity">Чувствительность</string>
     <string name="sensitivity_low">Слабая</string>
     <string name="sensitivity_medium">Средняя</string>
     <string name="sensitivity_high">Сильная</string>
-    <string name="back_tap_hint">Стучите пальцем по задней панели рядом с камерами. Если на Pixel включено «Быстрое касание» (Настройки → Система → Жесты), отключите его, иначе двойное постукивание сработает и там.</string>
     <string name="section_motion">Движения</string>
     <string name="section_headset">Наушники и колонки</string>
     <string name="tile_headset_on">Кнопки наушников — свои действия</string>
@@ -626,7 +613,6 @@
     <string name="speak_sleep_cancelled">Таймер сна отменён</string>
     <string name="log_no_metadata">нет данных о треке — нужен доступ к плееру</string>
     <string name="log_needs_access">нужен доступ к плееру</string>
-    <string name="log_unsupported">плеер это не поддерживает</string>
     <string name="log_unsupported_actions">плеер не даёт «нравится»; его действия: %1$s</string>
     <string name="log_already_liked">уже нравится</string>
     <string name="log_sleep_set">таймер на %1$d мин</string>
@@ -651,7 +637,6 @@
     <string name="action_volume">Громкость, как обычно</string>
 
     <string name="settings_title">Настройки</string>
-    <string name="pref_enabled">Включено</string>
     <string name="pref_only_when_playing">Только когда играет звук</string>
     <string name="pref_only_when_playing_hint">Когда ничего не играет, кнопки работают как обычно. Продолжить музыку — «+» и «−» вместе или жестом, назначенным на паузу</string>
     <string name="pref_resume">Снять паузу жестом</string>
@@ -659,7 +644,6 @@
     <string name="double_mode_off">Выкл</string>
     <string name="double_mode_screen_off">Без экрана</string>
     <string name="double_mode_always">Всегда</string>
-    <string name="last_event">Последние события:\n%1$s</string>
     <string name="last_event_none">Пока пусто. Здесь видно, какие жесты распознаны и что из этого вышло.</string>
     <string name="log_volume">громкость %1$s %2$d→%3$d (%4$s)</string>
     <string name="log_via_broadcast">система</string>
@@ -679,7 +663,6 @@
     <string name="log_pocket_off">карманный режим выключен</string>
     <string name="action_pocket">Карманный режим</string>
     <string name="pocket_hint">Карманный режим · двойное касание — выйти</string>
-    <string name="pocket_title">Карманный режим</string>
     <string name="pocket_intro">Экран остаётся включённым, но полностью чёрным и не реагирует на касания. Для Android телефон «в руках», поэтому в кармане работают все жесты кнопок: удержание, плавная перемотка, «+ и −» вместе. Чёрный OLED-экран почти не тратит энергию, но телефон не засыпает — режим сам выключится, если музыка не играет 2 минуты.</string>
     <string name="pocket_auto">Включать кнопкой питания</string>
     <string name="pocket_auto_hint">Пока играет музыка, первое нажатие питания включает карманный режим, второе — гасит экран полностью</string>
@@ -751,7 +734,6 @@
     <string name="pref_app_filter_no_access">Нужен доступ к уведомлениям</string>
     <string name="players_empty">Включите музыку в плеере — он появится здесь</string>
 
-    <string name="about_title">О приложении</string>
     <string name="pref_check_updates">Проверять обновления</string>
     <string name="version_value">Версия %1$s</string>
 
@@ -927,7 +909,6 @@
     <string name="pref_sleep_extend_hint">Повторный жест добавляет 15 минут, а не отменяет таймер. Пока музыка затихает, можно встряхнуть телефон — тоже +15 минут. Отменить — в приложении.</string>
 
     <!-- Improvements: settings -->
-    <string name="actions_title">Действия</string>
     <string name="pref_seek_step">Шаг перемотки</string>
     <string name="pref_seek_step_hint">Для нажатий и жестов — на сколько прыгать; для плавной перемотки — шаг «зубчиков» вибрации</string>
     <string name="pref_seek_hold">Перемотка удержанием</string>

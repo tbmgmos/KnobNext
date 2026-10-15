@@ -747,13 +747,9 @@ class TrackBubble(
 
     private fun progress(): Float? {
         val c = controller ?: return null
-        val state = c.playbackState ?: return null
+        if (c.playbackState == null) return null
         val duration = c.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 } ?: return null
-        var at = state.position
-        if (state.state == PlaybackState.STATE_PLAYING && state.lastPositionUpdateTime > 0) {
-            at += ((SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
-        }
-        return (at.toFloat() / duration).coerceIn(0f, 1f)
+        return (c.position().toFloat() / duration).coerceIn(0f, 1f)
     }
 
     /**
@@ -970,7 +966,7 @@ class TrackBubble(
 
     /** Questions to the cloud model, when it has a key: the answer takes the note's place. */
     private fun askSection(box: LinearLayout, questions: List<Pair<TrackInfo.Question, Int>>) {
-        if (CloudBrain.configured(prefs) == null) return
+        if (CloudBrain.order(prefs).isEmpty()) return
         val section = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(10), 0, 0)

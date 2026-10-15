@@ -51,12 +51,6 @@ object CloudBrain {
     /** What answered last: "Gemini · gemini-2.5-flash · с поиском". */
     @Volatile var lastUsed: String? = null
 
-    /** The service, key and model set in the settings, or null when there is no key. */
-    fun configured(prefs: Prefs): Triple<CloudService, String, String>? {
-        val service = order(prefs).firstOrNull() ?: return null
-        return Triple(service, prefs.cloudKey(service), prefs.cloudModel(service).ifBlank { service.defaultModel })
-    }
-
     /**
      * The services to ask, in turn: the chosen one, then (when switching is on) every other with a key,
      * in the order of the list, so that one down, out of quota or overloaded does not leave the card silent.

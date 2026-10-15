@@ -241,10 +241,6 @@ object Journal {
         }.sortedByDescending { it.at }
     }
 
-    @Synchronized
-    fun isLater(context: Context, artist: String, title: String?): Boolean =
-        later(context).any { same(it, artist, title) }
-
     /** Puts the artist (or track) aside, or takes it back when it already was: true when it is aside now. */
     @Synchronized
     fun toggleLater(context: Context, artist: String, title: String?, via: String?): Boolean {
@@ -428,8 +424,6 @@ object Journal {
         Prefs(context).journalVersion++
     }
 
-    private fun sha1(text: String): String =
-        MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private const val MAX_NOTES = 50
     private const val MAX_LATER = 200

@@ -21,7 +21,6 @@ object Discogs {
         val profile: List<String>,
         /** Members, the present ones first. */
         val members: List<String>,
-        val realName: String?,
     )
 
     /** One of the artist's own records: a "master" (all its pressings) or a single release. */
@@ -39,7 +38,6 @@ object Discogs {
             name = plainName(a.optString("name")),
             profile = profile(a.optString("profile")),
             members = members.distinct().take(MAX_MEMBERS),
-            realName = a.optString("realname").takeIf { it.isNotBlank() && it != "null" },
         )
     }
 
@@ -100,10 +98,7 @@ object Discogs {
     /** "Dave Grohl (2)": Discogs' number for one of several of that name goes. */
     internal fun plainName(name: String) = name.replace(Regex("\\s*\\(\\d+\\)$"), "").trim()
 
-    private fun same(a: String, b: String): Boolean {
-        fun n(s: String) = s.lowercase().replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N}]"), "")
-        return n(a).isNotEmpty() && n(a) == n(b)
-    }
+    private fun same(a: String, b: String): Boolean = norm(a).isNotEmpty() && norm(a) == norm(b)
 
     // ---- Requests: spaced as Discogs allows ----
 

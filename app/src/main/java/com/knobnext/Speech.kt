@@ -263,11 +263,6 @@ class Speaker(private val context: Context, private val prefs: Prefs) : TextToSp
 
     private var queued = false
 
-    /** Runs [onDone] once what is being said now ends, or at once when nothing is. */
-    fun then(onDone: () -> Unit) {
-        if (speaking) whenDone = onDone else onDone()
-    }
-
     /** The phrase an utterance belongs to: "knob-<phrase>-<piece>[-last]". */
     private fun phraseOf(utteranceId: String?) = utteranceId?.split('-')?.getOrNull(1)?.toIntOrNull()
 

@@ -492,7 +492,7 @@ object Brainz {
     private fun year(r: JSONObject, field: String) = r.optString(field).take(4).takeIf { it.length == 4 && it.all(Char::isDigit) }
 
     /** An instrument's name to say; one not in the list is left out rather than said in English to a Russian ear. */
-    private fun instrument(attribute: String, lang: String): String? {
+    internal fun instrument(attribute: String, lang: String): String? {
         val ru = INSTRUMENTS[attribute.lowercase(Locale.ROOT)] ?: return null
         return if (lang == "ru") ru else attribute.lowercase(Locale.ROOT).removeSuffix(" (drum set)")
     }
@@ -502,7 +502,8 @@ object Brainz {
     private val gate = Mutex()
     private var last = 0L
 
-    private suspend fun get(url: String): JSONObject? = gate.withLock {
+    /** A request to MusicBrainz, at most one a second whichever part of the app asks. */
+    internal suspend fun get(url: String): JSONObject? = gate.withLock {
         val wait = last + SPACING_MS - System.currentTimeMillis()
         if (wait > 0) delay(wait)
         try {
@@ -512,16 +513,9 @@ object Brainz {
         }
     }
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     private fun clean(s: String) = s.replace("\"", "")
 
-    private fun sameName(found: String, wanted: String): Boolean {
-        fun n(s: String) = s.lowercase(Locale.ROOT).replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N}]"), "")
-        val a = n(found)
-        val b = n(wanted)
-        return a.isNotEmpty() && (a == b || a.contains(b) || b.contains(a))
-    }
 
     private const val API = "https://musicbrainz.org/ws/2"
     private const val MIN_SCORE = 90

@@ -166,9 +166,9 @@ object MusicSources {
 
     // ---- MusicBrainz ----
 
-    private fun brainzArtist(res: Context, artist: String, lang: String): List<String>? {
+    private suspend fun brainzArtist(res: Context, artist: String, lang: String): List<String>? {
         val q = "artist:\"${artist.replace("\"", "")}\""
-        val a = TrackInfo.getJson("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}")
+        val a = Brainz.get("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}")
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
         val facts = ArrayList<String>()
@@ -267,17 +267,9 @@ object MusicSources {
     private const val MAX_SIMILAR = 4
     private const val MIN_TEXT_CHARS = 60
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     private fun cyrillic(s: String) = s.any { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
 
-    /** The source found this artist, not one with a similar name. */
-    private fun sameName(found: String, wanted: String): Boolean {
-        fun n(s: String) = s.lowercase(Locale.ROOT).replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N}]"), "")
-        val a = n(found)
-        val b = n(wanted)
-        return a.isNotEmpty() && (a == b || a.contains(b) || b.contains(a))
-    }
 
     /** "1988-01-05" → "5 января 1988 года" / "January 5, 1988". */
     private fun dateWords(date: String, lang: String): String? = runCatching {

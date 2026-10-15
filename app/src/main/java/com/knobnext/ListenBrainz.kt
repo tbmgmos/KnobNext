@@ -297,14 +297,10 @@ object ListenBrainz {
         files.sortedBy { it.lastModified() }.take(files.size - MAX_KEPT).forEach { it.delete() }
     }
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private fun norm(s: String) = s.lowercase(Locale.ROOT).replace('ё', 'е').replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     private fun words(s: String) = s.lowercase(Locale.ROOT).replace('ё', 'е').split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 }.toSet()
 
-    private fun sha1(text: String): String =
-        MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
     /** Where a player's music comes from, as ListenBrainz names services. */
     private val SERVICES = mapOf(
