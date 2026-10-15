@@ -168,7 +168,7 @@ object MusicSources {
 
     private suspend fun brainzArtist(res: Context, artist: String, lang: String): List<String>? {
         val q = "artist:\"${artist.replace("\"", "")}\""
-        val a = Brainz.get("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}")
+        val a = Brainz.get("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}", urgent = true)
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
         val facts = ArrayList<String>()

@@ -90,6 +90,9 @@ class TrackBubble(
     private var subView: TextView? = null
     private var askJob: Job? = null
 
+    /** The facts are on the card while the cloud model still tells the story. */
+    private var refining = false
+
     /** Counts the cards closed or folded: a question's answer is shown only on the card it was asked on. */
     private var shownCard = 0
 
@@ -214,6 +217,11 @@ class TrackBubble(
 
     /** The note to show in the card (null: nothing was found). */
     fun setNote(text: String?) {
+        // The facts shown meanwhile are replaced: the line saying the model is still telling goes too.
+        if (refining) {
+            statusView?.visibility = View.GONE
+            refining = false
+        }
         note = text ?: service.getString(R.string.speak_info_none)
         if (path.isEmpty()) {
             noteView?.text = note
@@ -372,11 +380,23 @@ class TrackBubble(
         noteJob?.cancel()
         note = null
         noteView?.setText(R.string.bubble_loading)
+        val lang = prefs.infoLanguage.resolve()
         noteJob = scope.launch {
-            val told = runCatching {
-                TrackInfo.story(service, t, prefs.infoLength, prefs.infoLanguage.resolve(), prefs.infoSource) { log(it) }
-            }.getOrNull()
-            setNote(told)
+            // Read with the eyes: the facts are shown as soon as they are here, without waiting for a model
+            // on the phone (that is for the voice). The cloud model takes longer: its facts first, its story after.
+            val telling = async {
+                runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
+            }
+            if (prefs.infoSource == com.knobnext.InfoSource.CLOUD) launch {
+                val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
+                val first = TrackInfo.preview(facts, lang) ?: return@launch
+                if (telling.isActive && note == null && path.isEmpty() && same(t)) {
+                    noteView?.text = first
+                    status(service.getString(R.string.bubble_refining))
+                    refining = true
+                }
+            }
+            setNote(telling.await())
         }
     }
 

@@ -1291,6 +1291,7 @@ class KnobService : AccessibilityService() {
             handler.post { updateSensors() }
         }
         showBubbleFor(now)
+        prefetchFor(now)
         if (!prefs.announceAllTracks) {
             announcedTrack = null
             return
@@ -1332,6 +1333,25 @@ class KnobService : AccessibilityService() {
             }
         }
     }
+
+    /**
+     * A new track playing: its facts fetched ahead, so that the card, the story or a question opens with
+     * them at hand. On Wi-Fi only (on mobile data they are fetched when asked for); with the card showing
+     * by itself they are fetched for it anyway.
+     */
+    private fun prefetchFor(now: NowPlaying?) {
+        if (now?.playing != true || prefs.bubbleAuto != BubbleAuto.OFF) return
+        val title = now.title ?: return
+        val key = now.controller.packageName + "/" + now.artist + "/" + title
+        if (key == prefetched) return
+        prefetched = key
+        val unmetered = runCatching { !getSystemService(android.net.ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(false)
+        if (!unmetered) return
+        val track = now.controller.metadata?.let { TrackInfo.trackOf(it, now.controller.packageName) } ?: return
+        TrackInfo.prefetch(this, track, prefs.infoLanguage.resolve())
+    }
+
+    private var prefetched: String? = null
 
     /**
      * What there is to find out about [track]: its artist met for the first time (and something known

@@ -971,4 +971,5 @@
     <string name="sum_base_on">своя база</string>
     <string name="sum_lb_on">ListenBrainz</string>
     <string name="sum_pocket_short">карман по кнопке питания</string>
+    <string name="bubble_refining">Это первые факты — облачная модель ещё рассказывает…</string>
 </resources>

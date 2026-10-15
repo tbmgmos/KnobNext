@@ -380,10 +380,10 @@ object Brainz {
 
     /** [artist]'s dates from MusicBrainz (by [mbid] when Wikidata gave it: the right one), [album]'s among them. */
     suspend fun dates(artist: String, album: String?, mbid: String?): Dates? {
-        val id = mbid ?: artistId(Speech.cleanArtist(artist)) ?: return null
-        val a = get("$API/artist/$id?fmt=json")
+        val id = mbid ?: artistId(Speech.cleanArtist(artist), urgent = true) ?: return null
+        val a = get("$API/artist/$id?fmt=json", urgent = true)
         val span = a?.optJSONObject("life-span")
-        val groups = get("$API/release-group?artist=$id&type=album&limit=100&fmt=json")?.optJSONArray("release-groups")
+        val groups = get("$API/release-group?artist=$id&type=album&limit=100&fmt=json", urgent = true)?.optJSONArray("release-groups")
         // Neither answered (busy, offline): nothing is known, which is not the same as nothing there.
         if (a == null && groups == null) return null
         val all = (0 until (groups?.length() ?: 0)).mapNotNull { groups!!.optJSONObject(it) }
@@ -470,14 +470,14 @@ object Brainz {
 
     private suspend fun releaseGroupDate(artist: String, album: String): Pair<String, String>? {
         val q = "releasegroup:\"${clean(album)}\" AND artist:\"${clean(Speech.cleanArtist(artist))}\""
-        val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}")?.optJSONArray("release-groups") ?: return null
+        val groups = get("$API/release-group/?fmt=json&limit=5&query=${enc(q)}", urgent = true)?.optJSONArray("release-groups") ?: return null
         return (0 until groups.length()).mapNotNull { groups.optJSONObject(it) }
             .firstOrNull { it.optInt("score") >= COVER_SCORE && sameName(it.optString("title"), album) }
             ?.let { g -> g.optString("first-release-date").takeIf { it.length >= 4 }?.let { g.optString("title") to it } }
     }
 
-    private suspend fun artistId(artist: String): String? {
-        val a = get("$API/artist/?fmt=json&limit=1&query=${enc("artist:\"${clean(artist)}\"")}")
+    private suspend fun artistId(artist: String, urgent: Boolean = false): String? {
+        val a = get("$API/artist/?fmt=json&limit=1&query=${enc("artist:\"${clean(artist)}\"")}", urgent)
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
         return a.optString("id").takeIf { it.isNotBlank() }
@@ -502,16 +502,31 @@ object Brainz {
     private val gate = Mutex()
     private var last = 0L
 
-    /** A request to MusicBrainz, at most one a second whichever part of the app asks. */
-    internal suspend fun get(url: String): JSONObject? = gate.withLock {
-        val wait = last + SPACING_MS - System.currentTimeMillis()
-        if (wait > 0) delay(wait)
+    /**
+     * A request to MusicBrainz, at most one a second whichever part of the app asks. [urgent]: for a
+     * story someone is waiting for; the background's (the recording's credits, the artist base) let
+     * those go first.
+     */
+    internal suspend fun get(url: String, urgent: Boolean = false): JSONObject? {
+        if (urgent) urgentWaiting.incrementAndGet()
         try {
-            TrackInfo.getJson(url)
+            if (!urgent) while (urgentWaiting.get() > 0) delay(YIELD_MS)
+            return gate.withLock {
+                val wait = last + SPACING_MS - System.currentTimeMillis()
+                if (wait > 0) delay(wait)
+                try {
+                    TrackInfo.getJson(url)
+                } finally {
+                    last = System.currentTimeMillis()
+                }
+            }
         } finally {
-            last = System.currentTimeMillis()
+            if (urgent) urgentWaiting.decrementAndGet()
         }
     }
+
+    private val urgentWaiting = java.util.concurrent.atomic.AtomicInteger(0)
+    private const val YIELD_MS = 200L
 
 
     private fun clean(s: String) = s.replace("\"", "")

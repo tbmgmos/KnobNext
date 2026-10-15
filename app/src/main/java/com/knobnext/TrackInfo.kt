@@ -205,6 +205,8 @@ object TrackInfo {
         length: InfoLength,
         lang: String,
         source: InfoSource,
+        /** False for the round card: read with the eyes, it shows the facts rather than wait for a model on the phone. */
+        model: Boolean = true,
         note: (String) -> Unit,
     ): String? = coroutineScope {
         val started = System.currentTimeMillis()
@@ -264,11 +266,14 @@ object TrackInfo {
         // Apart from the story: an answer from the model does not wait for them, and they are still kept.
         val factsAhead = background.async { runCatching { facts(context, track, lang) }.getOrNull() }
         lastSources = emptyList()
-        if (source == InfoSource.CLOUD && CloudBrain.order(Prefs(context)).isNotEmpty()) {
+        val cloud = source == InfoSource.CLOUD && CloudBrain.order(Prefs(context)).isNotEmpty()
+        // The dates for the cloud's Reference, asked at once beside the facts rather than after them.
+        val datesAhead = if (cloud) background.async { runCatching { reference(context, track.artist, track.album, null) }.getOrNull() } else null
+        if (cloud) {
             // The facts are its footing when they come quickly; the rest it looks up itself.
             // Slow to come: what the artist base has, at once.
             val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() } ?: ArtistBase.enrich(context, track, lang, null)
-            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet)
+            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet, datesAhead)
             if (answer != null) {
                 found = quick
                 album = quick?.album ?: album
@@ -296,7 +301,7 @@ object TrackInfo {
         // Known under another spelling ("Kino" after "Кино"): no second introduction.
         if (firstMeet && remember && facts.artistId != null && Journal.knows(context, facts.artistId)) firstMeet = false
         val keep = { plan: Plan -> told = plan }
-        if (source != InfoSource.WIKI) {
+        if (source != InfoSource.WIKI && model) {
             retell(context, track, facts, length, lang, history.told(), firstMeet, keep)
                 ?.let { return@coroutineScope ready(it, context.getString(R.string.log_info_way_model)) }
             note(context.getString(R.string.log_info_plain))
@@ -317,10 +322,15 @@ object TrackInfo {
         lang: String,
         told: List<String>,
         firstMeet: Boolean,
+        datesAhead: kotlinx.coroutines.Deferred<Brainz.Dates?>?,
     ): CloudBrain.Answer? {
         val prefs = Prefs(context)
-        // The dates it is not to guess, as far as there is time for them (the voice is waiting).
-        val dates = within(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
+        // The dates it is not to guess, as far as there is time for them (the voice is waiting). Asked with
+        // the player's album at the start; when the player gave none and the facts found one, for that album.
+        val early = datesAhead?.let { withTimeoutOrNull(STORY_DATES_WAIT_MS) { it.await() } }
+        val album = facts?.album ?: track.album
+        val dates = if (early != null && (track.album != null || album == null || early.albumDate != null)) early
+        else within(STORY_DATES_WAIT_MS) { reference(context, track.artist, album, facts?.mbid) } ?: early
         val prompt = buildString {
             appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year)
             reference(dates, track, facts, lang)
@@ -349,6 +359,23 @@ object TrackInfo {
     /** Cloud answers that came too late for their telling, by track: the next telling takes them. */
     private val lateAnswers = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, kotlinx.coroutines.Deferred<CloudBrain.Answer?>>>()
     private const val LATE_ANSWER_MS = 30L * 60 * 1000
+
+    /**
+     * A few facts to show at once while the story is still being told (the cloud model is thinking):
+     * the introduction or the song's first facts, in the story's language. Nothing is marked as told.
+     */
+    fun preview(facts: Facts, lang: String): String? {
+        val song = merged(facts.song, lang).take(PREVIEW_FACTS)
+        val lines = (facts.intro.take(1) + song).ifEmpty { aboutLines(facts, lang).filter { inLanguage(it, lang) }.take(PREVIEW_FACTS) }
+        return lines.joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /** The track's facts fetched ahead, on a track change: the card then opens with them at hand. */
+    fun prefetch(context: Context, track: Track, lang: String) {
+        background.launch { runCatching { facts(context, track, lang) } }
+    }
+
+    private const val PREVIEW_FACTS = 2
 
     /** What the round card can ask the cloud model about the track or an artist down the circle. */
     enum class Question { SONG, MAKING, START, ROOTS, NEXT, WHO }
@@ -1245,7 +1272,7 @@ object TrackInfo {
     }
 
     private suspend fun albumSearch(query: String): Pair<String?, String?>? {
-        val json = Brainz.get("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"))
+        val json = Brainz.get("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=$ALBUM_SEARCH_LIMIT&query=" + URLEncoder.encode(query, "UTF-8"), urgent = true)
             ?: return null
         val found = json.optJSONArray("recordings") ?: return null
         val recordings = (0 until found.length()).mapNotNull { found.optJSONObject(it) }.filter { it.optInt("score") >= MIN_SCORE }
@@ -1261,7 +1288,7 @@ object TrackInfo {
         // The year the album first came out: its release group's. The releases found are often reissues
         // (Nevermind's 2011 remaster), and a recording's own date is the remaster's.
         val released = first?.optJSONObject("release-group")?.optString("id")?.takeIf { it.isNotBlank() }?.let { id ->
-            Brainz.get("https://musicbrainz.org/ws/2/release-group/$id?fmt=json")?.optString("first-release-date")
+            Brainz.get("https://musicbrainz.org/ws/2/release-group/$id?fmt=json", urgent = true)?.optString("first-release-date")
                 ?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
         }
         return first?.optString("title") to (released ?: year.takeIf { first == null })
