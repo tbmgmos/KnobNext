@@ -38,6 +38,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -89,8 +90,11 @@ class TrackBubble(
     private var subView: TextView? = null
     private var askJob: Job? = null
 
+    /** Counts the cards closed or folded: a question's answer is shown only on the card it was asked on. */
+    private var shownCard = 0
+
     /** The cloud model's answers this time, by card and question: asked again, shown at once. */
-    private val answers = HashMap<String, CloudBrain.Answer>()
+    private val answers = java.util.concurrent.ConcurrentHashMap<String, CloudBrain.Answer>()
     private var chipsRow: LinearLayout? = null
     private var circleBox: View? = null
     private var readButton: ImageView? = null
@@ -223,6 +227,9 @@ class TrackBubble(
         handler.removeCallbacks(tick)
         noteJob?.cancel()
         circleJob?.cancel()
+        // A question asked on the card before belongs to it: its answer must not land on this one.
+        askJob?.cancel()
+        shownCard++
         watch(null)
         root?.let { runCatching { windows.removeView(it) } }
         root = null
@@ -261,6 +268,9 @@ class TrackBubble(
         expanded = false
         noteJob?.cancel()
         circleJob?.cancel()
+        // A question asked on the card before belongs to it: its answer must not land on this one.
+        askJob?.cancel()
+        shownCard++
         path.clear()
         reasons.clear()
         trailAt = 0L
@@ -994,16 +1004,24 @@ class TrackBubble(
         noteView?.setText(R.string.bubble_asking)
         showSources(emptyList())
         keepOpen()
+        val card = shownCard
         askJob = scope.launch {
             val facts = if (artist != null) artists[artist] else trackFacts
-            val a = runCatching { TrackInfo.ask(service, t.takeIf { artist == null }, artist, q, prefs.infoLanguage.resolve(), facts) }.getOrNull()
+            // A cloud service that keeps retrying is not waited for forever: the answer, if it comes later,
+            // is kept for the next time the same is asked.
+            val asking = scope.async(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { TrackInfo.ask(service, t.takeIf { artist == null }, artist, q, prefs.infoLanguage.resolve(), facts) }.getOrNull()
+                    ?.also { answers[key] = it }
+            }
+            val a = kotlinx.coroutines.withTimeoutOrNull(ASK_WAIT_MS) { asking.await() }
+            // Closed meanwhile, or another track or artist on it now: the answer waits for its own card.
+            if (card != shownCard || track?.title != t.title || track?.artist != t.artist || path.lastOrNull() != artist) return@launch
             if (a == null) {
                 noteView?.text = service.getString(R.string.bubble_ask_failed, CloudBrain.lastError ?: "-")
                 log(service.getString(R.string.log_bubble_ask_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
                 return@launch
             }
-            answers[key] = a
-            if (path.lastOrNull() == artist) showAnswer(q, a, artist)
+            showAnswer(q, a, artist)
         }
     }
 
@@ -1232,6 +1250,8 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
+        /** A question in the card is waited for this long; a later answer is kept for the next asking. */
+        const val ASK_WAIT_MS = 45_000L
         const val BUBBLE_DP = 56
         const val RING_GAP_DP = 4
         const val RING_DP = 3

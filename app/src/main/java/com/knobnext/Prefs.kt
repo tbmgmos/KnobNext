@@ -189,6 +189,25 @@ data class Settings(
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("knob", Context.MODE_PRIVATE)
 
+    // The person's keys and tokens: a file of their own, left out of the cloud backup (see backup rules).
+    private val keys = context.getSharedPreferences("knob_keys", Context.MODE_PRIVATE)
+
+    init {
+        if (!keysMoved) {
+            // Kept with the settings before: moved once, so they leave the backup too.
+            val old = sp.all.filterKeys { k -> k in SECRET_KEYS || k.startsWith("cloud_key_") }
+            if (old.isNotEmpty()) {
+                val k = keys.edit()
+                old.forEach { (name, v) -> if (v is String && !keys.contains(name)) k.putString(name, v) }
+                k.apply()
+                val e = sp.edit()
+                old.keys.forEach { e.remove(it) }
+                e.apply()
+            }
+            keysMoved = true
+        }
+    }
+
     // The event log changes on every volume step; kept apart so that settings observers don't wake up for it.
     private val logSp = context.getSharedPreferences("knob_log", Context.MODE_PRIVATE)
 
@@ -326,8 +345,8 @@ class Prefs(context: Context) {
      * The person's own Last.fm key, for the track story. Empty: the app's own key, if the build has one.
      */
     var lastFmKey: String
-        get() = sp.getString("lastfm_key", null).orEmpty()
-        set(v) = sp.edit().putString("lastfm_key", v.trim()).apply()
+        get() = keys.getString("lastfm_key", null).orEmpty()
+        set(v) = keys.edit().putString("lastfm_key", v.trim()).apply()
 
     val lastFmKeyInUse: String get() = lastFmKey.ifBlank { BuildConfig.LASTFM_KEY }
 
@@ -360,13 +379,18 @@ class Prefs(context: Context) {
 
     /** The person's Discogs token: optional, for Discogs' search and quicker gathering. */
     var discogsToken: String
-        get() = sp.getString("discogs_token", null).orEmpty()
-        set(v) = sp.edit().putString("discogs_token", v.trim()).apply()
+        get() = keys.getString("discogs_token", null).orEmpty()
+        set(v) = keys.edit().putString("discogs_token", v.trim()).apply()
 
     /** The person's ListenBrainz token: their listens are written down with it. */
     var lbToken: String
-        get() = sp.getString("lb_token", null).orEmpty()
-        set(v) = sp.edit().putString("lb_token", v.trim()).apply()
+        get() = keys.getString("lb_token", null).orEmpty()
+        // Another token (or none): whose it is is learned anew when it is checked.
+        set(v) {
+            if (v.trim() == lbToken) return
+            keys.edit().putString("lb_token", v.trim()).apply()
+            sp.edit().remove("lb_user").apply()
+        }
 
     /** Whose the token is (for their statistics), learned when it was checked. */
     var lbUser: String
@@ -397,11 +421,14 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("cloud_fallback", true)
         set(v) = sp.edit().putBoolean("cloud_fallback", v).apply()
 
-    fun cloudKey(service: CloudService): String = sp.getString("cloud_key_" + service.name, null).orEmpty()
+    fun cloudKey(service: CloudService): String = keys.getString("cloud_key_" + service.name, null).orEmpty()
 
     // A new key or model: what worked with the old one is tried afresh.
-    fun setCloudKey(service: CloudService, key: String) =
-        sp.edit().putString("cloud_key_" + service.name, key.trim()).remove("cloud_working_" + service.name).apply()
+    fun setCloudKey(service: CloudService, key: String) {
+        if (key.trim() == cloudKey(service)) return
+        keys.edit().putString("cloud_key_" + service.name, key.trim()).apply()
+        sp.edit().remove("cloud_working_" + service.name).apply()
+    }
 
     fun cloudModel(service: CloudService): String = sp.getString("cloud_model_" + service.name, null).orEmpty()
 
@@ -424,12 +451,21 @@ class Prefs(context: Context) {
         sp.edit().putString("cloud_last", what).putBoolean("cloud_last_ok", ok).putLong("cloud_last_at", System.currentTimeMillis()).apply()
 
     /** The model, and whether with the search, that answered last with this key: tried first. */
-    fun cloudWorking(service: CloudService): Pair<String, Boolean>? =
-        sp.getString("cloud_working_" + service.name, null)?.split('\u0000')?.takeIf { it.size == 2 && it[0].isNotBlank() }
-            ?.let { it[0] to (it[1] == "1") }
+    /**
+     * The model (and whether with search) that answered last, tried first next time. Without search it is
+     * remembered for a few hours only: one busy moment of the search must not give it up for good.
+     */
+    fun cloudWorking(service: CloudService): Pair<String, Boolean>? {
+        val parts = sp.getString("cloud_working_" + service.name, null)?.split('\u0000') ?: return null
+        if (parts.size < 2 || parts[0].isBlank()) return null
+        val search = parts[1] == "1"
+        val at = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        if (!search && System.currentTimeMillis() - at > NO_SEARCH_KEPT_MS) return null
+        return parts[0] to search
+    }
 
     fun setCloudWorking(service: CloudService, model: String, search: Boolean) =
-        sp.edit().putString("cloud_working_" + service.name, model + "\u0000" + (if (search) "1" else "0")).apply()
+        sp.edit().putString("cloud_working_" + service.name, model + "\u0000" + (if (search) "1" else "0") + "\u0000" + System.currentTimeMillis()).apply()
 
     /**
      * The artists the last "widening the circle" note named, for [Action.PLAY_CIRCLE]; [circlePick]
@@ -775,8 +811,9 @@ class Prefs(context: Context) {
         sp.getString(key, null)?.let { stored -> Action.entries.firstOrNull { it.name == stored } ?: Action.NONE }
 
     /** The action for [g] while [pkg] is the player: its own set if it has one, otherwise the common one. */
+    // The headset's buttons are the same in every app: a profile has no say over them (it shows none).
     fun action(g: Gesture, pkg: String?): Action =
-        if (pkg != null && pkg in profileApps) stored(profileKey(g, pkg)) ?: action(g) else action(g)
+        if (pkg != null && pkg in profileApps && g.group != GestureGroup.HEADSET) stored(profileKey(g, pkg)) ?: action(g) else action(g)
 
     fun setAction(g: Gesture, a: Action, pkg: String?) {
         if (pkg == null) setAction(g, a) else sp.edit().putString(profileKey(g, pkg), a.name).apply()
@@ -784,7 +821,7 @@ class Prefs(context: Context) {
 
     fun createProfile(pkg: String, preset: ProfilePreset) {
         val edit = sp.edit()
-        Gesture.entries.forEach { g ->
+        Gesture.entries.filter { it.group != GestureGroup.HEADSET }.forEach { g ->
             val a = if (preset == ProfilePreset.SEEK) SEEK_PRESET[g] ?: action(g) else action(g)
             edit.putString(profileKey(g, pkg), a.name)
         }
@@ -795,6 +832,11 @@ class Prefs(context: Context) {
     fun migrate() {
         val level = sp.getInt("migrated", 0)
         if (level >= 2) return
+        // A fresh install has nothing to bring over: the person's first choices are not to be overwritten.
+        if (sp.all.isEmpty()) {
+            sp.edit().putInt("migrated", 2).apply()
+            return
+        }
         val edit = sp.edit()
         // One voice for a whole phrase sounds more natural than switching voices mid-sentence.
         if (level < 2) edit.putBoolean("tts_multilang", false)
@@ -916,7 +958,11 @@ class Prefs(context: Context) {
     )
 
     /** Returns an unregister function. The listener object must stay referenced, so it lives in the closure. */
-    fun observe(onChange: () -> Unit): () -> Unit = observe(sp, onChange)
+    fun observe(onChange: () -> Unit): () -> Unit {
+        val settings = observe(sp, onChange)
+        val secrets = observe(keys, onChange)
+        return { settings(); secrets() }
+    }
 
     /** Same as [observe], for the event log. */
     fun observeLog(onChange: () -> Unit): () -> Unit = observe(logSp, onChange)
@@ -928,6 +974,12 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        /** The keys and tokens kept apart from the settings (and cloud keys, "cloud_key_" + the service). */
+        private val SECRET_KEYS = setOf("lastfm_key", "discogs_token", "lb_token")
+
+        @Volatile private var keysMoved = false
+        private const val NO_SEARCH_KEPT_MS = 6L * 60 * 60 * 1000
+
         private val SEEK_PRESET = mapOf(
             Gesture.HOLD_UP to Action.SEEK_FORWARD,
             Gesture.HOLD_DOWN to Action.SEEK_BACK,

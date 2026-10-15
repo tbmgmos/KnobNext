@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Only for checking GitHub for a newer release and downloading it; can be turned off in settings. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether the phone is online: nothing found offline says nothing about an artist. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Updating from inside the app: the downloaded release is handed to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- The daily update check: tell the user about a new version, and keep the check after a restart. -->

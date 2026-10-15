@@ -384,6 +384,8 @@ object Brainz {
         val a = get("$API/artist/$id?fmt=json")
         val span = a?.optJSONObject("life-span")
         val groups = get("$API/release-group?artist=$id&type=album&limit=100&fmt=json")?.optJSONArray("release-groups")
+        // Neither answered (busy, offline): nothing is known, which is not the same as nothing there.
+        if (a == null && groups == null) return null
         val all = (0 until (groups?.length() ?: 0)).mapNotNull { groups!!.optJSONObject(it) }
             .mapNotNull { g ->
                 val date = g.optString("first-release-date").takeIf { it.length >= 4 } ?: return@mapNotNull null

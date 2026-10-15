@@ -5,5 +5,7 @@
     <cloud-backup>
         <exclude domain="file" path="trackinfo" />
         <exclude domain="sharedpref" path="trackinfo_rotation.xml" />
+        <!-- The person's keys and tokens: never in the cloud. -->
+        <exclude domain="sharedpref" path="knob_keys.xml" />
     </cloud-backup>
 </data-extraction-rules>

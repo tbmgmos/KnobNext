@@ -228,6 +228,9 @@ object ListenBrainz {
             maybeSubmit()
         }
 
+        /** No longer following (the watcher stopped): nothing is written down for the track left unheard. */
+        fun stop() = reset()
+
         private fun reset() {
             handler.removeCallbacks(check)
             key = null

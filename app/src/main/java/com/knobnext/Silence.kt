@@ -18,6 +18,7 @@ class Silence {
 
     fun start(): Boolean {
         if (track != null) return true
+        var made: AudioTrack? = null
         return try {
             val t = AudioTrack.Builder()
                 .setAudioAttributes(
@@ -36,6 +37,7 @@ class Silence {
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .setBufferSizeInBytes(FRAMES * 2)
                 .build()
+            made = t
             t.write(ShortArray(FRAMES), 0, FRAMES)
             // Loops the same half second of zeros for as long as needed, no thread to feed it.
             t.setLoopPoints(0, FRAMES, -1)
@@ -43,6 +45,8 @@ class Silence {
             track = t
             true
         } catch (_: Exception) {
+            // Made but not started: released here, it is not yet the one stop() knows.
+            if (track == null) runCatching { made?.release() }
             stop()
             false
         }

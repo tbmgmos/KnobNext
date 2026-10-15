@@ -272,7 +272,7 @@ object TrackInfo {
                 found = quick
                 album = quick?.album ?: album
                 lastSources = answer.sources
-                return@coroutineScope ready(answer.text, CloudBrain.lastUsed ?: Prefs(context).cloudService.title)
+                return@coroutineScope ready(answer.text, answer.by ?: Prefs(context).cloudService.title)
             }
             note(context.getString(R.string.log_info_cloud_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
         }
@@ -285,7 +285,8 @@ object TrackInfo {
         val facts = factsAhead.await()
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
-            if (remember && track.artist != null) {
+            // Without the network nothing could be found: that says nothing about the artist.
+            if (remember && track.artist != null && online(context)) {
                 Journal.record(context, track.artist, track.title, Speech.cleanTitle(track.title), track.album, null, null)
             }
             return@coroutineScope null
@@ -344,7 +345,7 @@ object TrackInfo {
         }
         val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
         val text = clean(checked.text, length, lang) ?: return null
-        return CloudBrain.Answer(text, checked.sources)
+        return CloudBrain.Answer(text, checked.sources, checked.by)
     }
 
     /** Cloud answers that came too late for their telling, by track: the next telling takes them. */
@@ -388,7 +389,7 @@ object TrackInfo {
         // A list of names keeps its lines; anything else reads as one note.
         val text = if (question == Question.NEXT) answer.text.lines().map { it.trim().trimStart('-', '*', '•', ' ') }.filter { it.isNotBlank() }.joinToString("\n")
         else speakable(answer.text.replace(Regex("[*#_`]"), "")).trim()
-        return CloudBrain.Answer(text, answer.sources)
+        return CloudBrain.Answer(text, answer.sources, answer.by)
     }
 
     /** Who the cloud model is to be, and what it must not do. */
@@ -488,7 +489,7 @@ object TrackInfo {
             CloudBrain.lastError = "в ответе были только непроверенные даты"
             return null
         }
-        return CloudBrain.Answer(text, answer.sources)
+        return CloudBrain.Answer(text, answer.sources, answer.by)
     }
 
     /** "the 1990s", «в 1990-х»: a decade, not a date to check. */
@@ -873,6 +874,21 @@ object TrackInfo {
      * base gathered ahead ([ArtistBase]): its facts alone when nothing could be fetched.
      */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
+        // The story, the card and the "news" mark ask about the same track at once: it is fetched once.
+        val key = "${track.artist}\u0000${track.title}\u0000${track.album}\u0000$lang"
+        val running = synchronized(fetching) {
+            fetching[key]?.takeIf { it.isActive } ?: background.async { factsNow(context, track, lang) }.also { fetching[key] = it }
+        }
+        return try {
+            running.await()
+        } finally {
+            synchronized(fetching) { if (fetching[key] === running && !running.isActive) fetching.remove(key) }
+        }
+    }
+
+    private val fetching = HashMap<String, kotlinx.coroutines.Deferred<Facts?>>()
+
+    private suspend fun factsNow(context: Context, track: Track, lang: String): Facts? {
         // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is.
         val match = if (track.album == null) within(LOOKUP_WAIT_MS) { ListenBrainz.lookup(context, track.artist, track.title) } else null
         val known = if (match?.album != null) track.copy(album = match.album) else track
@@ -1413,6 +1429,13 @@ object TrackInfo {
     }
 
     private fun dir(context: Context) = File(context.filesDir, "trackinfo").apply { mkdirs() }
+
+    /** Whether the phone has a network that reaches the internet. */
+    internal fun online(context: Context): Boolean = runCatching {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return true
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(true)
 
     /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {

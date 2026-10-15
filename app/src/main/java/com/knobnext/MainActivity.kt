@@ -27,6 +27,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val prefs = Prefs(this)
+        // Before the person changes anything: an old setting brought over then cannot undo a new choice.
+        prefs.migrate()
         val version = packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
         val actions = ScreenActions(
             openAccessibility = {

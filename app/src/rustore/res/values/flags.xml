@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="update_check">false</bool>
+    <!-- The build may use the network: stories from the open sources, the cloud model, the artist base, ListenBrainz. -->
+    <bool name="network">false</bool>
 </resources>

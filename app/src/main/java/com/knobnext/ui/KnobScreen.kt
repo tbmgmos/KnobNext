@@ -388,7 +388,7 @@ private fun LazyListScope.homePage(ctx: PageContext, update: Release?, nowPlayin
                             )
                         },
                     ) { ctx.open(Page.SEQUENCES) }
-                    val motionOn = listOf(s.backTap, s.flip, s.twist, s.wave).count { it }
+                    val motionOn = listOf(s.backTap, s.flip, s.twist, s.wave, s.pixelTap).count { it }
                     PageTile(
                         2, MaterialShapes.SoftBurst, KnobIcons.TouchApp, R.string.section_motion,
                         if (motionOn == 0) stringResource(R.string.tile_off) else stringResource(R.string.tile_motion, motionOn),
@@ -713,7 +713,9 @@ private fun BrainCard(ctx: PageContext) {
                 )
                 SwitchRow(
                     shape(2 + n), stringResource(R.string.brain_titles), s.smartTitles, { ctx.prefs.smartTitles = it },
-                    subtitle = stringResource(R.string.brain_titles_hint),
+                    subtitle = stringResource(if (s.cleanTitles) R.string.brain_titles_hint else R.string.brain_titles_needs_clean),
+                    // It improves the cleaned names: without cleaning there is nothing for it to do.
+                    enabled = s.cleanTitles,
                 )
             }
         }
@@ -1632,7 +1634,8 @@ private fun LazyListScope.speechSettings(ctx: PageContext) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchRow(
                     shape(0), stringResource(R.string.pref_announce_skips), s.announceSkips, { prefs.announceSkips = it },
-                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled,
+                    // Every new track is named anyway when the switch below is on.
+                    subtitle = stringResource(R.string.pref_announce_skips_hint), enabled = s.enabled && !s.announceAllTracks,
                 )
                 SwitchRow(
                     shape(1), stringResource(R.string.pref_announce_all), s.announceAllTracks, { prefs.announceAllTracks = it },
@@ -1699,8 +1702,11 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.info_hint))
-            SectionTitle(stringResource(R.string.story_sources))
-            Group(1) {
+            // The RuStore build has no network: only the model on the phone can tell anything there.
+            val network = LocalContext.current.resources.getBoolean(R.bool.network)
+            if (!network) Hint(stringResource(R.string.info_no_network))
+            if (network) SectionTitle(stringResource(R.string.story_sources))
+            if (network) Group(1) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ControlRow(
                         shape(0), stringResource(R.string.info_source),
@@ -1783,6 +1789,8 @@ private fun LazyListScope.bubbleSettings(ctx: PageContext) {
 /** The cloud model, an experiment: one switch, and behind it the services, keys and models. */
 @Composable
 private fun CloudCard(ctx: PageContext) {
+    // No network in this build (RuStore): no cloud either.
+    if (!LocalContext.current.resources.getBoolean(R.bool.network)) return
     val s = ctx.s
     val prefs = ctx.prefs
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

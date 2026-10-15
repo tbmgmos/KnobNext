@@ -67,7 +67,8 @@ object SelfUpdate {
             } catch (_: Exception) {
                 return@launch fail(app.getString(R.string.update_err_network))
             }
-            verify(app, file)?.let { return@launch fail(it) }
+            // Reading the archive's signatures takes a while for a big APK: not on the screen's thread.
+            kotlinx.coroutines.withContext(Dispatchers.IO) { verify(app, file) }?.let { return@launch fail(it) }
             try {
                 kotlinx.coroutines.withContext(Dispatchers.IO) { install(app, file) }
                 mutableState.value = State.Installing

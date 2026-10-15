@@ -468,6 +468,8 @@ private suspend fun fetchCover(context: Context, key: String, album: String?): B
  */
 @Composable
 fun SourceKeys(prefs: Prefs) {
+    // Services on the network: not in a build without it (RuStore).
+    if (!LocalContext.current.resources.getBoolean(R.bool.network)) return
     val context = LocalContext.current
     SectionTitle(stringResource(R.string.keys_title))
     Hint(stringResource(R.string.keys_hint))
@@ -499,6 +501,8 @@ fun SourceKeys(prefs: Prefs) {
  */
 @Composable
 fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
+    // Services on the network: not in a build without it (RuStore).
+    if (!LocalContext.current.resources.getBoolean(R.bool.network)) return
     val context = LocalContext.current
     val progress by com.knobnext.ArtistBase.progress.collectAsState()
     // Counted again when a gathering ends.
@@ -527,6 +531,8 @@ fun BaseCard(s: com.knobnext.Settings, prefs: Prefs) {
  */
 @Composable
 fun ListenBrainzCard(s: com.knobnext.Settings, prefs: Prefs) {
+    // Services on the network: not in a build without it (RuStore).
+    if (!LocalContext.current.resources.getBoolean(R.bool.network)) return
     val context = LocalContext.current
     SectionTitle(stringResource(R.string.lb_title))
     Hint(stringResource(R.string.lb_hint))
@@ -696,6 +702,9 @@ private fun keyProblem(result: KeyCheck): String = when (result) {
     }
 }
 
+/** What each key was answered this run of the app (by the key itself): asked once, not on every visit. */
+private val checkedKeys = java.util.concurrent.ConcurrentHashMap<String, KeyCheck>()
+
 @Composable
 private fun KeyField(
     context: Context,
@@ -714,22 +723,28 @@ private fun KeyField(
     var checking by remember { mutableStateOf(false) }
     // Bumped by "Check again": the same key asked once more (after the connection came back, say).
     var again by remember { mutableIntStateOf(0) }
+    // Hidden like a password unless asked to show: a screenshot or someone nearby should not get it.
+    var visible by remember { mutableStateOf(false) }
     val formatProblem = if (text.isBlank()) null else format(text)
     LaunchedEffect(text, again) {
         result = null
         if (text.isBlank()) {
-            save("")
+            if (stored.isNotBlank()) save("")
             return@LaunchedEffect
         }
-        delay(SAVE_DELAY_MS)
+        // The key as it was: opening the page neither saves it again (which would forget the model that
+        // worked) nor asks the service each time: once per run of the app, unless asked again.
+        val untouched = text == stored && again == 0
+        if (untouched) checkedKeys[text]?.let { result = it; return@LaunchedEffect }
+        if (!untouched) delay(SAVE_DELAY_MS)
         // Kept as typed even when it looks wrong: a half-pasted key is theirs to finish.
-        save(text)
+        if (text != stored) save(text)
         if (formatProblem != null && formatBlocks) return@LaunchedEffect
         checking = true
         try {
             result = withContext(Dispatchers.IO) {
                 runCatching { check(text) }.getOrElse { KeyCheck.NoAnswer(KeyCheck.Kind.OTHER, it.javaClass.simpleName) }
-            }
+            }.also { checkedKeys[text] = it }
         } finally {
             checking = false
         }
@@ -757,10 +772,15 @@ private fun KeyField(
                 )
             },
             isError = result !is KeyCheck.Works && (formatProblem != null || result != null),
+            visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
+            else androidx.compose.ui.text.input.PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
         )
         Row {
             TextButton(onClick = { open(context, getUrl) }) { Text(stringResource(R.string.keys_get)) }
+            if (text.isNotBlank()) {
+                TextButton(onClick = { visible = !visible }) { Text(stringResource(if (visible) R.string.keys_hide else R.string.keys_show)) }
+            }
             if (text.isNotBlank() && !checking && (formatProblem == null || !formatBlocks)) {
                 TextButton(onClick = { again++ }) { Text(stringResource(R.string.keys_check_again)) }
             }

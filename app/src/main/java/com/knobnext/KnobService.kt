@@ -479,6 +479,8 @@ class KnobService : AccessibilityService() {
         PowerHold.handler = null
         HeadsetHold.handler = null
         VoiceListener.trigger = null
+        pendingAnnounce?.invoke()
+        scrobbler.stop()
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) {
             pocket.hide(PocketScreen.Reason.STOPPED)
@@ -1190,7 +1192,11 @@ class KnobService : AccessibilityService() {
         val playing = enabled && (media.musicActive() || testing)
         val now = SystemClock.elapsedRealtime()
         // Playing again some other way (the player itself, headphones): the window is no longer needed.
-        if (media.musicActive() && pausedAt != 0L && now - pausedAt > PAUSE_SETTLE_MS) pausedAt = 0L
+        if (media.musicActive() && pausedAt != 0L && now - pausedAt > PAUSE_SETTLE_MS) {
+            pausedAt = 0L
+            // Nor is the flip's: picking the phone up later must not start music paused by hand since.
+            flipPausedAt = 0L
+        }
         checkSilence()
         val resumable = enabled && !playing && resumeWindowOpen()
 
@@ -1256,21 +1262,26 @@ class KnobService : AccessibilityService() {
      * step with the one that plays now, and speaks new tracks when that is turned on.
      */
     private fun updateTrackWatcher() {
-        val want = (prefs.enabled || GestureTest.active) && media.hasAccess()
+        // Listens are written down whether or not the gestures are on.
+        val scrobbling = prefs.lbScrobble && prefs.lbToken.isNotBlank()
+        val want = (prefs.enabled || GestureTest.active || scrobbling) && media.hasAccess()
         if (want && trackWatcher == null) {
             announcedTrack = null
             trackWatcher = NowPlayingTracker(this, prefs, ::onTrack).also { it.start() }
         } else if (!want && trackWatcher != null) {
             trackWatcher?.stop()
             trackWatcher = null
+            scrobbler.stop()
         }
     }
 
     /** A track changed (or just its state): speak it once, if it is new, playing and the screen is off. */
     private fun onTrack(now: NowPlaying?) {
-        headset.mirror(now?.controller)
-        // Written down to ListenBrainz when so set, whatever player it is.
+        // Written down to ListenBrainz when so set, whatever player it is, gestures on or off.
         scrobbler.onTrack(now)
+        // The rest is the gestures' (the watcher may run for the listens alone).
+        if (!prefs.enabled && !GestureTest.active) return
+        headset.mirror(now?.controller)
         // Playing again, whichever way: the silence that kept the keys alive is no longer needed.
         if (now?.playing == true && silence.playing) stopSilence(R.string.log_silence_resumed)
         val pkg = now?.controller?.packageName
@@ -1328,10 +1339,10 @@ class KnobService : AccessibilityService() {
      */
     private suspend fun newsOf(track: TrackInfo.Track): BubbleNews? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val artist = track.artist?.takeIf { it.isNotBlank() } ?: return@withContext null
-        val first = Journal.firstMeeting(this@KnobService, artist)
         val facts = runCatching { TrackInfo.facts(this@KnobService, track, prefs.infoLanguage.resolve()) }.getOrNull()
         if (facts == null || facts.empty && facts.intro.isEmpty()) return@withContext null
-        if (first) return@withContext BubbleNews.NEW_ARTIST
+        // Marked as met only once there is something to tell: offline, they stay new for next time.
+        if (Journal.firstMeeting(this@KnobService, artist)) return@withContext BubbleNews.NEW_ARTIST
         val told = Journal.entry(this@KnobService, Journal.key(artist))?.notes.orEmpty()
             .any { Speech.cleanTitle(it.track).equals(Speech.cleanTitle(track.title), ignoreCase = true) }
         if (facts.song.isNotEmpty() && !told) BubbleNews.STORY else null
@@ -1444,15 +1455,23 @@ class KnobService : AccessibilityService() {
     }
 
     /** Says the new track's name once the player reports it (or after a short wait, whatever it is then). */
+    /**
+     * Says the new track's name once the player reports it and it settles (several skips in a row: only
+     * the last one), or after a short wait, whatever it is then. One at a time: a new skip takes over.
+     */
     private fun announceNewTrack(controller: MediaController?) {
         val c = controller ?: return
+        pendingAnnounce?.invoke()
         val before = c.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
-        var done = false
         lateinit var callback: MediaController.Callback
-        val finish = Runnable {
-            if (done) return@Runnable
-            done = true
+        lateinit var finish: Runnable
+        val drop = {
+            handler.removeCallbacks(finish)
             c.unregisterCallback(callback)
+            pendingAnnounce = null
+        }
+        finish = Runnable {
+            drop()
             extras.perform(Action.ANNOUNCE, c)
         }
         callback = object : MediaController.Callback() {
@@ -1460,13 +1479,17 @@ class KnobService : AccessibilityService() {
                 val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return
                 if (title != before) {
                     handler.removeCallbacks(finish)
-                    finish.run()
+                    handler.postDelayed(finish, ANNOUNCE_SETTLE_MS)
                 }
             }
         }
+        pendingAnnounce = drop
         c.registerCallback(callback, handler)
         handler.postDelayed(finish, ANNOUNCE_WAIT_MS)
     }
+
+    /** Takes back the announcement waiting for a new track (a newer skip, the service stopping). */
+    private var pendingAnnounce: (() -> Unit)? = null
 
     /** Sleep timer: lower the volume step by step, pause, then put the volume back for next time. */
     private fun fadeOutAndPause() {
@@ -1715,6 +1738,9 @@ class KnobService : AccessibilityService() {
         const val RAMP_QUIET_MS = 600L
         const val IGNORE_OWN_CHANGE_MS = 400L
         const val ANNOUNCE_WAIT_MS = 2_500L
+
+        /** A new title is said once no other follows this soon (skipping through several). */
+        const val ANNOUNCE_SETTLE_MS = 600L
         const val RESTORE_AFTER_FADE_MS = 1_000L
         const val FADE_SILENCE_MS = 4_000L
         const val FADE_SILENCE_CHECK_MS = 500L

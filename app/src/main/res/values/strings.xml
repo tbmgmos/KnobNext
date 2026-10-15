@@ -889,7 +889,7 @@
     <string name="diag_sensor_proximity">датчик приближения</string>
     <string name="diag_device">Устройство</string>
     <string name="diag_share">Поделиться отчётом</string>
-    <string name="diag_hint">Отчёт — это текст этой страницы и журнал событий. Его можно отправить разработчику: в нём нет личных данных, кроме названия играющего приложения.</string>
+    <string name="diag_hint">Отчёт — это текст этой страницы и журнал событий. Его можно отправить разработчику. Ключей в нём нет, но журнал может содержать названия плееров, исполнителей и треков и распознанные голосовые фразы: посмотрите его перед отправкой.</string>
     <string name="diag_report_log">Журнал событий:</string>
 
     <!-- Hold time advice -->
@@ -987,4 +987,8 @@
     <string name="lb_status">Трек записывается после половины или 4 минут прослушивания. Отправлено: %1$d</string>
     <string name="lb_status_queued">Отправлено: %1$d · ждут сети: %2$d</string>
     <string name="lb_user">Профиль: %1$s</string>
+    <string name="keys_show">Показать</string>
+    <string name="keys_hide">Скрыть</string>
+    <string name="brain_titles_needs_clean">Работает вместе с «Чистить названия» в «Озвучке треков»: сначала включите её</string>
+    <string name="info_no_network">В версии из RuStore у приложения нет доступа к интернету: рассказ — только от Gemini Nano на телефоне, пока открыт KnobNext. Полная версия — на GitHub</string>
 </resources>

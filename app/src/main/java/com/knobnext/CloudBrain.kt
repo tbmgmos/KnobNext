@@ -37,7 +37,8 @@ enum class CloudService(
 
 object CloudBrain {
     /** An answer and the pages it was found on (Gemini's search), for the card to name. */
-    class Answer(val text: String, val sources: List<Source>)
+    /** [by]: what answered ("Groq · openai/gpt-oss-120b"), this answer's own, whatever else was asked meanwhile. */
+    class Answer(val text: String, val sources: List<Source>, val by: String? = null)
 
     class Source(val title: String, val url: String)
 
@@ -94,6 +95,8 @@ object CloudBrain {
     private val answered = HashMap<String, Pair<Long, Answer>>()
 
     private fun askNow(prefs: Prefs, system: String, prompt: String, maxTokens: Int): Answer? {
+        usedHere.set(null)
+        lastCode = 0
         val services = order(prefs)
         if (services.isEmpty()) return null.also { lastError = "нет ключа" }
         val why = ArrayList<String>()
@@ -119,8 +122,9 @@ object CloudBrain {
             }
             if (answer != null) {
                 // For the settings: what answered last (the service it switched to, if it did).
-                prefs.setCloudLast(lastUsed.orEmpty(), ok = true)
-                return answer
+                val by = usedHere.get()
+                prefs.setCloudLast(by.orEmpty(), ok = true)
+                return Answer(answer.text, answer.sources, by)
             }
             why += "${service.title}: ${lastError ?: "нет ответа"}"
         }
@@ -130,7 +134,7 @@ object CloudBrain {
     }
 
     private fun used(service: CloudService, model: String, search: Boolean?) {
-        lastUsed = listOfNotNull(
+        usedHere.set(listOfNotNull(
             service.title,
             model,
             when (search) {
@@ -138,7 +142,8 @@ object CloudBrain {
                 false -> "без поиска"
                 null -> null
             },
-        ).joinToString(" · ")
+        ).joinToString(" · "))
+        lastUsed = usedHere.get()
     }
 
     /** Whether the key opens the service: the list of its models, which costs nothing. */
@@ -392,6 +397,14 @@ object CloudBrain {
 
     /** OpenRouter's free text models, the better-known families first. */
     private fun freeModels(key: String): List<String> {
+        // The whole list is large: fetched once an hour, not before every answer.
+        freeList?.takeIf { System.currentTimeMillis() - it.first < MODELS_KEPT_MS }?.let { return it.second }
+        return fetchFreeModels(key).also { if (it.isNotEmpty()) freeList = System.currentTimeMillis() to it }
+    }
+
+    @Volatile private var freeList: Pair<Long, List<String>>? = null
+
+    private fun fetchFreeModels(key: String): List<String> {
         val list = get("${CloudService.OPENROUTER.base}/models", mapOf("Authorization" to "Bearer $key")).json?.optJSONArray("data") ?: return emptyList()
         return (0 until list.length()).mapNotNull { list.optJSONObject(it) }
             .filter { m ->
@@ -510,8 +523,16 @@ object CloudBrain {
     /** Models by these names do not chat: embeddings, rerankers, speech, guards. */
     private val NOT_CHAT = listOf("embed", "rerank", "whisper", "tts", "guard", "moderation")
 
-    /** The last failed request's code, for the next step to decide on. */
-    @Volatile private var lastCode = 0
+    /**
+     * The last failed request's code, for the next step to decide on; and what answered. Per thread: a
+     * question from the card may be asked while a story's request is still running, each on its own
+     * thread from start to end (the requests block), and neither must steer the other.
+     */
+    private val codeHere = ThreadLocal<Int>()
+    private val usedHere = ThreadLocal<String?>()
+    private var lastCode: Int
+        get() = codeHere.get() ?: 0
+        set(v) = codeHere.set(v)
 
     /** Free models from these families are tried first: they know music and Russian best. */
     private val FREE_PREFERRED = listOf("deepseek", "gemini", "llama-3.3", "qwen", "mistral", "llama")
