@@ -41,6 +41,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -491,15 +493,23 @@ class TrackBubble(
             val telling = async {
                 runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
             }
-            if (prefs.infoSource == com.knobnext.InfoSource.CLOUD) launch {
-                val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
-                val first = TrackInfo.preview(facts, lang) ?: return@launch
+            val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
+            fun preview(facts: TrackInfo.Facts) {
+                val first = TrackInfo.preview(facts, lang) ?: return
                 if (telling.isActive && note == null && path.isEmpty() && same(t)) {
                     noteView?.text = first
-                    status(service.getString(R.string.bubble_refining))
+                    status(service.getString(if (cloud) R.string.bubble_refining else R.string.bubble_more_coming))
                     refining = true
                 }
             }
+            // The Wikipedia articles come first, in a second or two: shown while the other sources answer.
+            val early = launch { TrackInfo.earlyOf(t, lang).filterNotNull().first().let(::preview) }
+            if (cloud) launch {
+                val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
+                early.cancel()
+                preview(facts)
+            }
+            telling.invokeOnCompletion { early.cancel() }
             setNote(telling.await())
         }
     }

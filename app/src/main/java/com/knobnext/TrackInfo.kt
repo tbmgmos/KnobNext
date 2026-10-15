@@ -173,6 +173,10 @@ object TrackInfo {
             song, artist, album, year, albumText, intro, circle, related, relatedIds, artistId, coverUrl, pages, deep, mbid,
         )
 
+        fun withAlbum(album: String) = Facts(
+            song, artist, album, year, albumText, intro, circle, related, relatedIds, artistId, coverUrl, pages, deep, mbid,
+        )
+
         /** Where these facts came from, without repeats ("wikipedia", "lastfm", "discogs"…). */
         val sources get() = (song + artist + albumText).mapNotNull { it.source }.distinct()
     }
@@ -292,6 +296,8 @@ object TrackInfo {
             note(context.getString(R.string.log_info_cloud_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
         }
         val facts = factsAhead.await()
+        // Where the time went: each source's seconds, for the log.
+        stepsOf(track)?.let { note(context.getString(R.string.log_info_steps, it)) }
         if (facts == null || facts.empty) {
             note(context.getString(R.string.log_info_no_facts))
             // Nothing found (offline, a build without network): Gemini Nano may know the artist itself.
@@ -940,7 +946,10 @@ object TrackInfo {
         val quiet = kotlin.coroutines.coroutineContext[Brainz.Quiet]?.takeIf { it.on }
         val running = synchronized(fetching) {
             fetching[key]?.takeIf { it.isActive }?.also { if (quiet == null) quietOf.remove(key)?.on = false }
-                ?: background.async(quiet ?: kotlin.coroutines.EmptyCoroutineContext) { translated(factsNow(context, track, lang), lang) }
+                ?: background.async(quiet ?: kotlin.coroutines.EmptyCoroutineContext) {
+                    val first = earlyOf(track, lang).also { it.value = null }
+                    translated(factsNow(context, track, lang) { first.value = it }, lang)
+                }
                     .also { fetching[key] = it; if (quiet != null) quietOf[key] = quiet else quietOf.remove(key) }
         }
         return try {
@@ -953,24 +962,77 @@ object TrackInfo {
     private val fetching = HashMap<String, kotlinx.coroutines.Deferred<Facts?>>()
     private val quietOf = HashMap<String, Brainz.Quiet>()
 
-    private suspend fun factsNow(context: Context, track: Track, lang: String): Facts? {
-        // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is.
-        val match = if (track.album == null) within(LOOKUP_WAIT_MS) { ListenBrainz.lookup(context, track.artist, track.title) } else null
+    /**
+     * The first facts about [track] while the rest are still being fetched (the Wikipedia articles, a
+     * second or two in): the card shows them at once instead of waiting for the slowest source.
+     */
+    fun earlyOf(track: Track, lang: String): kotlinx.coroutines.flow.MutableStateFlow<Facts?> = synchronized(early) {
+        early.getOrPut("${track.artist}\u0000${track.title}\u0000$lang") { kotlinx.coroutines.flow.MutableStateFlow(null) }
+    }
+
+    private val early = object : LinkedHashMap<String, kotlinx.coroutines.flow.MutableStateFlow<Facts?>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, kotlinx.coroutines.flow.MutableStateFlow<Facts?>>) = size > MAX_EARLY
+    }
+    private const val MAX_EARLY = 8
+
+    /** How long each source took, for the log: where a slow story loses its time. */
+    private class Steps {
+        private val list = java.util.Collections.synchronizedList(ArrayList<String>())
+
+        /** A source did not answer in its time: "nothing" from it says nothing about the artist. */
+        @Volatile var slow = false
+
+        suspend fun <T> time(name: String, limit: Long, block: suspend () -> T?): T? {
+            val started = System.currentTimeMillis()
+            val result = within(limit, block)
+            val ms = System.currentTimeMillis() - started
+            if (ms >= limit) slow = true
+            add(name + " " + seconds(ms) + if (ms >= limit) " (не дождались)" else if (result == null) " (пусто)" else "")
+            return result
+        }
+
+        fun add(line: String) { list += line }
+
+        override fun toString() = synchronized(list) { list.joinToString(", ") }
+    }
+
+    private fun seconds(ms: Long) = String.format(Locale.ROOT, "%.1f с", ms / 1000.0)
+
+    /** The last fetch's steps, by track ("artist\u0000title"), for the story's log. */
+    @Volatile private var lastSteps: Pair<String, String>? = null
+
+    private fun stepsOf(track: Track): String? = lastSteps?.takeIf { it.first == "${track.artist}\u0000${track.title}" }?.second
+
+    private suspend fun factsNow(context: Context, track: Track, lang: String, early: (Facts) -> Unit): Facts? = coroutineScope {
+        val steps = Steps()
+        val started = System.currentTimeMillis()
+        // No album from the player (YouTube, SoundCloud): ListenBrainz says which recording and album it is,
+        // asked beside the sources rather than before them (its answer is kept: once per track).
+        val lookup = if (track.album == null && Prefs(context).lbToken.isNotBlank()) {
+            async { steps.time("ListenBrainz", LOOKUP_WAIT_MS) { ListenBrainz.lookup(context, track.artist, track.title) } }
+        } else null
+        var found = found(context, track, lang, steps, early)
+        val match = lookup?.await()
         val known = if (match?.album != null) track.copy(album = match.album) else track
-        var found = found(context, known, lang)
+        if (found != null && found.album == null && match?.album != null) found = found.withAlbum(match.album)
         // Nothing under the player's spelling ("Kino", a title with a channel's additions): under MusicBrainz's.
         if ((found == null || found.empty) && match != null &&
             (match.artist != track.artist || match.title != Speech.cleanTitle(track.title))
         ) {
-            found = found(context, known.copy(title = match.title, artist = match.artist), lang) ?: found
+            found = found(context, known.copy(title = match.title, artist = match.artist), lang, steps, early) ?: found
         }
         // Little or nothing in the open sources about them: the artist base asks MusicBrainz and Discogs
         // now rather than at night, and for an artist nothing else knows the story waits for it.
         if (track.artist != null && ArtistBase.card(context, track.artist) == null && thin(found, lang)) {
             val building = ArtistBase.buildSoon(context, track.artist, lang)
-            if (building != null && (found == null || found.empty)) withTimeoutOrNull(BASE_WAIT_MS) { building.await() }
+            if (building != null && (found == null || found.empty)) {
+                val waited = System.currentTimeMillis()
+                withTimeoutOrNull(BASE_WAIT_MS) { building.await() }
+                steps.add("своя база " + seconds(System.currentTimeMillis() - waited))
+            }
         }
-        return ArtistBase.enrich(context, known, lang, found)
+        lastSteps = "${track.artist}\u0000${track.title}" to (seconds(System.currentTimeMillis() - started) + ": " + steps)
+        ArtistBase.enrich(context, known, lang, found)
     }
 
     /** Fewer than a few facts about the artist in the story's language. */
@@ -1005,13 +1067,20 @@ object TrackInfo {
         }
     }
 
-    private suspend fun found(context: Context, track: Track, lang: String): Facts? {
+    private suspend fun found(context: Context, track: Track, lang: String, steps: Steps, early: (Facts) -> Unit): Facts? {
         val file = File(dir(context), FACTS_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
             runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { cached ->
                 deepenLater(context, track, lang, file, cached)
+                steps.add("сохранённые")
                 return cached
             }
+        }
+        // Nothing was found lately, every source answering: not asked all over again on every telling.
+        val none = File(dir(context), NONE_PREFIX + sha1("${track.title}\u0000${track.artist}\u0000$lang"))
+        if (none.exists() && System.currentTimeMillis() - none.lastModified() < NONE_FRESH_MS) {
+            steps.add("недавно ничего не нашлось")
+            return null
         }
         val fetched = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
@@ -1021,22 +1090,36 @@ object TrackInfo {
                     // Each source has its own time: a slow one (a VPN, a busy server) is left out, and what the
                     // others found is still told. One shared limit used to throw everything away. A request
                     // does not stop when cancelled: it is left to finish on its own, not waited for.
-                    suspend fun <T> timed(block: suspend () -> T?): T? = within(SOURCE_TIMEOUT_MS, block)
-                    val more = async { timed { MusicSources.gather(context, title, artist, track.album, lang) } }
-                    val song = async { timed { findArticle(lang) { l -> findSong(l, title, artist) } } }
-                    val about = async { artist?.let { a -> timed { findArticle(lang) { l -> findArtist(l, a) } } } }
-                    val brainz = async { if (artist != null && (track.album == null || track.year == null)) timed { musicBrainz(title, artist) } else null }
+                    suspend fun <T> timed(name: String, block: suspend () -> T?): T? = steps.time(name, SOURCE_TIMEOUT_MS, block)
+                    val more = async { timed("Last.fm, Deezer, TheAudioDB") { MusicSources.gather(context, title, artist, track.album, lang) } }
+                    val song = async { timed("Википедия: песня") { findArticle(lang) { l -> findSong(l, title, artist) } } }
+                    val about = async { artist?.let { a -> timed("Википедия: исполнитель") { findArticle(lang) { l -> findArtist(l, a) } } } }
+                    // The articles are here first: the card shows them while the rest is still on its way.
+                    launch {
+                        val songArticle = song.await()?.text
+                        val artistArticle = about.await()?.text
+                        if (songArticle != null || artistArticle != null) runCatching {
+                            early(
+                                Facts(
+                                    song = listOfNotNull(songArticle), artist = listOfNotNull(artistArticle),
+                                    album = track.album, year = track.year, albumText = emptyList(),
+                                    intro = intro(context, artist, artistArticle?.takeIf { it.lang == lang }, emptyList(), lang),
+                                ),
+                            )
+                        }
+                    }
+                    val brainz = async { if (artist != null && (track.album == null || track.year == null)) timed("MusicBrainz: альбом") { musicBrainz(title, artist) } else null }
                     // The album's article: right away when the player names the album, else once MusicBrainz has.
                     val albumText = async {
                         val name = track.album ?: brainz.await()?.first
-                        name?.let { a -> timed { findArticle(lang) { l -> findAlbum(l, a, artist) } } }
+                        name?.let { a -> timed("Википедия: альбом") { findArticle(lang) { l -> findAlbum(l, a, artist) } } }
                     }
                     // Wikidata, for the very items behind the articles found.
                     val data = async {
                         val songArticle = song.await()
                         val albumArticle = albumText.await()
                         val artistArticle = about.await()
-                        timed {
+                        timed("Wikidata") {
                             Wikidata.gather(
                                 context, lang, songArticle?.page, albumArticle?.page, artistArticle?.page,
                                 // From when the articles are here, not from the start: a slow article
@@ -1081,9 +1164,13 @@ object TrackInfo {
             val old = if (file.exists()) runCatching { readFacts(JSONObject(file.readText())) }.getOrNull() else null
             if (old != null || fetched == null) return old
             // Nothing quick at all: a small artist may still be in MusicBrainz, worth the wait.
-            return within(DEEP_WAIT_MS) { deepen(context, track, lang, file, fetched) }?.takeIf { !it.empty } ?: fetched
+            val deep = steps.time("MusicBrainz: подробности", DEEP_WAIT_MS) { deepen(context, track, lang, file, fetched) }?.takeIf { !it.empty }
+            // Every source answered and none knows them: remembered for a while (offline or slow, it is not).
+            if (deep == null && !steps.slow && fetched.intro.isEmpty() && online(context)) runCatching { none.writeText("") }
+            return deep ?: fetched
         }
         runCatching { file.writeText(writeFacts(fetched).toString()) }
+        none.delete()
         trimCache(context)
         deepenLater(context, track, lang, file, fetched)
         return fetched
@@ -1535,7 +1622,7 @@ object TrackInfo {
         dir(context).listFiles { f ->
             f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) || f.name.startsWith("dates") && !f.name.startsWith(DATES_PREFIX)
         }?.forEach { it.delete() }
-        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX, DATES_PREFIX)) {
+        for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX, DATES_PREFIX, NONE_PREFIX)) {
             val files = dir(context).listFiles { f -> f.name.startsWith(prefix) } ?: continue
             if (files.size <= MAX_CACHED) continue
             files.sortedBy { it.lastModified() }.take(files.size - MAX_CACHED).forEach { it.delete() }
@@ -1650,6 +1737,10 @@ object TrackInfo {
 
     /** ListenBrainz is waited for this long to say which album a track is from. */
     private const val LOOKUP_WAIT_MS = 4_000L
+
+    /** "Nothing found" about a track is believed this long before the sources are asked again. */
+    private const val NONE_FRESH_MS = 6L * 60 * 60 * 1000
+    private const val NONE_PREFIX = "none1-"
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
     private const val FACTS_PREFIX = "facts9-"
