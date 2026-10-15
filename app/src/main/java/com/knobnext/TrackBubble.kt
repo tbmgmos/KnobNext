@@ -91,6 +91,40 @@ class TrackBubble(
     private var askJob: Job? = null
 
     private var activeView: TextView? = null
+    private var coverSlot: FrameLayout? = null
+
+    /** The cover that came after the card opened, in its place on the open card. */
+    private fun showCover() {
+        val slot = coverSlot ?: return
+        val t = track ?: return
+        if (!expanded || path.isNotEmpty()) return
+        slot.removeAllViews()
+        slot.addView(coverView(COVER_DP, round = false, picture = art, letter = t.artist ?: t.title))
+    }
+
+    /**
+     * No cover from the player: the album's, as the facts found it (the Cover Art Archive), else Deezer's
+     * or MusicBrainz's for the album by name.
+     */
+    private fun coverFromFacts(t: TrackInfo.Track, facts: TrackInfo.Facts?) {
+        if (art != null) return
+        val artist = t.artist
+        val album = t.album ?: facts?.album
+        scope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                val url = facts?.coverUrl
+                    ?: if (artist != null && album != null) {
+                        runCatching { MusicSources.deezerCover(artist, album) ?: Brainz.coverOf(artist, album) }.getOrNull()
+                    } else {
+                        null
+                    }
+                url?.let { u -> runCatching { java.net.URL(u).openStream().use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull() }
+            } ?: return@launch
+            if (!same(t) || art != null) return@launch
+            setTrack(track ?: return@launch, bitmap)
+            showCover()
+        }
+    }
 
     /** The album's year from the dates, for a player that gives none and facts that found none. */
     private var albumYear: String? = null
@@ -197,8 +231,14 @@ class TrackBubble(
                 // taken as they come, the open card included.
                 val was = track ?: return
                 if ((was.album != null || t.album == null) && (was.year != null || t.year == null) && (art != null || cover == null)) return
+                val newCover = cover != null && art == null
                 setTrack(t.copy(album = t.album ?: was.album, year = t.year ?: was.year), cover ?: art)
-                if (expanded) subView?.text = subtitle(track ?: return, trackFacts) else collapse()
+                if (expanded) {
+                    subView?.text = subtitle(track ?: return, trackFacts)
+                    if (newCover) showCover()
+                } else {
+                    collapse()
+                }
                 return
             }
             // Another track: the card follows it, open or not. Down the circle (an artist's card) the
@@ -382,7 +422,10 @@ class TrackBubble(
 
     private fun trackCard(t: TrackInfo.Track, fetchNote: Boolean): View {
         val box = cardBox()
-        val names = header(box, coverView(COVER_DP, round = false, picture = art, letter = t.artist ?: t.title))
+        // In a slot of its own: a cover that comes late (the player's, or the Cover Art Archive's) takes its place.
+        val slot = FrameLayout(service).apply { addView(coverView(COVER_DP, round = false, picture = art, letter = t.artist ?: t.title)) }
+        coverSlot = slot
+        val names = header(box, slot)
         names.addView(text(Speech.cleanTitle(t.title), 16f, TEXT, bold = true, lines = 2))
         val sub = text(subtitle(t, trackFacts), 13f, MUTED, lines = 2)
         subView = sub
@@ -468,6 +511,7 @@ class TrackBubble(
         circleJob = scope.launch {
             val facts = runCatching { TrackInfo.facts(service, t, prefs.infoLanguage.resolve()) }.getOrNull()
             trackFacts = facts
+            coverFromFacts(t, facts)
             if (path.isEmpty()) {
                 if (TrackInfo.lastSources.isEmpty()) showSources(emptyList())
                 showCircle(facts?.related.orEmpty(), t.artist)
