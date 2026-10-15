@@ -235,6 +235,7 @@ object ArtistBase {
 
     /** The card of [name], from every source; one that found nothing is kept too, and asked again later. */
     suspend fun build(context: Context, name: String, lang: String): Card {
+        TrackInfo.attachBrainz(context)
         val token = Prefs(context).discogsToken
         val facts = runCatching { TrackInfo.aboutArtist(context, name, lang) }.getOrNull()
         // MusicBrainz turns away a burst of requests ("busy"): once more, a few seconds later.

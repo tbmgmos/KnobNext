@@ -204,6 +204,8 @@ object Wikidata {
 
     /** The Wikidata item behind a Wikipedia article. */
     private fun itemOf(page: Page): String? {
+        // Found with the article (the search asks for it): no request.
+        TrackInfo.itemOf(page)?.let { return it }
         val url = "https://${page.lang}.wikipedia.org/w/api.php?action=query&prop=pageprops&ppprop=wikibase_item" +
             "&redirects=1&format=json&titles=" + URLEncoder.encode(page.title, "UTF-8")
         val pages = TrackInfo.getJson(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null

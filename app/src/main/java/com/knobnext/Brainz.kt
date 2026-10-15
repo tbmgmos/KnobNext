@@ -485,11 +485,41 @@ object Brainz {
     }
 
     private suspend fun artistId(artist: String, urgent: Boolean = false): String? {
+        knownId(artist)?.let { return it }
         val a = get("$API/artist/?fmt=json&limit=1&query=${enc("artist:\"${clean(artist)}\"")}", urgent)
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
-        return a.optString("id").takeIf { it.isNotBlank() }
+        return a.optString("id").takeIf { it.isNotBlank() }?.also { rememberId(artist, it) }
     }
+
+    // ---- Who is who: an artist's name and their MusicBrainz id, kept on the phone ----
+
+    /** Where the ids are kept: set by the first story (MusicBrainz has no context of its own). */
+    @Volatile var store: java.io.File? = null
+    private var ids: MutableMap<String, String>? = null
+
+    /** The id MusicBrainz gave [artist] before: one search less (they used to be looked up for every track). */
+    @Synchronized
+    fun knownId(artist: String): String? = loaded()[norm(Speech.cleanArtist(artist))]
+
+    @Synchronized
+    fun rememberId(artist: String, id: String) {
+        val map = loaded()
+        val key = norm(Speech.cleanArtist(artist)).takeIf { it.isNotEmpty() } ?: return
+        if (map[key] == id) return
+        map[key] = id
+        if (map.size > MAX_IDS) map.keys.take(map.size - MAX_IDS).forEach { map.remove(it) }
+        store?.let { f -> runCatching { f.writeText(JSONObject(map as Map<*, *>).toString()) } }
+    }
+
+    private fun loaded(): MutableMap<String, String> = ids ?: LinkedHashMap<String, String>().also { map ->
+        store?.takeIf { it.exists() }?.let { f ->
+            runCatching { JSONObject(f.readText()) }.getOrNull()?.let { o -> o.keys().forEach { k -> map[k] = o.optString(k) } }
+        }
+        if (store != null) ids = map
+    }
+
+    private const val MAX_IDS = 2_000
 
     private fun attributes(r: JSONObject): List<String> =
         r.optJSONArray("attributes")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()

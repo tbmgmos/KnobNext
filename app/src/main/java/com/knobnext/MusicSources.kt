@@ -171,6 +171,8 @@ object MusicSources {
         val a = Brainz.get("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=${enc(q)}", urgent = true)
             ?.optJSONArray("artists")?.optJSONObject(0) ?: return null
         if (a.optInt("score") < MIN_SCORE || !sameName(a.optString("name"), artist)) return null
+        // Kept: the dates and the deeper facts need not search for them again.
+        a.optString("id").takeIf { it.isNotBlank() }?.let { Brainz.rememberId(artist, it) }
         val facts = ArrayList<String>()
         val group = a.optString("type") == "Group"
         val begin = a.optJSONObject("life-span")?.optString("begin")?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }

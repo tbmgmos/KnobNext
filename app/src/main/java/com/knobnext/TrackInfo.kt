@@ -450,7 +450,13 @@ object TrackInfo {
     })
 
     /** [artist]'s and [album]'s verified dates (MusicBrainz), kept on disk like the facts. */
+    /** Where MusicBrainz's ids by name are kept (it has no context of its own). */
+    internal fun attachBrainz(context: Context) {
+        if (Brainz.store == null) Brainz.store = File(dir(context), "brainz-ids.json")
+    }
+
     suspend fun reference(context: Context, artist: String?, album: String?, mbid: String?): Brainz.Dates? {
+        attachBrainz(context)
         val who = artist?.let(Speech::cleanArtist)?.takeIf { it.isNotBlank() } ?: return null
         val key = "${normalize(who)}\u0000${album?.let { normalize(Speech.cleanTitle(it)) }.orEmpty()}"
         referenceCache[key]?.let { return it }
@@ -907,6 +913,7 @@ object TrackInfo {
      * base gathered ahead ([ArtistBase]): its facts alone when nothing could be fetched.
      */
     suspend fun facts(context: Context, track: Track, lang: String): Facts? {
+        attachBrainz(context)
         // The story, the card and the "news" mark ask about the same track at once: it is fetched once.
         val key = "${track.artist}\u0000${track.title}\u0000${track.album}\u0000$lang"
         val running = synchronized(fetching) {
@@ -1239,29 +1246,37 @@ object TrackInfo {
     private fun findArtist(lang: String, artist: String): String? =
         find(lang, "$artist " + if (lang == "ru") "музыка" else "music", artist, ARTIST_WORDS, null, startsWith = true)
 
+    /**
+     * The page [query] finds that is about [name] and of its [kind]. One request gives the search's pages
+     * with their short description, opening paragraph and Wikidata item (it used to take a search, a
+     * summary for each page and another request for the item).
+     */
     private fun find(lang: String, query: String, name: String, kind: List<String>, artist: String?, startsWith: Boolean): String? {
-        for (page in search(lang, query)) {
+        val url = "https://$lang.wikipedia.org/w/api.php?action=query&format=json&utf8=1&redirects=1" +
+            "&generator=search&gsrlimit=$SEARCH_RESULTS&gsrsearch=" + URLEncoder.encode(query, "UTF-8") +
+            "&prop=extracts%7Cdescription%7Cpageprops&exintro=1&explaintext=1&exlimit=$SEARCH_RESULTS&ppprop=wikibase_item%7Cdisambiguation"
+        val pages = getJson(url)?.optJSONObject("query")?.optJSONObject("pages") ?: return null
+        val found = pages.keys().asSequence().mapNotNull { pages.optJSONObject(it) }.sortedBy { it.optInt("index", Int.MAX_VALUE) }
+        for (p in found) {
+            val page = p.optString("title").takeIf { it.isNotBlank() } ?: continue
             val title = normalize(page)
             if (if (startsWith) !title.startsWith(normalize(name)) else !title.contains(normalize(name))) continue
-            val summary = summary(lang, page) ?: continue
-            val about = (summary.optString("description") + " " + summary.optString("extract")).lowercase()
+            val props = p.optJSONObject("pageprops")
+            if (props?.has("disambiguation") == true) continue
+            val about = (p.optString("description") + " " + p.optString("extract").take(MAX_INTRO_CHARS)).lowercase()
             if (kind.none { about.contains(it) }) continue
             if (artist != null && !about.contains(normalize(artist).substringBefore(' '))) continue
+            props?.optString("wikibase_item")?.takeIf { it.isNotBlank() }?.let { items["$lang:$page"] = it }
             return page
         }
         return null
     }
 
-    private fun search(lang: String, query: String): List<String> {
-        val url = "https://$lang.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit=$SEARCH_RESULTS&srsearch=" +
-            URLEncoder.encode(query, "UTF-8")
-        val results = getJson(url)?.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
-        return (0 until results.length()).map { results.getJSONObject(it).getString("title") }
-    }
+    /** Wikidata items of the pages found, so that Wikidata need not be asked for them again. */
+    private val items = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    private fun summary(lang: String, page: String): JSONObject? =
-        getJson("https://$lang.wikipedia.org/api/rest_v1/page/summary/" + URLEncoder.encode(page.replace(' ', '_'), "UTF-8"))
-            ?.takeIf { it.optString("type") != "disambiguation" }
+    /** The Wikidata item behind [page] when the search found it. */
+    internal fun itemOf(page: Wikidata.Page): String? = items["${page.lang}:${page.title}"]
 
     /** The whole article as plain text, cut into facts: sentences of a fair length, before the reference sections. */
     private fun text(lang: String, page: String): List<String>? {
@@ -1589,6 +1604,9 @@ object TrackInfo {
 
     /** Sentences translated per text: the story takes a few at a time. */
     private const val MAX_TRANSLATED = 30
+
+    /** The opening paragraph read to tell what a page is about. */
+    private const val MAX_INTRO_CHARS = 1_500
 
     /** ListenBrainz is waited for this long to say which album a track is from. */
     private const val LOOKUP_WAIT_MS = 4_000L

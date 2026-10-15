@@ -1335,21 +1335,38 @@ class KnobService : AccessibilityService() {
     }
 
     /**
-     * A new track playing: its facts fetched ahead, so that the card, the story or a question opens with
-     * them at hand. On Wi-Fi only (on mobile data they are fetched when asked for); with the card showing
-     * by itself they are fetched for it anyway.
+     * A new track playing: its facts fetched ahead, and the next one's in the player's queue (the card
+     * then opens at once on the switch). Text only, a few dozen kilobytes; not with Data Saver on. With
+     * the card showing by itself the playing track's are fetched for it anyway.
      */
     private fun prefetchFor(now: NowPlaying?) {
-        if (now?.playing != true || prefs.bubbleAuto != BubbleAuto.OFF) return
+        if (now?.playing != true) return
         val title = now.title ?: return
         val key = now.controller.packageName + "/" + now.artist + "/" + title
         if (key == prefetched) return
         prefetched = key
-        val unmetered = runCatching { !getSystemService(android.net.ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(false)
-        if (!unmetered) return
-        val track = now.controller.metadata?.let { TrackInfo.trackOf(it, now.controller.packageName) } ?: return
-        TrackInfo.prefetch(this, track, prefs.infoLanguage.resolve())
+        val saving = runCatching {
+            getSystemService(android.net.ConnectivityManager::class.java).restrictBackgroundStatus ==
+                android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
+        }.getOrDefault(false)
+        if (saving) return
+        val lang = prefs.infoLanguage.resolve()
+        val c = now.controller
+        if (prefs.bubbleAuto == BubbleAuto.OFF) {
+            c.metadata?.let { TrackInfo.trackOf(it, c.packageName) }?.let { TrackInfo.prefetch(this, it, lang) }
+        }
+        nextInQueue(c)?.let { TrackInfo.prefetch(this, it, lang) }
     }
+
+    /** The track after this one in the player's queue, when the player shows its queue. */
+    private fun nextInQueue(c: MediaController): TrackInfo.Track? = runCatching {
+        val queue = c.queue ?: return null
+        val active = c.playbackState?.activeQueueItemId ?: return null
+        val at = queue.indexOfFirst { it.queueId == active }.takeIf { it >= 0 } ?: return null
+        val next = queue.getOrNull(at + 1)?.description ?: return null
+        val title = next.title?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        TrackInfo.Track(title, next.subtitle?.toString()?.takeIf { it.isNotBlank() }, next.description?.toString()?.takeIf { it.isNotBlank() }, null)
+    }.getOrNull()
 
     private var prefetched: String? = null
 
