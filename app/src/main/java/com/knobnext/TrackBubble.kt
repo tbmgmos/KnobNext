@@ -151,6 +151,8 @@ class TrackBubble(
             }
             card = ArtistBase.buildSoon(service, artist, lang)?.await() ?: return@launch
             showArtistLine(t, card.genres, card.began, card.ended, lang)
+            // Nothing was found before the base gathered the artist (Discogs, MusicBrainz): told again with it.
+            if (!card.empty && same(t) && path.isEmpty() && noteJob?.isActive != true && note == service.getString(R.string.speak_info_none)) fetchNote()
         }
     }
 
@@ -671,7 +673,7 @@ class TrackBubble(
     }
 
     private fun showPage(facts: TrackInfo.Facts?) {
-        val all = facts?.let { TrackInfo.aboutLines(it, prefs.infoLanguage.resolve()) }.orEmpty()
+        val all = facts?.let { f -> TrackInfo.aboutLines(f, prefs.infoLanguage.resolve()).ifEmpty { TrackInfo.aboutLines(f, null) } }.orEmpty()
         noteView?.text = if (all.isEmpty()) {
             service.getString(R.string.bubble_artist_none)
         } else {

@@ -316,6 +316,10 @@ object TrackInfo {
             note(context.getString(R.string.log_info_plain))
         }
         plainStory(context, track, facts, length, lang, firstMeet, keep) { bare = it }?.let { ready(it, context.getString(R.string.log_info_way_plain)) }
+            // Read on the card, not heard: nothing in the story's language yet (a biography only Discogs or
+            // Last.fm has, not translated yet) is shown as found rather than "nothing found". Not kept in the
+            // history: told in the story's language, it is news next time.
+            ?: if (!model) untranslated(facts) else null
     }
 
     // ---- A large model in the cloud ----
@@ -378,6 +382,19 @@ object TrackInfo {
         val lines = (facts.intro.take(1) + song).ifEmpty { aboutLines(facts, lang).filter { inLanguage(it, lang) }.take(PREVIEW_FACTS) }
         return lines.joinToString(" ").takeIf { it.isNotBlank() }
     }
+
+    /**
+     * The facts as found, in whatever language: for the card when none are in the story's language yet
+     * (a biography from Discogs or Last.fm before the phone has translated it). Better than "nothing found".
+     */
+    fun untranslated(facts: Facts): String? {
+        val seen = HashSet<String>()
+        val lines = (facts.intro.take(1) + merged(facts.song) + artistFacts(facts, null) + merged(facts.albumText))
+            .filter { seen.add(normalize(it).take(DUPLICATE_CHARS)) }
+        return lines.take(UNTRANSLATED_FACTS).joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    private const val UNTRANSLATED_FACTS = 4
 
     /**
      * The track's facts fetched ahead, on a track change: the card then opens with them at hand. [later]:
@@ -456,6 +473,7 @@ object TrackInfo {
     /** Where MusicBrainz's ids by name are kept (it has no context of its own). */
     internal fun attachBrainz(context: Context) {
         if (Brainz.store == null) Brainz.store = File(dir(context), "brainz-ids.json")
+        Translate.attach(dir(context))
     }
 
     suspend fun reference(context: Context, artist: String?, album: String?, mbid: String?): Brainz.Dates? {
@@ -961,20 +979,30 @@ object TrackInfo {
 
     /**
      * Facts in another language than the story's (Last.fm's and Discogs' biographies, an English article)
-     * translated on the phone, so that a story without a model and the card can use them too. Never
-     * waited for: what is not translated yet is left as it is now and translated in the background, for
-     * the next time.
+     * translated on the phone, so that a story without a model and the card can use them too. A download
+     * of the model is never waited for: what is not translated yet stays as it is and is translated in the
+     * background, for next time. Only when nothing is in the story's language, and the model is on the
+     * phone already, the translation is waited for a moment.
      */
-    private fun translated(facts: Facts?, lang: String): Facts? {
+    private suspend fun translated(facts: Facts?, lang: String): Facts? {
         facts ?: return null
         val all = facts.song + facts.artist + facts.albumText
         if (all.all { it.lang == lang }) return facts
-        fun tr(list: List<Text>) = list.map { t ->
-            val part = t.facts.take(MAX_TRANSLATED)
-            if (t.lang == lang) t
-            else Translate.known(part, t.lang, lang)?.let { Text(it, lang, t.source) } ?: t.also { Translate.later(part, t.lang, lang) }
+        val wait = if (all.none { it.lang == lang && it.facts.isNotEmpty() }) TRANSLATE_WAIT_MS else 0L
+        suspend fun tr(list: List<Text>) = coroutineScope {
+            list.map { t ->
+                async {
+                    val part = t.facts.take(MAX_TRANSLATED)
+                    if (t.lang == lang) t else Translate.soon(part, t.lang, lang, wait)?.let { Text(it, lang, t.source) } ?: t
+                }
+            }.map { it.await() }
         }
-        return facts.withTexts(tr(facts.song), tr(facts.artist), tr(facts.albumText))
+        return coroutineScope {
+            val song = async { tr(facts.song) }
+            val artist = async { tr(facts.artist) }
+            val album = async { tr(facts.albumText) }
+            facts.withTexts(song.await(), artist.await(), album.await())
+        }
     }
 
     private suspend fun found(context: Context, track: Track, lang: String): Facts? {
@@ -1122,7 +1150,7 @@ object TrackInfo {
     }
 
     /** What a card says of the artist: who they are, then the rest of their facts, a sentence each. */
-    fun aboutLines(facts: Facts, lang: String): List<String> {
+    fun aboutLines(facts: Facts, lang: String?): List<String> {
         val seen = HashSet<String>()
         return (facts.intro + artistFacts(facts, lang)).filter { seen.add(normalize(it).take(DUPLICATE_CHARS)) }
     }
@@ -1613,6 +1641,9 @@ object TrackInfo {
 
     /** Sentences translated per text: the story takes a few at a time. */
     private const val MAX_TRANSLATED = 30
+
+    /** How long a translation is waited for when nothing is in the story's language (the model there). */
+    private const val TRANSLATE_WAIT_MS = 2_500L
 
     /** The opening paragraph read to tell what a page is about. */
     private const val MAX_INTRO_CHARS = 1_500

@@ -23,31 +23,69 @@ object Translate {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > MAX_KEPT
     })
 
-    /** [sentences] already translated from [from] into [to] (this run of the app), or null. Never waits. */
+    /** Where the translations are kept between runs of the app: a biography is translated once. */
+    @Volatile private var store: java.io.File? = null
+
+    fun attach(dir: java.io.File) {
+        if (store != null) return
+        val f = java.io.File(dir, "translations.json")
+        store = f
+        runCatching {
+            if (!f.exists()) return
+            val o = org.json.JSONObject(f.readText())
+            o.keys().forEach { k -> done.putIfAbsent(k, o.optString(k)) }
+        }
+    }
+
+    @Synchronized private fun save() {
+        val f = store ?: return
+        runCatching {
+            val o = org.json.JSONObject()
+            synchronized(done) { done.forEach { (k, v) -> o.put(k, v) } }
+            f.writeText(o.toString())
+        }
+    }
+
+    /** [sentences] already translated from [from] into [to], or null. Never waits. */
     fun known(sentences: List<String>, from: String, to: String): List<String>? {
         if (from == to) return sentences
         return sentences.map { done["$from>$to:$it"] ?: return null }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val asked = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val jobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    /** Language pairs whose model is on the phone: translating with it takes a moment, not a download. */
+    private val ready = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /**
      * [sentences] translated in the background, for [known] to give next time: a story never waits for
-     * the translation (it used to wait for the model on every telling, seconds each, without Wi-Fi forever).
+     * a download of the model (it used to, seconds on every telling, without Wi-Fi to the end of the wait).
      * Without the language pair's model, it is fetched on Wi-Fi, once.
      */
-    fun later(sentences: List<String>, from: String, to: String) {
-        if (from == to || known(sentences, from, to) != null) return
-        val job = "$from>$to:${sentences.hashCode()}"
-        if (!asked.add(job)) return
-        scope.launch {
+    fun later(sentences: List<String>, from: String, to: String): kotlinx.coroutines.Job? {
+        if (from == to || known(sentences, from, to) != null) return null
+        val key = "$from>$to:${sentences.hashCode()}"
+        jobs[key]?.takeIf { it.isActive }?.let { return it }
+        return scope.launch {
             try {
                 translate(sentences, from, to)
             } finally {
-                asked.remove(job)
+                jobs.remove(key)
             }
-        }
+        }.also { jobs[key] = it }
+    }
+
+    /**
+     * [sentences] in [to] if the model is already on the phone and translates them within [ms]
+     * (a moment); otherwise null at once, and they are translated in the background for next time.
+     */
+    suspend fun soon(sentences: List<String>, from: String, to: String, ms: Long): List<String>? {
+        known(sentences, from, to)?.let { return it }
+        val job = later(sentences, from, to) ?: return known(sentences, from, to)
+        if (ms <= 0 || "$from>$to" !in ready) return null
+        withTimeoutOrNull(ms) { job.join() }
+        return known(sentences, from, to)
     }
 
     private suspend fun translate(sentences: List<String>, from: String, to: String) {
@@ -63,10 +101,13 @@ object Translate {
                 translator.downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build()).outcome().isSuccess
             } == true
             if (!ready) return
+            this.ready += "$from>$to"
+            var added = false
             for (s in sentences) {
                 val key = "$from>$to:$s"
-                if (done[key] == null) translator.translate(s).outcome().getOrNull()?.let { done[key] = it }
+                if (done[key] == null) translator.translate(s).outcome().getOrNull()?.let { done[key] = it; added = true }
             }
+            if (added) save()
         } catch (_: Exception) {
         } finally {
             translator.close()
