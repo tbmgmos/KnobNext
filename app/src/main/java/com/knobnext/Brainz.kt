@@ -365,6 +365,9 @@ object Brainz {
         /** Studio albums, the earliest first: title and year. */
         val albums: List<Pair<String, String>>,
     ) {
+        /** Nothing known at all. */
+        val blank get() = began == null && ended == null && albumDate == null && albums.isEmpty()
+
         fun toJson(): JSONObject = JSONObject()
             .put("began", began ?: "").put("ended", ended ?: "").put("album", album ?: "").put("albumDate", albumDate ?: "")
             .put("albums", org.json.JSONArray(albums.map { (t, y) -> JSONObject().put("t", t).put("y", y) }))

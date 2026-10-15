@@ -91,6 +91,9 @@ class TrackBubble(
     private var askJob: Job? = null
 
     private var activeView: TextView? = null
+
+    /** The album's year from the dates, for a player that gives none and facts that found none. */
+    private var albumYear: String? = null
     private var lineJob: Job? = null
 
     /**
@@ -106,9 +109,11 @@ class TrackBubble(
             var card = withContext(Dispatchers.IO) { ArtistBase.card(service, artist) }
             card?.let { showArtistLine(t, it.genres, it.began, it.ended, lang) }
             if (card != null && card.genres.isNotEmpty()) return@launch
-            if (card == null) {
-                val dates = withContext(Dispatchers.IO) { runCatching { TrackInfo.reference(service, artist, null, null) }.getOrNull() }
-                if (dates != null) showArtistLine(t, emptyList(), dates.began, dates.ended, lang)
+            // The dates: the artist's years meanwhile, and the album's year when the player gave none.
+            val dates = withContext(Dispatchers.IO) { runCatching { TrackInfo.reference(service, artist, t.album, null) }.getOrNull() }
+            if (dates != null) {
+                if (card == null) showArtistLine(t, emptyList(), dates.began, dates.ended, lang)
+                dates.albumDate?.take(4)?.let { albumYear = it; if (same(t) && path.isEmpty()) subView?.text = subtitle(t, trackFacts) }
             }
             card = ArtistBase.buildSoon(service, artist, lang)?.await() ?: return@launch
             showArtistLine(t, card.genres, card.began, card.ended, lang)
@@ -305,6 +310,7 @@ class TrackBubble(
     private fun same(t: TrackInfo.Track) = track?.title == t.title && track?.artist == t.artist
 
     private fun setTrack(t: TrackInfo.Track, cover: Bitmap?) {
+        if (!same(t)) albumYear = null
         track = t
         art = cover
         palette = paletteOf(cover)
@@ -424,7 +430,7 @@ class TrackBubble(
     private fun subtitle(t: TrackInfo.Track, facts: TrackInfo.Facts?): String = listOfNotNull(
         t.artist?.let(Speech::cleanArtist),
         (t.album ?: facts?.album)?.let(Speech::cleanTitle)?.takeIf { it.isNotBlank() },
-        t.year ?: facts?.year,
+        t.year ?: facts?.year ?: albumYear.takeIf { t.album != null || facts?.album == null },
     ).joinToString(" · ")
 
     /** The next note about the track: the same the voice would tell, and kept in the history the same way. */

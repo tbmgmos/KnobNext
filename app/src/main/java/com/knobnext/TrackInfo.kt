@@ -463,9 +463,12 @@ object TrackInfo {
         }
         val file = File(dir(context), DATES_PREFIX + sha1(key))
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < FACTS_FRESH_MS) {
-            runCatching { Brainz.Dates.fromJson(JSONObject(file.readText())) }.getOrNull()?.let { referenceCache[key] = it; return it }
+            runCatching { Brainz.Dates.fromJson(JSONObject(file.readText())) }.getOrNull()?.takeUnless { it.blank }
+                ?.let { referenceCache[key] = it; return it }
         }
         val found = withContext(Dispatchers.IO) { runCatching { Brainz.dates(who, album, mbid) }.getOrNull() } ?: return null
+        // Nothing in it (MusicBrainz busy): not kept, asked again next time.
+        if (found.blank) return found
         referenceCache[key] = found
         runCatching { file.writeText(found.toJson().toString()) }
         return found
@@ -1477,7 +1480,9 @@ object TrackInfo {
 
     /** Facts kept in an older shape go; of the current ones, only the latest [MAX_CACHED]. */
     private fun trimCache(context: Context) {
-        dir(context).listFiles { f -> f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) }?.forEach { it.delete() }
+        dir(context).listFiles { f ->
+            f.name.startsWith("facts") && !f.name.startsWith(FACTS_PREFIX) || f.name.startsWith("dates") && !f.name.startsWith(DATES_PREFIX)
+        }?.forEach { it.delete() }
         for (prefix in listOf(FACTS_PREFIX, ARTIST_PREFIX, RECORD_PREFIX, DATES_PREFIX)) {
             val files = dir(context).listFiles { f -> f.name.startsWith(prefix) } ?: continue
             if (files.size <= MAX_CACHED) continue
@@ -1589,7 +1594,7 @@ object TrackInfo {
     private const val LOOKUP_WAIT_MS = 4_000L
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
-    private const val FACTS_PREFIX = "facts8-"
+    private const val FACTS_PREFIX = "facts9-"
 
     /** Verified dates: waited for this long in a story (the voice is waiting), longer for a question. */
     private const val STORY_DATES_WAIT_MS = 5_000L
@@ -1598,7 +1603,7 @@ object TrackInfo {
 
     /** An album title this short ("45", "9") is found inside other words: not looked for in sentences. */
     private const val MIN_TITLE_CHARS = 4
-    private const val DATES_PREFIX = "dates1-"
+    private const val DATES_PREFIX = "dates2-"
 
     /** How long the cloud model waits for the facts before it is asked without them. */
     private const val CLOUD_FACTS_WAIT_MS = 4_000L
