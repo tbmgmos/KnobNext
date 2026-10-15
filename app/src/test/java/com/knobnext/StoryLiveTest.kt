@@ -186,6 +186,7 @@ class StoryLiveTest {
         val k = TrackInfo.reference(context, "Кино", "Группа крови", null)
         println("Группа крови: ${k?.albumDate}")
         val facts = TrackInfo.facts(context, TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", "Nevermind", null), "ru")
+        println("источники фактов: ${facts?.sources}")
         println("из базы в фактах: ${facts?.artist?.takeLast(2)?.joinToString(" | ") { t -> "[${t.lang}] " + t.facts.take(2).joinToString(" ") }}")
         assertTrue("карточка Nirvana пуста", ArtistBase.card(context, "Nirvana") != null)
     }

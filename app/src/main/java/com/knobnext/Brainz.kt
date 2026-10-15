@@ -117,8 +117,8 @@ object Brainz {
             ?.let { basics += res.getString(if (group) R.string.src_band_from else R.string.src_artist_from, it) }
 
         return Found(
-            song = songFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
-            artist = artistFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
+            song = songFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, TrackInfo.MUSICBRAINZ) },
+            artist = artistFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, TrackInfo.MUSICBRAINZ) },
             basics = basics,
             circle = circle,
             related = related,

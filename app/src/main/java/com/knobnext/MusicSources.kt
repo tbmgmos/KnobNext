@@ -64,7 +64,7 @@ object MusicSources {
         Found(
             song = listOfNotNull(audioDbTrack.await()),
             album = listOfNotNull(audioDbAlbum, d?.album),
-            artist = listOfNotNull(audioDbArtist.await(), d?.artist, brainz.await()?.let { TrackInfo.Text(it, lang) }),
+            artist = listOfNotNull(audioDbArtist.await(), d?.artist, brainz.await()?.let { TrackInfo.Text(it, lang, TrackInfo.MUSICBRAINZ) }),
             albumName = albumName,
             year = d?.year,
             lastFm = lastFm.await(),
@@ -89,21 +89,21 @@ object MusicSources {
             }
             a.optString("strStyle").takeIf { it.isNotBlank() && it != "null" }?.let { facts += res.getString(R.string.src_style, it) }
         }
-        return facts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, bioLang) }
+        return facts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, bioLang, TrackInfo.AUDIODB) }
     }
 
     private fun audioDbAlbum(artist: String, album: String, lang: String): TrackInfo.Text? {
         val a = TrackInfo.getJson("$AUDIODB/searchalbum.php?s=${enc(artist)}&a=${enc(Speech.cleanTitle(album))}")
             ?.optJSONArray("album")?.optJSONObject(0) ?: return null
         val (text, textLang) = described(a, "strDescription", lang) ?: return null
-        return TrackInfo.Text(TrackInfo.splitFacts(text), textLang)
+        return TrackInfo.Text(TrackInfo.splitFacts(text), textLang, TrackInfo.AUDIODB)
     }
 
     private fun audioDbTrack(artist: String, title: String, lang: String): TrackInfo.Text? {
         val t = TrackInfo.getJson("$AUDIODB/searchtrack.php?s=${enc(artist)}&t=${enc(title)}")
             ?.optJSONArray("track")?.optJSONObject(0) ?: return null
         val (text, textLang) = described(t, "strDescription", lang) ?: return null
-        return TrackInfo.Text(TrackInfo.splitFacts(text), textLang)
+        return TrackInfo.Text(TrackInfo.splitFacts(text), textLang, TrackInfo.AUDIODB)
     }
 
     /** A description in the story's language if the source has one, else in English. */
@@ -147,8 +147,8 @@ object MusicSources {
             a.optInt("nb_album").takeIf { it > 1 }?.let { artistFacts += res.resources.getQuantityString(R.plurals.src_albums, it, it) }
         }
         return DeezerFacts(
-            albumFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
-            artistFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
+            albumFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, TrackInfo.DEEZER) },
+            artistFacts.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, TrackInfo.DEEZER) },
             albumName,
             year,
         )
@@ -251,7 +251,7 @@ object MusicSources {
         val letters = text.filter { it.isLetter() }
         val cyrillic = letters.count { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
         val textLang = if (cyrillic * 10 >= letters.length * 6) "ru" else "en"
-        return TrackInfo.splitFacts(text).takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, textLang) }
+        return TrackInfo.splitFacts(text).takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, textLang, TrackInfo.LASTFM) }
     }
 
     // ---- Helpers ----

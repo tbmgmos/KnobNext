@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -150,7 +151,7 @@ object ArtistBase {
         val extra = texts(context, card, lang)
         val album = facts?.album ?: track.album
         val year = facts?.year ?: track.year ?: album?.let { albumOf(card, it)?.date?.take(4) }
-        val own = listOfNotNull(card.about.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, card.lang) })
+        val own = listOfNotNull(card.about.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, card.lang, TrackInfo.BASE) })
         if (facts == null || (facts.empty && facts.intro.isEmpty())) {
             return TrackInfo.Facts(
                 song = facts?.song.orEmpty(),
@@ -203,8 +204,8 @@ object ArtistBase {
         }
         if (card.labels.isNotEmpty()) said += res.getString(R.string.base_labels, card.labels.joinToString(", "))
         return listOfNotNull(
-            said.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) },
-            card.profile.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, "en") },
+            said.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, if (card.discogsId != null) TrackInfo.DISCOGS else TrackInfo.MUSICBRAINZ) },
+            card.profile.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, "en", TrackInfo.DISCOGS) },
         )
     }
 
@@ -340,6 +341,30 @@ object ArtistBase {
         } finally {
             _progress.value = Progress(false, 0, 0, null)
             running.unlock()
+        }
+    }
+
+    private val building = HashMap<String, kotlinx.coroutines.Deferred<Card?>>()
+
+    /**
+     * [name]'s card gathered now, in the background (an artist the open sources say little about), unless
+     * the base is off, there is no network in this build, or it was gathered lately (found or not).
+     * Null when nothing is to be gathered.
+     */
+    fun buildSoon(context: Context, name: String, lang: String): kotlinx.coroutines.Deferred<Card?>? {
+        val app = context.applicationContext
+        if (!Prefs(app).baseOn || !app.resources.getBoolean(R.bool.network)) return null
+        val key = Journal.key(name)
+        val f = file(app, key)
+        if (f.exists()) {
+            val card = runCatching { Card.fromJson(JSONObject(f.readText())) }.getOrNull()
+            val fresh = if (card == null || card.empty) EMPTY_FRESH_MS else DAY_MS
+            if (card != null && System.currentTimeMillis() - card.at < fresh) return null
+        }
+        return synchronized(building) {
+            building[key]?.takeIf { it.isActive } ?: scope.async {
+                runCatching { build(app, name, lang).also { keep(app, name, it) } }.getOrNull()
+            }.also { building[key] = it }
         }
     }
 

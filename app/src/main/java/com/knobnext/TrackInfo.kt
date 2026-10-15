@@ -138,7 +138,8 @@ object TrackInfo {
     private const val MAX_ALBUM_CHARS = 120
 
     /** An article's facts (one sentence each) and the language they are in. */
-    class Text(val facts: List<String>, val lang: String)
+    /** [source]: where it came from ("wikipedia", "lastfm", "discogs"…), for the card to name. */
+    class Text(val facts: List<String>, val lang: String, val source: String? = null)
 
     /** What is known, by subject; each subject from several sources (Wikipedia, TheAudioDB, Deezer, MusicBrainz). */
     class Facts(
@@ -166,6 +167,14 @@ object TrackInfo {
         val mbid: String? = null,
     ) {
         val empty get() = song.isEmpty() && artist.isEmpty() && albumText.isEmpty()
+
+        /** The same facts with other texts (translated ones). */
+        fun withTexts(song: List<Text>, artist: List<Text>, albumText: List<Text>) = Facts(
+            song, artist, album, year, albumText, intro, circle, related, relatedIds, artistId, coverUrl, pages, deep, mbid,
+        )
+
+        /** Where these facts came from, without repeats ("wikipedia", "lastfm", "discogs"…). */
+        val sources get() = (song + artist + albumText).mapNotNull { it.source }.distinct()
     }
 
     /**
@@ -898,7 +907,7 @@ object TrackInfo {
         // The story, the card and the "news" mark ask about the same track at once: it is fetched once.
         val key = "${track.artist}\u0000${track.title}\u0000${track.album}\u0000$lang"
         val running = synchronized(fetching) {
-            fetching[key]?.takeIf { it.isActive } ?: background.async { factsNow(context, track, lang) }.also { fetching[key] = it }
+            fetching[key]?.takeIf { it.isActive } ?: background.async { translated(factsNow(context, track, lang), lang) }.also { fetching[key] = it }
         }
         return try {
             running.await()
@@ -920,7 +929,33 @@ object TrackInfo {
         ) {
             found = found(context, known.copy(title = match.title, artist = match.artist), lang) ?: found
         }
+        // Little or nothing in the open sources about them: the artist base asks MusicBrainz and Discogs
+        // now rather than at night, and for an artist nothing else knows the story waits for it.
+        if (track.artist != null && ArtistBase.card(context, track.artist) == null && thin(found, lang)) {
+            val building = ArtistBase.buildSoon(context, track.artist, lang)
+            if (building != null && (found == null || found.empty)) withTimeoutOrNull(BASE_WAIT_MS) { building.await() }
+        }
         return ArtistBase.enrich(context, known, lang, found)
+    }
+
+    /** Fewer than a few facts about the artist in the story's language. */
+    private fun thin(facts: Facts?, lang: String): Boolean =
+        facts == null || facts.artist.filter { it.lang == lang }.sumOf { it.facts.size } < THIN_FACTS
+
+    /**
+     * Facts in another language than the story's (Last.fm's and Discogs' biographies, an English article)
+     * translated on the phone, so that a story without a model and the card can use them too. Left as they
+     * are when that cannot be done (no translation model yet).
+     */
+    private suspend fun translated(facts: Facts?, lang: String): Facts? {
+        facts ?: return null
+        val all = facts.song + facts.artist + facts.albumText
+        if (all.all { it.lang == lang }) return facts
+        suspend fun tr(list: List<Text>) = list.map { t ->
+            if (t.lang == lang) t
+            else Translate.sentences(t.facts.take(MAX_TRANSLATED), t.lang, lang)?.let { Text(it, lang, t.source) } ?: t
+        }
+        return facts.withTexts(tr(facts.song), tr(facts.artist), tr(facts.albumText))
     }
 
     private suspend fun found(context: Context, track: Track, lang: String): Facts? {
@@ -978,9 +1013,9 @@ object TrackInfo {
                     val lfArtist = lf?.artist?.takeIf { wikiArtist == null && (artistText == null || it.lang == lang) }
                     Facts(
                         song = listOfNotNull(songText, d?.song) + m?.song.orEmpty() +
-                            listOfNotNull(lf?.song?.takeIf { songText == null }, lf?.songNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang) }),
+                            listOfNotNull(lf?.song?.takeIf { songText == null }, lf?.songNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang, LASTFM) }),
                         artist = listOfNotNull(artistText, lfArtist, d?.artist) + m?.artist.orEmpty() +
-                            listOfNotNull(lf?.artistNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang) }),
+                            listOfNotNull(lf?.artistNumbers?.takeIf { it.isNotEmpty() }?.let { Text(it, lang, LASTFM) }),
                         album = track.album ?: b?.first ?: m?.albumName,
                         year = track.year ?: b?.second ?: m?.year,
                         albumText = listOfNotNull(albumArticle, d?.album) + m?.album.orEmpty() + listOfNotNull(lf?.album?.takeIf { albumArticle == null }),
@@ -1175,13 +1210,13 @@ object TrackInfo {
      * kept foreign (for a model to translate) only when there is no such version.
      */
     private fun findArticle(lang: String, find: (String) -> String?): Article? {
-        find(lang)?.let { page -> return Article(text(lang, page)?.let { Text(it, lang) }, Wikidata.Page(lang, page)) }
+        find(lang)?.let { page -> return Article(text(lang, page)?.let { Text(it, lang, WIKIPEDIA) }, Wikidata.Page(lang, page)) }
         val other = if (lang == "ru") "en" else "ru"
         val page = find(other) ?: return null
         translation(other, page, lang)?.let { translated ->
-            text(lang, translated)?.let { return Article(Text(it, lang), Wikidata.Page(lang, translated)) }
+            text(lang, translated)?.let { return Article(Text(it, lang, WIKIPEDIA), Wikidata.Page(lang, translated)) }
         }
-        return Article(text(other, page)?.let { Text(it, other) }, Wikidata.Page(other, page))
+        return Article(text(other, page)?.let { Text(it, other, WIKIPEDIA) }, Wikidata.Page(other, page))
     }
 
     /** An article found: its facts, and where it is (for the Wikidata item behind it). */
@@ -1374,7 +1409,7 @@ object TrackInfo {
     private fun writeFacts(f: Facts): JSONObject {
         val o = JSONObject()
         fun putText(name: String, texts: List<Text>) {
-            o.put(name, JSONArray(texts.map { JSONObject().put("lang", it.lang).put("facts", JSONArray(it.facts)) }))
+            o.put(name, JSONArray(texts.map { JSONObject().put("lang", it.lang).put("facts", JSONArray(it.facts)).put("src", it.source ?: "") }))
         }
         putText("song", f.song)
         putText("artist", f.artist)
@@ -1399,7 +1434,7 @@ object TrackInfo {
             return (0 until arr.length()).map { i ->
                 val t = arr.getJSONObject(i)
                 val list = t.getJSONArray("facts")
-                Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"))
+                Text((0 until list.length()).map { list.getString(it) }, t.getString("lang"), t.optString("src").ifBlank { null })
             }
         }
         fun strings(name: String) = o.optJSONArray(name)?.let { arr -> (0 until arr.length()).map { arr.getString(it) } }.orEmpty()
@@ -1530,6 +1565,25 @@ object TrackInfo {
 
     private const val ALBUM_SEARCH_LIMIT = 25
 
+
+    // Where facts come from, as the card names them (see [Text.source]).
+    const val WIKIPEDIA = "wikipedia"
+    const val WIKIDATA = "wikidata"
+    const val LASTFM = "lastfm"
+    const val DISCOGS = "discogs"
+    const val MUSICBRAINZ = "musicbrainz"
+    const val AUDIODB = "audiodb"
+    const val DEEZER = "deezer"
+    const val BASE = "base"
+
+    /** Fewer facts about the artist than this: the artist base is asked at once. */
+    private const val THIN_FACTS = 3
+
+    /** For an artist nothing else knows, the story waits this long for MusicBrainz and Discogs. */
+    private const val BASE_WAIT_MS = 15_000L
+
+    /** Sentences translated per text: the story takes a few at a time. */
+    private const val MAX_TRANSLATED = 30
 
     /** ListenBrainz is waited for this long to say which album a track is from. */
     private const val LOOKUP_WAIT_MS = 4_000L

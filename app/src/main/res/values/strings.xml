@@ -972,4 +972,5 @@
     <string name="sum_lb_on">ListenBrainz</string>
     <string name="sum_pocket_short">карман по кнопке питания</string>
     <string name="bubble_refining">Это первые факты — облачная модель ещё рассказывает…</string>
+    <string name="bubble_fact_sources">Сведения: %1$s</string>
 </resources>

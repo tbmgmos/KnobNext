@@ -155,14 +155,19 @@ class TrackBubble(
                 if (expanded) subView?.text = subtitle(track ?: return, trackFacts) else collapse()
                 return
             }
-            if (expanded) return
+            // Another track: the card follows it, open or not. Down the circle (an artist's card) the
+            // person is reading: that stays, and "back" leads to the new track.
             setTrack(t, cover)
             news = null
             note = null
             trackFacts = null
             trackRecord = null
             recordJob?.cancel()
-            collapse()
+            askJob?.cancel()
+            when {
+                !expanded -> collapse()
+                path.isEmpty() -> expand(fetchNote = true)
+            }
         }
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -410,6 +415,7 @@ class TrackBubble(
             val facts = runCatching { TrackInfo.facts(service, t, prefs.infoLanguage.resolve()) }.getOrNull()
             trackFacts = facts
             if (path.isEmpty()) {
+                if (TrackInfo.lastSources.isEmpty()) showSources(emptyList())
                 showCircle(facts?.related.orEmpty(), t.artist)
                 // The player did not say the album or the year: the sources often know them.
                 subView?.text = subtitle(t, facts)
@@ -976,7 +982,15 @@ class TrackBubble(
     private fun showSources(sources: List<CloudBrain.Source>) {
         val v = sourcesView ?: return
         if (sources.isEmpty()) {
-            v.visibility = View.GONE
+            // No pages of the cloud's to name: where the facts came from, if they are here.
+            val from = trackFacts?.sources.orEmpty().takeIf { path.isEmpty() }?.mapNotNull { SOURCE_NAMES[it] }.orEmpty()
+            v.setOnClickListener(null)
+            if (from.isEmpty()) {
+                v.visibility = View.GONE
+            } else {
+                v.text = service.getString(R.string.bubble_fact_sources, from.joinToString(", "))
+                v.visibility = View.VISIBLE
+            }
             return
         }
         v.text = service.getString(R.string.bubble_sources, sources.take(MAX_SOURCES).joinToString(", ") { it.title })
@@ -1266,6 +1280,12 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
+        /** How the sources are named on the card. */
+        val SOURCE_NAMES = mapOf(
+            TrackInfo.WIKIPEDIA to "Википедия", TrackInfo.WIKIDATA to "Wikidata", TrackInfo.LASTFM to "Last.fm",
+            TrackInfo.DISCOGS to "Discogs", TrackInfo.MUSICBRAINZ to "MusicBrainz", TrackInfo.AUDIODB to "TheAudioDB",
+            TrackInfo.DEEZER to "Deezer", TrackInfo.BASE to "своя база",
+        )
         /** A question in the card is waited for this long; a later answer is kept for the next asking. */
         const val ASK_WAIT_MS = 45_000L
         const val BUBBLE_DP = 56

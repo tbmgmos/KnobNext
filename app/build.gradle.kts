@@ -86,6 +86,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     // Gemini Nano on phones that have it (AICore); nothing is bundled.
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
+    // Facts found only in another language, translated on the phone (the model is downloaded once, on Wi-Fi).
+    implementation("com.google.mlkit:translate:17.0.3")
     // GitHub build only (it can download models): a local language model and offline speech recognition.
     "githubImplementation"("com.google.mediapipe:tasks-genai:0.10.27")
     "githubImplementation"("com.alphacephei:vosk-android:0.3.47")

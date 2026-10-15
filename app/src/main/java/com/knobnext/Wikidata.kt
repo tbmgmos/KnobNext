@@ -79,7 +79,7 @@ object Wikidata {
         val known = said.lowercase(Locale.ROOT)
         fun facts(id: String?, build: Facts.() -> Unit): Facts? =
             id?.let { items[it] }?.let { Facts(res, it, names, lang, known, albumKnown).apply(build) }
-        fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang) }
+        fun Facts?.text() = this?.out?.takeIf { it.isNotEmpty() }?.let { TrackInfo.Text(it, lang, TrackInfo.WIKIDATA) }
         val artistFacts = facts(ids[2]) { artist() }
         val circle = ids[2]?.let { id -> items[id]?.let { Circle(res, id, it, memberClaims, names, musical) } }
         return Found(
