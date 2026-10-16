@@ -318,6 +318,8 @@ class TrackBubble(
             refining = false
         }
         note = text ?: service.getString(R.string.speak_info_none)
+        // Kept for the track: shown again when the card comes back to it, rather than asked for anew.
+        track?.let { t -> if (text != null) synchronized(told) { told[keyOf(t)] = text } }
         if (path.isEmpty()) {
             noteView?.text = note
             showSources(if (text != null) TrackInfo.lastSources else emptyList())
@@ -470,7 +472,7 @@ class TrackBubble(
         when {
             ours && note != null && note != service.getString(R.string.speak_info_none) -> noteView?.text = note
             ours && noteJob?.isActive == true -> noteView?.setText(R.string.bubble_loading)
-            fetchNote -> fetchNote()
+            fetchNote -> toldOrFetch(t)
             note != null -> noteView?.text = note
             else -> noteView?.setText(R.string.bubble_loading)
         }
@@ -500,6 +502,39 @@ class TrackBubble(
     }
 
     private fun keyOf(t: TrackInfo.Track) = "${t.artist}\u0000${t.title}"
+
+    /**
+     * What was already told about [t] (on this card a while ago, or in the history: a story heard or read
+     * before) is shown as it is, not asked for again; "More" tells something new. Nothing told yet: the note.
+     */
+    private fun toldOrFetch(t: TrackInfo.Track) {
+        val key = keyOf(t)
+        synchronized(told) { told[key] }?.let { return showTold(t, it) }
+        noteView?.setText(R.string.bubble_loading)
+        noteJob?.cancel()
+        noteKey = key
+        noteJob = scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val artist = t.artist?.takeIf { it.isNotBlank() } ?: return@runCatching null
+                    Journal.entry(service, Journal.key(artist))?.notes.orEmpty()
+                        .filter { Speech.cleanTitle(it.track).equals(Speech.cleanTitle(t.title), ignoreCase = true) && it.text.isNotBlank() }
+                        .maxByOrNull { it.at }?.text
+                }.getOrNull()
+            }
+            if (!same(t)) return@launch
+            if (saved != null) showTold(t, saved) else fetchNote()
+        }
+    }
+
+    private fun showTold(t: TrackInfo.Track, text: String) {
+        noteKey = keyOf(t)
+        note = text
+        if (path.isEmpty()) {
+            noteView?.text = text
+            showSources(emptyList())
+        }
+    }
 
     /** Whose note [note] is (or the one being told). */
     private var noteKey: String? = null
@@ -1498,6 +1533,12 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
+        /** The notes told lately, by track: the card shows them again rather than asking anew. */
+        val told = object : LinkedHashMap<String, String>() {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > MAX_TOLD
+        }
+        const val MAX_TOLD = 50
+
         /** The seconds the cloud has been answering for, counted on the card. */
         const val CLOUD_TICK_MS = 1_000L
 

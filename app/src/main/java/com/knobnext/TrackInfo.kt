@@ -457,7 +457,8 @@ object TrackInfo {
         background.launch(if (later) Brainz.Quiet() else kotlin.coroutines.EmptyCoroutineContext) { runCatching { facts(context, track, lang) } }
     }
 
-    private const val PREVIEW_FACTS = 2
+    /** While the cloud writes, the card has a few facts to read. */
+    private const val PREVIEW_FACTS = 3
 
     /** What the round card can ask the cloud model about the track or an artist down the circle. */
     enum class Question { SONG, MAKING, START, ROOTS, NEXT, WHO }
