@@ -354,6 +354,7 @@
     <string name="dev_mode_hint">Claude или Groq со своим ключом: источник «Облако» в «Рассказе о треке» и вопросы в кружке. Выключено — облако не используется совсем</string>
     <string name="cloud_hint">Для рассказов из источника «Облако» и вопросов в кружке («О чём песня?», «С чего начать?»). Ключ хранится только на телефоне; сервису уходят название трека, исполнитель и найденные факты</string>
     <string name="cloud_model_hint_claude">Пусто — %1$s (самая сильная). Дешевле: claude-sonnet-5-5 или claude-haiku-5-5</string>
+    <string name="claude_key_reseller">Это не ключ Anthropic (у них ключи начинаются с «sk-ant-») — похоже, ключ посредника. Впишите адрес его сервера в поле «Адрес сервера» ниже: без адреса ключ уходит в Anthropic, и тот его не примет</string>
     <string name="claude_base">Адрес сервера (необязательно)</string>
     <string name="claude_base_hint">Пусто — сам Anthropic. Если доступ к Claude куплен у посредника, впишите его адрес (base URL), а его ключ — в поле ключа выше</string>
     <string name="cloud_key">Ключ %1$s</string>

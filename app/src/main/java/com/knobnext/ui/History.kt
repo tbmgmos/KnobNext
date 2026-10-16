@@ -629,7 +629,12 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
             // A server in between has keys of its own making: not judged by Anthropic's.
             format = { key ->
                 val ownServer = service == com.knobnext.CloudService.CLAUDE && prefs.claudeBase.isNotBlank()
-                if (!ownServer && service.keyPrefix.none { key.startsWith(it) }) stringResource(R.string.cloud_key_prefix, service.title, service.keyPrefix.first()) else null
+                when {
+                    ownServer || service.keyPrefix.any { key.startsWith(it) } -> null
+                    // Not Anthropic's: most likely a reseller's, which works only at the reseller's server.
+                    service == com.knobnext.CloudService.CLAUDE -> stringResource(R.string.claude_key_reseller)
+                    else -> stringResource(R.string.cloud_key_prefix, service.title, service.keyPrefix.first())
+                }
             },
             check = { com.knobnext.CloudBrain.check(prefs, service, it) },
             formatBlocks = false,
