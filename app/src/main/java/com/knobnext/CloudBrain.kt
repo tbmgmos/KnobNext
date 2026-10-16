@@ -30,7 +30,7 @@ enum class CloudService(
 }
 
 object CloudBrain {
-    /** An answer and the pages it was found on (Groq's search), for the card to name. */
+    /** An answer and the pages it was found on (Claude's or Groq's search), for the card to name. */
     /** [by]: what answered ("Groq · openai/gpt-oss-120b"), this answer's own, whatever else was asked meanwhile. */
     class Answer(val text: String, val sources: List<Source>, val by: String? = null)
 
@@ -144,11 +144,11 @@ object CloudBrain {
      * passes requests on to Claude). Its thinking is kept short: a few sentences are asked, and the voice waits.
      */
     private fun claude(prefs: Prefs, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
-        val r = ClaudeApi.ask(key, prefs.claudeBase, model, system, prompt, maxOf(maxTokens, CLAUDE_MIN_TOKENS))
+        val r = ClaudeApi.ask(key, prefs.claudeBase, model, system, prompt, maxOf(maxTokens, CLAUDE_MIN_TOKENS), prefs.claudeSearch)
         lastCode = r.code
         if (r.text != null) {
-            used(CloudService.CLAUDE, r.model ?: model, null)
-            return Answer(r.text, emptyList())
+            used(CloudService.CLAUDE, r.model ?: model, if (prefs.claudeSearch) r.sources.isNotEmpty() else null)
+            return Answer(r.text, r.sources.map { (title, url) -> Source(title.ifBlank { url }, url) })
         }
         lastDetail = "HTTP ${r.code}: ${r.said.take(MAX_ERROR_CHARS)}"
         val quoted = r.said.takeIf { it.isNotBlank() }?.let { " — «${it.take(MAX_QUOTE_CHARS)}»" }.orEmpty()

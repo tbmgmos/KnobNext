@@ -286,7 +286,9 @@ object TrackInfo {
             // The facts are its footing when they come quickly; the rest it looks up itself.
             // Slow to come: what the artist base has, at once.
             val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() } ?: ArtistBase.enrich(context, track, lang, null)
-            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet, datesAhead)
+            // Read on the card (its first facts already showing), the cloud is waited for longer than by the voice.
+            val wait = if (model) CLOUD_STORY_WAIT_MS else CLOUD_CARD_WAIT_MS
+            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet, datesAhead, wait)
             if (answer != null) {
                 found = quick
                 album = quick?.album ?: album
@@ -330,7 +332,7 @@ object TrackInfo {
 
     // ---- A large model in the cloud ----
 
-    /** Where the last story from the cloud was found (Gemini's search): the card names them. */
+    /** Where the last story from the cloud was found (Claude's or Groq's search): the card names them. */
     @Volatile var lastSources: List<CloudBrain.Source> = emptyList()
 
     private suspend fun fromCloud(
@@ -342,6 +344,7 @@ object TrackInfo {
         told: List<String>,
         firstMeet: Boolean,
         datesAhead: kotlinx.coroutines.Deferred<Brainz.Dates?>?,
+        wait: Long = CLOUD_STORY_WAIT_MS,
     ): CloudBrain.Answer? {
         val prefs = Prefs(context)
         // The dates it is not to guess, as far as there is time for them (the voice is waiting). Asked with
@@ -364,10 +367,10 @@ object TrackInfo {
         val asked = late ?: background.async {
             CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS)
         }
-        val answer = withTimeoutOrNull(CLOUD_STORY_WAIT_MS) { asked.await() } ?: return null.also {
+        val answer = withTimeoutOrNull(wait) { asked.await() } ?: return null.also {
             if (asked.isActive) {
                 lateAnswers[key] = System.currentTimeMillis() to asked
-                CloudBrain.lastError = "не успела за ${CLOUD_STORY_WAIT_MS / 1000} с — ответ возьмётся в следующий раз"
+                CloudBrain.lastError = "не успела за ${wait / 1000} с — ответ возьмётся в следующий раз"
             }
         }
         val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
@@ -1772,6 +1775,9 @@ object TrackInfo {
 
     /** How long a story waits for the cloud model before it is told from the facts. */
     private const val CLOUD_STORY_WAIT_MS = 12_000L
+
+    /** The card shows the first facts meanwhile: a search and an answer may take this long. */
+    private const val CLOUD_CARD_WAIT_MS = 30_000L
 
     /** Facts given to the cloud model as its footing. */
     private const val FOOTING_FACTS = 14

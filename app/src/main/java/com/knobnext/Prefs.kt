@@ -159,6 +159,7 @@ data class Settings(
     val cloudKeyed: Set<CloudService>,
     val cloudFallback: Boolean,
     val groqSearch: Boolean,
+    val claudeSearch: Boolean,
     val devMode: Boolean,
     val baseOn: Boolean,
     val baseFilledAt: Long,
@@ -419,6 +420,11 @@ class Prefs(context: Context) {
     var lbQueued: Int
         get() = sp.getInt("lb_queued", 0)
         set(v) = sp.edit().putInt("lb_queued", v).apply()
+
+    /** Claude may look things up on the web (a few searches per answer, paid per search). */
+    var claudeSearch: Boolean
+        get() = sp.getBoolean("claude_search", true)
+        set(v) = sp.edit().putBoolean("claude_search", v).apply()
 
     /** Groq answers with its web search (Compound), paid per search. */
     var groqSearch: Boolean
@@ -943,6 +949,7 @@ class Prefs(context: Context) {
         cloudKeyed = CloudService.entries.filter { cloudKey(it).isNotBlank() }.toSet(),
         cloudFallback = cloudFallback,
         groqSearch = groqSearch,
+        claudeSearch = claudeSearch,
         devMode = devMode,
         baseOn = baseOn,
         baseFilledAt = baseFilledAt,

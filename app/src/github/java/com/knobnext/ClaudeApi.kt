@@ -4,7 +4,10 @@ import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.models.beta.messages.BetaOutputConfig
+import com.anthropic.models.beta.messages.BetaMessage
 import com.anthropic.models.beta.messages.BetaStopReason
+import com.anthropic.models.beta.messages.BetaWebSearchTool20250305
+import com.anthropic.models.beta.messages.BetaWebSearchTool20260209
 import com.anthropic.models.beta.messages.MessageCreateParams
 import java.time.Duration
 
@@ -13,22 +16,36 @@ import java.time.Duration
  * passes requests on to Claude. Blocking: called on a background thread, like the other services.
  */
 object ClaudeApi {
-    /** The text (null: none), the model that answered, the HTTP status (0: no answer at all), what was said. */
-    class Reply(val text: String?, val model: String?, val code: Int, val said: String)
+    /**
+     * The text (null: none), the model that answered, the HTTP status (0: no answer at all), what was
+     * said, and the pages its web search found (title, address).
+     */
+    class Reply(val text: String?, val model: String?, val code: Int, val said: String, val sources: List<Pair<String, String>> = emptyList())
 
     /** Not an HTTP status: Claude declined to answer (its safeguards). */
     const val REFUSED = -2
 
-    fun ask(key: String, base: String, model: String, system: String, prompt: String, maxTokens: Int): Reply {
+    /** [search]: Claude may look things up on the web (a few searches, paid apart from the tokens). */
+    fun ask(key: String, base: String, model: String, system: String, prompt: String, maxTokens: Int, search: Boolean): Reply {
         val official = base.isBlank()
-        fun params(effort: Boolean) = MessageCreateParams.builder()
+        fun params(effort: Boolean, search: Boolean, before: List<BetaMessage>) = MessageCreateParams.builder()
             .model(model)
             .maxTokens(maxTokens.toLong())
             .system(system)
             .addUserMessage(prompt)
             .apply {
+                // A long search pauses the turn: what was done so far goes back, and Claude goes on from there.
+                before.forEach { addMessage(it) }
                 // A few sentences: brief thinking is enough, and quicker (the voice is waiting).
                 if (effort) outputConfig(BetaOutputConfig.builder().effort(BetaOutputConfig.Effort.LOW).build())
+                if (search) {
+                    // The newer search (it filters what it finds) on the models that have it.
+                    if (NEW_SEARCH_MODELS.any { model.startsWith(it) }) {
+                        addTool(BetaWebSearchTool20260209.builder().maxUses(MAX_SEARCHES).build())
+                    } else {
+                        addTool(BetaWebSearchTool20250305.builder().maxUses(MAX_SEARCHES).build())
+                    }
+                }
                 // Declined by Claude's safeguards: Anthropic answers with the model its category calls for
                 // instead. Only at Anthropic itself: a server in between may not know the parameter.
                 if (official && FALLBACK_MODELS.any { model.startsWith(it) }) {
@@ -38,19 +55,35 @@ object ClaudeApi {
             }
             .build()
         return try {
-            val m = try {
-                client(key, base).beta().messages().create(params(effort = true))
-            } catch (e: AnthropicServiceException) {
-                // An older model, or a server in between, that does not take the effort: once more without it.
-                if (e.statusCode() == 400 && "effort" in e.message.orEmpty().lowercase()) {
-                    client(key, base).beta().messages().create(params(effort = false))
-                } else {
-                    throw e
+            var effort = true
+            var searching = search
+            val turns = ArrayList<BetaMessage>()
+            var m: BetaMessage
+            while (true) {
+                m = try {
+                    client(key, base).beta().messages().create(params(effort, searching, turns))
+                } catch (e: AnthropicServiceException) {
+                    val said = e.message.orEmpty().lowercase()
+                    // An older model, or a server in between, that does not take the effort or the search:
+                    // once more without what it did not take.
+                    when {
+                        e.statusCode() != 400 || turns.isNotEmpty() -> throw e
+                        effort && "effort" in said -> { effort = false; continue }
+                        searching && ("web_search" in said || "tool" in said) -> { searching = false; continue }
+                        else -> throw e
+                    }
                 }
+                if (m.stopReason().orElse(null) != BetaStopReason.PAUSE_TURN || turns.size >= MAX_PAUSES) break
+                turns += m
             }
             if (m.stopReason().orElse(null) == BetaStopReason.REFUSAL) return Reply(null, null, REFUSED, "")
+            val all = turns + m
             val text = m.content().mapNotNull { it.text().orElse(null)?.text() }.joinToString("").trim()
-            Reply(text.ifBlank { null }, m.model().toString(), 200, "")
+            // The pages the search found: the card names them.
+            val sources = all.flatMap { it.content() }.mapNotNull { it.webSearchToolResult().orElse(null) }
+                .flatMap { it.content().resultBlocks().orElse(emptyList()) }
+                .map { it.title() to it.url() }.distinctBy { it.second }.take(MAX_SOURCES)
+            Reply(text.ifBlank { null }, m.model().toString(), 200, "", sources)
         } catch (e: AnthropicServiceException) {
             Reply(null, null, e.statusCode(), e.message.orEmpty())
         } catch (e: Exception) {
@@ -95,6 +128,12 @@ object ClaudeApi {
     /** A story waits a few seconds and takes a late answer next time; a request is not kept open longer. */
     private const val TIMEOUT_S = 60L
     private const val CHECK_TOKENS = 16L
+
+    /** A few searches are enough for a few sentences, and each one is paid for and waited for. */
+    private const val MAX_SEARCHES = 3L
+    private const val MAX_PAUSES = 2
+    private const val MAX_SOURCES = 5
+    private val NEW_SEARCH_MODELS = listOf("claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6")
     private const val FALLBACK_BETA = "server-side-fallback-2026-07-01"
     private val FALLBACK_MODELS = listOf("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5")
 }

@@ -586,6 +586,19 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
                 )
             }
         }
+        if (service == com.knobnext.CloudService.CLAUDE) {
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.claude_search), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        stringResource(R.string.claude_search_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(checked = s.claudeSearch, onCheckedChange = { prefs.claudeSearch = it })
+            }
+        }
         if (service == com.knobnext.CloudService.GROQ) {
             androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
