@@ -115,7 +115,8 @@ object CloudBrain {
         return null
     }
 
-    private fun used(service: CloudService, model: String, search: Boolean?) {
+    /** [ms]: how long the answer took, for the settings and the log ("Claude · … · 14,2 с"). */
+    private fun used(service: CloudService, model: String, search: Boolean?, ms: Long? = null) {
         usedHere.set(listOfNotNull(
             service.title,
             model,
@@ -124,6 +125,7 @@ object CloudBrain {
                 false -> "без поиска"
                 null -> null
             },
+            ms?.let { String.format(java.util.Locale("ru"), "%.1f с", it / 1000.0) },
         ).joinToString(" · "))
         lastUsed = usedHere.get()
     }
@@ -144,13 +146,14 @@ object CloudBrain {
      * passes requests on to Claude). Its thinking is kept short: a few sentences are asked, and the voice waits.
      */
     private fun claude(prefs: Prefs, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
+        val started = System.currentTimeMillis()
         val r = ClaudeApi.ask(key, prefs.claudeBase, model, system, prompt, maxOf(maxTokens, CLAUDE_MIN_TOKENS), prefs.claudeSearch)
         lastCode = r.code
         if (r.text != null) {
-            used(CloudService.CLAUDE, r.model ?: model, if (prefs.claudeSearch) r.sources.isNotEmpty() else null)
+            used(CloudService.CLAUDE, r.model ?: model, if (prefs.claudeSearch) r.sources.isNotEmpty() else null, System.currentTimeMillis() - started)
             return Answer(r.text, r.sources.map { (title, url) -> Source(title.ifBlank { url }, url) })
         }
-        lastDetail = "HTTP ${r.code}: ${r.said.take(MAX_ERROR_CHARS)}"
+        lastDetail = "HTTP ${r.code} за ${(System.currentTimeMillis() - started) / 1000} с: ${r.said.take(MAX_ERROR_CHARS)}"
         val quoted = r.said.takeIf { it.isNotBlank() }?.let { " — «${it.take(MAX_QUOTE_CHARS)}»" }.orEmpty()
         lastError = when (r.code) {
             0 -> r.said.ifBlank { "нет связи" }
