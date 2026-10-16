@@ -328,7 +328,7 @@ class TrackBubble(
     fun dismiss() {
         handler.removeCallbacks(hide)
         handler.removeCallbacks(tick)
-        noteJob?.cancel()
+        // The note being told goes on: shown again for the same track, it is there, not asked for anew.
         circleJob?.cancel()
         // A question asked on the card before belongs to it: its answer must not land on this one.
         askJob?.cancel()
@@ -371,7 +371,7 @@ class TrackBubble(
 
     private fun collapse() {
         expanded = false
-        noteJob?.cancel()
+        // The note being told goes on (the cloud is paid per answer): opened again, the card shows it.
         circleJob?.cancel()
         // A question asked on the card before belongs to it: its answer must not land on this one.
         askJob?.cancel()
@@ -401,7 +401,6 @@ class TrackBubble(
         badgeView = null
         // A tap elsewhere folds it back.
         params?.let { it.flags = it.flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH; update(it) }
-        if (fetchNote) note = null
         render(fetchNote)
     }
 
@@ -409,7 +408,6 @@ class TrackBubble(
     private fun render(fetchNote: Boolean = false) {
         val r = root ?: return
         val t = track ?: return
-        noteJob?.cancel()
         circleJob?.cancel()
         r.removeAllViews()
         reading = false
@@ -418,6 +416,8 @@ class TrackBubble(
     }
 
     private fun keepOpen() {
+        // A note finished while the card was closed: nothing to keep open (nor to close later).
+        if (root == null) return
         handler.removeCallbacks(hide)
         handler.postDelayed(hide, if (expanded) EXPANDED_MS else COLLAPSED_MS)
     }
@@ -464,9 +464,14 @@ class TrackBubble(
         buttons.addView(button(service.getString(R.string.bubble_close)) { dismiss() })
         box.addView(buttons)
 
+        // This track's note, told before the card was folded or closed, or still being told: kept, not
+        // asked for again (the cloud is paid per answer). "Nothing found" is tried again.
+        val ours = noteKey == keyOf(t)
         when {
-            note != null -> noteView?.text = note
+            ours && note != null && note != service.getString(R.string.speak_info_none) -> noteView?.text = note
+            ours && noteJob?.isActive == true -> noteView?.setText(R.string.bubble_loading)
             fetchNote -> fetchNote()
+            note != null -> noteView?.text = note
             else -> noteView?.setText(R.string.bubble_loading)
         }
         loadTrackCircle(t)
@@ -494,10 +499,16 @@ class TrackBubble(
         fetchNote(more = true)
     }
 
+    private fun keyOf(t: TrackInfo.Track) = "${t.artist}\u0000${t.title}"
+
+    /** Whose note [note] is (or the one being told). */
+    private var noteKey: String? = null
+
     private fun fetchNote(more: Boolean = false) {
         val t = track ?: return
         noteJob?.cancel()
         note = null
+        noteKey = keyOf(t)
         noteView?.setText(if (more) R.string.bubble_loading_more else R.string.bubble_loading)
         val lang = prefs.infoLanguage.resolve()
         noteJob = scope.launch {
@@ -534,7 +545,7 @@ class TrackBubble(
                 refining = true
                 var seconds = 0
                 while (true) {
-                    if (refining && path.isEmpty()) status(service.getString(waiting, by, seconds))
+                    if (refining && path.isEmpty() && expanded && root != null) status(service.getString(waiting, by, seconds))
                     kotlinx.coroutines.delay(CLOUD_TICK_MS)
                     seconds++
                 }
@@ -585,6 +596,8 @@ class TrackBubble(
                 first == null || text.contains(first.take(LEAD_MATCH)) -> text
                 else -> first + "\n\n" + text
             }
+            // The track changed meanwhile (the card closed, another song): this note is not the card's any more.
+            if (!same(t)) return@launch
             setNote(withLead(told))
             // The cloud did not answer in time and is still answering: the facts meanwhile, its story when it comes.
             if (cloud && TrackInfo.cloudLate(t, lang)) {
