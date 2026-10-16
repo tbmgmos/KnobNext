@@ -126,7 +126,7 @@ object ClaudeApi {
     private var current: Pair<String, AnthropicClient>? = null
 
     /** A story waits a few seconds and takes a late answer next time; a request is not kept open longer. */
-    private const val TIMEOUT_S = 60L
+    private const val TIMEOUT_S = 45L
     private const val CHECK_TOKENS = 16L
 
     /** A few searches are enough for a few sentences, and each one is paid for and waited for. */

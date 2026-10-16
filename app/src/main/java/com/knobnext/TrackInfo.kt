@@ -378,6 +378,29 @@ object TrackInfo {
         return CloudBrain.Answer(text, checked.sources, checked.by)
     }
 
+    /** Whether the cloud's answer about [track] is still on its way, after its telling stopped waiting. */
+    fun cloudLate(track: Track, lang: String): Boolean =
+        lateAnswers["${track.artist}\u0000${track.title}\u0000$lang"]?.second?.isActive == true
+
+    /**
+     * The cloud's answer about [track] that came too late for its telling, checked like any other: for the
+     * card, which shows the facts meanwhile and puts the answer in their place when it comes.
+     */
+    suspend fun lateStory(context: Context, track: Track, length: InfoLength, lang: String): CloudBrain.Answer? {
+        val key = "${track.artist}\u0000${track.title}\u0000$lang"
+        val asked = lateAnswers[key]?.second ?: return null
+        val answer = withTimeoutOrNull(LATE_WAIT_MS) { asked.await() } ?: return null
+        lateAnswers.remove(key)
+        val facts = recent(track, lang)
+        val dates = within(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
+        val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
+        val text = clean(checked.text, length, lang) ?: return null
+        return CloudBrain.Answer(text, checked.sources, checked.by)
+    }
+
+    /** A late answer is waited for this long more by the card (a search and a long answer take a while). */
+    private const val LATE_WAIT_MS = 60_000L
+
     /** Cloud answers that came too late for their telling, by track: the next telling takes them. */
     private val lateAnswers = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, kotlinx.coroutines.Deferred<CloudBrain.Answer?>>>()
     private const val LATE_ANSWER_MS = 30L * 60 * 1000
@@ -1088,6 +1111,8 @@ object TrackInfo {
             runCatching { readFacts(JSONObject(file.readText())) }.getOrNull()?.let { cached ->
                 deepenLater(context, track, lang, file, cached)
                 steps.add("сохранённые")
+                // The card shows them at once, whatever else (the cloud) it is waiting for.
+                runCatching { early(cached) }
                 return cached
             }
         }

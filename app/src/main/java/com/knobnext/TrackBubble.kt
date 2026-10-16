@@ -494,6 +494,11 @@ class TrackBubble(
                 runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
             }
             val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
+            // The cloud takes a while (a search, a long answer): said at once, so the card does not look stuck.
+            if (cloud) {
+                status(service.getString(R.string.bubble_cloud_asking, prefs.cloudService.title))
+                refining = true
+            }
             // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
             var lead: String? = null
             fun show(text: String?, isLead: Boolean) {
@@ -515,27 +520,42 @@ class TrackBubble(
                 val facts = TrackInfo.earlyOf(t, lang).filterNotNull().first()
                 if (lead == null) {
                     val about = TrackInfo.summary(facts, lang)
-                    if (about != null) show(about, isLead = true) else show(TrackInfo.preview(facts, lang), isLead = false)
+                    if (about != null) show(about, isLead = true)
+                    else show(TrackInfo.preview(facts, lang) ?: TrackInfo.untranslated(facts), isLead = false)
                 }
             }
             if (cloud) launch {
                 val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
                 early.cancel()
                 if (lead == null) TrackInfo.summary(facts, lang)?.let { lead = it }
-                show(listOfNotNull(lead, TrackInfo.preview(facts, lang)?.takeUnless { p -> lead?.let { p.startsWith(it.take(LEAD_MATCH)) } == true })
+                val more = TrackInfo.preview(facts, lang) ?: TrackInfo.untranslated(facts)
+                show(listOfNotNull(lead, more?.takeUnless { p -> lead?.let { p.startsWith(it.take(LEAD_MATCH)) } == true })
                     .joinToString("\n\n").ifBlank { null }, isLead = false)
             }
             telling.invokeOnCompletion { early.cancel() }
             val told = telling.await()
             // The note under the line about the artist, unless it begins with it already.
             val first = TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
-            setNote(
-                when {
-                    told == null -> first
-                    first == null || told.contains(first.take(LEAD_MATCH)) -> told
-                    else -> first + "\n\n" + told
-                },
-            )
+            fun withLead(text: String?) = when {
+                text == null -> first
+                first == null || text.contains(first.take(LEAD_MATCH)) -> text
+                else -> first + "\n\n" + text
+            }
+            setNote(withLead(told))
+            // The cloud did not answer in time and is still answering: the facts meanwhile, its story when it comes.
+            if (cloud && TrackInfo.cloudLate(t, lang)) {
+                status(service.getString(R.string.bubble_cloud_late))
+                refining = true
+                val late = runCatching { TrackInfo.lateStory(service, t, prefs.infoLength, lang) }.getOrNull()
+                if (!same(t) || path.isNotEmpty()) return@launch
+                if (late == null) {
+                    statusView?.visibility = View.GONE
+                    refining = false
+                    return@launch
+                }
+                TrackInfo.lastSources = late.sources
+                setNote(withLead(late.text))
+            }
         }
     }
 
