@@ -58,8 +58,13 @@ object ArtistBase {
         val genres: List<String> = emptyList(),
         /** Every source answered: one that did not (MusicBrainz busy, say) is asked again the next night. */
         val complete: Boolean = true,
+        /** How it was gathered: an older card ([VERSION]) is gathered again. */
+        val version: Int = VERSION,
     ) {
         val empty get() = mbid == null && discogsId == null && intro.isEmpty() && about.isEmpty()
+
+        /** Gathered the way cards are now (a singer's years from their first record, not their birth). */
+        val current get() = version >= VERSION
 
         fun toJson(): JSONObject = JSONObject()
             .put("name", name).put("at", at).put("lang", lang)
@@ -70,7 +75,7 @@ object ArtistBase {
             .put("labels", JSONArray(labels)).put("profile", JSONArray(profile))
             .put("intro", JSONArray(intro)).put("about", JSONArray(about))
             .put("related", JSONArray(related)).put("relatedIds", JSONArray(relatedIds))
-            .put("complete", complete)
+            .put("complete", complete).put("v", version)
             .put("genres", JSONArray(genres))
 
         companion object {
@@ -99,6 +104,7 @@ object ArtistBase {
                     relatedIds = strings("relatedIds"),
                     complete = o.optBoolean("complete", true),
                     genres = strings("genres"),
+                    version = o.optInt("v", 1),
                 )
             }
         }
@@ -333,7 +339,7 @@ object ArtistBase {
                     !card.complete -> DAY_MS
                     else -> FRESH_MS
                 }
-                now - card.at > fresh || card.lang != lang
+                now - card.at > fresh || card.lang != lang || !card.current
             }.take(max)
             var done = 0
             for (name in due) {
@@ -365,7 +371,7 @@ object ArtistBase {
         if (f.exists()) {
             val card = runCatching { Card.fromJson(JSONObject(f.readText())) }.getOrNull()
             // A card from before genres were kept is gathered again for them.
-            val old = card != null && !card.empty && card.genres.isEmpty() && card.mbid != null
+            val old = card != null && !card.empty && card.mbid != null && (card.genres.isEmpty() || !card.current)
             val fresh = if (card == null || card.empty) EMPTY_FRESH_MS else DAY_MS
             if (card != null && !old && System.currentTimeMillis() - card.at < fresh) return null
         }
@@ -420,6 +426,9 @@ object ArtistBase {
 
 
     private const val JOB_ID = 43
+
+    /** 2: a person's years from their first record, not their birth. */
+    private const val VERSION = 2
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
     /** A card is gathered again after a month; one that found nothing, after a week. */

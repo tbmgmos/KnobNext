@@ -143,12 +143,12 @@ class TrackBubble(
         lineJob = scope.launch {
             val lang = prefs.infoLanguage.resolve()
             var card = withContext(Dispatchers.IO) { ArtistBase.card(service, artist) }
-            card?.let { showArtistLine(t, it.genres, it.began, it.ended, lang) }
-            if (card != null && card.genres.isNotEmpty()) return@launch
+            card?.takeIf { it.current }?.let { showArtistLine(t, it.genres, it.began, it.ended, lang) }
+            if (card != null && card.genres.isNotEmpty() && card.current) return@launch
             // The dates: the artist's years meanwhile, and the album's year when the player gave none.
             val dates = withContext(Dispatchers.IO) { runCatching { TrackInfo.reference(service, artist, t.album, null) }.getOrNull() }
             if (dates != null) {
-                if (card == null) showArtistLine(t, emptyList(), dates.began, dates.ended, lang)
+                if (card == null || !card.current) showArtistLine(t, card?.genres.orEmpty(), dates.began, dates.ended, lang)
                 dates.albumDate?.take(4)?.let { albumYear = it; if (same(t) && path.isEmpty()) subView?.text = subtitle(t, trackFacts) }
             }
             card = ArtistBase.buildSoon(service, artist, lang)?.await() ?: return@launch

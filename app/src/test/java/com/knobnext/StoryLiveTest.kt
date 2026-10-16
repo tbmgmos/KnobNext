@@ -105,6 +105,20 @@ class StoryLiveTest {
     }
 
     /** The dates the cloud model is given and held to: MusicBrainz's, and a wrong year taken out. */
+    /** Years active: a singer's from their first record, not their birth; a band's from its forming. */
+    @Test
+    fun activeYears() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val context = RuntimeEnvironment.getApplication()
+        println("\n===== Годы активности")
+        for (artist in listOf("Current Joys", "Земфира", "David Bowie", "Nirvana", "Кино")) {
+            val d = Brainz.dates(artist, null, null)
+            val facts = TrackInfo.facts(context, TrackInfo.Track("-", artist, null, null), "ru")
+            val formed = facts?.artist.orEmpty().flatMap { it.facts }.filter { it.contains("образована") }
+            println("$artist: начали ${d?.began}, закончили ${d?.ended}; «образована»: $formed")
+        }
+    }
+
     @Test
     fun dates() = runBlocking {
         assumeTrue(System.getenv("LIVE_STORIES") == "1")

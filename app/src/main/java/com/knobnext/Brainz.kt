@@ -402,9 +402,10 @@ object Brainz {
         val matched = albumName?.let { n -> all.firstOrNull { sameName(it.first, n) } }
             // Not among the studio albums (an EP, a single, a live record): its own release group.
             ?: albumName?.let { n -> releaseGroupDate(artist, n) }
+        val (began, ended) = active(a, all.firstOrNull()?.second?.take(4))
         return Dates(
-            began = span?.let { year(it, "begin") },
-            ended = span?.let { year(it, "end") },
+            began = began,
+            ended = ended,
             album = matched?.first ?: albumName,
             albumDate = matched?.second,
             albums = all.map { (t, d) -> t to d.take(4) }.distinctBy { it.first.lowercase(Locale.ROOT) }.take(MAX_ALBUMS),
@@ -461,13 +462,13 @@ object Brainz {
             }
             if (groups.size >= o.optInt("release-group-count")) break
         }
-        val span = a.optJSONObject("life-span")
+        val (began, ended) = active(a, groups.mapNotNull { it.date?.take(4) }.minOrNull())
         return ArtistInfo(
             id = id,
             name = a.optString("name"),
             band = a.optString("type") == "Group",
-            began = span?.let { year(it, "begin") },
-            ended = span?.let { year(it, "end") },
+            began = began,
+            ended = ended,
             area = (a.optJSONObject("begin-area") ?: a.optJSONObject("area"))?.optString("name")?.takeIf { it.isNotBlank() },
             discogs = discogs,
             members = members,
@@ -527,6 +528,25 @@ object Brainz {
     private fun name(r: JSONObject, target: String) = r.optJSONObject(target)?.optString("name")?.takeIf { it.isNotBlank() }
 
     // optString gives "null" for a JSON null: only four digits count.
+    /**
+     * The years the artist was active. A band's life-span is its own (formed, broke up); a person's is their
+     * life, so their years run from their first record ("since 1992" was a singer's birth). A band "formed"
+     * long before its first record is most likely one person's birth entered as a band's: the record's year.
+     */
+    internal fun active(a: JSONObject?, firstRecord: String?): Pair<String?, String?> {
+        val span = a?.optJSONObject("life-span")
+        val begin = span?.let { year(it, "begin") }
+        val end = span?.let { year(it, "end") }
+        val person = a?.optString("type") in setOf("Person", "Character")
+        if (person) return firstRecord to end?.takeIf { firstRecord != null }
+        val first = firstRecord?.toIntOrNull()
+        val formed = begin?.toIntOrNull()
+        return if (first != null && formed != null && first - formed > MAX_YEARS_BEFORE_RECORD) firstRecord to end else begin to end
+    }
+
+    /** A band rarely records its first album this long after forming: a longer gap is someone's birth. */
+    private const val MAX_YEARS_BEFORE_RECORD = 12
+
     private fun year(r: JSONObject, field: String) = r.optString(field).take(4).takeIf { it.length == 4 && it.all(Char::isDigit) }
 
     /** An instrument's name to say; one not in the list is left out rather than said in English to a Russian ear. */

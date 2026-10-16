@@ -83,7 +83,11 @@ object MusicSources {
         val facts = ArrayList<String>()
         bio?.let { facts += TrackInfo.splitFacts(it) }
         if (bioLang == lang) {
-            a.optString("intFormedYear").takeIf { it.length == 4 && it != "0000" }?.let { facts += res.getString(R.string.src_formed, it) }
+            // "Formed" only for a band: a solo artist's "formed" year is often their birth year.
+            val members = a.optString("intMembers").toIntOrNull() ?: 0
+            val born = a.optString("intBornYear")
+            a.optString("intFormedYear").takeIf { it.length == 4 && it != "0000" && members > 1 && it != born }
+                ?.let { facts += res.getString(R.string.src_formed, it) }
             a.optString("intMembers").toIntOrNull()?.takeIf { it > 1 }?.let {
                 facts += res.resources.getQuantityString(R.plurals.src_members, it, it)
             }

@@ -489,7 +489,7 @@ object TrackInfo {
         referenceCache[key]?.let { return it }
         // Gathered ahead: at once, and without the network. An album the base does not know is looked up.
         // A card MusicBrainz did not answer for has no studio albums to give: then MusicBrainz is asked now.
-        ArtistBase.card(context, who)?.takeIf { it.complete || it.albums.any { a -> a.studio } }
+        ArtistBase.card(context, who)?.takeIf { it.current && (it.complete || it.albums.any { a -> a.studio }) }
             ?.let { ArtistBase.dates(it, album) }?.takeIf { album == null || it.albumDate != null }?.let {
             referenceCache[key] = it
             return it
@@ -1756,7 +1756,7 @@ object TrackInfo {
     private const val NONE_PREFIX = "none1-"
 
     /** The cached facts' shape: a new one when the facts gain a field (now: MusicBrainz's and Last.fm's). */
-    private const val FACTS_PREFIX = "facts9-"
+    private const val FACTS_PREFIX = "facts10-"
 
     /** Verified dates: waited for this long in a story (the voice is waiting), longer for a question. */
     private const val STORY_DATES_WAIT_MS = 5_000L
@@ -1765,7 +1765,7 @@ object TrackInfo {
 
     /** An album title this short ("45", "9") is found inside other words: not looked for in sentences. */
     private const val MIN_TITLE_CHARS = 4
-    private const val DATES_PREFIX = "dates2-"
+    private const val DATES_PREFIX = "dates3-"
 
     /** How long the cloud model waits for the facts before it is asked without them. */
     private const val CLOUD_FACTS_WAIT_MS = 4_000L
