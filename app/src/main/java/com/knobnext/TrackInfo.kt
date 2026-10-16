@@ -605,7 +605,10 @@ object TrackInfo {
         val known = (facts.intro + merged(facts.song) + merged(facts.albumText) + merged(facts.artist) + facts.circle)
             .distinct().take(FOOTING_FACTS)
         if (known.isEmpty()) return
-        appendLine(if (lang == "ru") "Что известно из открытых источников (опирайся на это):" else "What the open sources say (build on this):")
+        appendLine(
+            if (lang == "ru") "Что известно из открытых источников (опирайся на это; что написано на другом языке — перескажи по-русски):"
+            else "What the open sources say (build on this; retell in English what is written in another language):",
+        )
         known.forEach { appendLine("- " + it.take(MAX_FACT_CHARS)) }
     }
 
@@ -974,7 +977,10 @@ object TrackInfo {
             fetching[key]?.takeIf { it.isActive }?.also { if (quiet == null) quietOf.remove(key)?.on = false }
                 ?: background.async(quiet ?: kotlin.coroutines.EmptyCoroutineContext) {
                     val first = earlyOf(track, lang).also { it.value = null }
-                    translated(factsNow(context, track, lang) { first.value = it }, lang)
+                    val found = factsNow(context, track, lang) { first.value = it }
+                    // The cloud model tells the story in the listener's language from facts in any: the phone
+                    // need not translate them first (nor fetch its translation model for them).
+                    if (cloudTells(context)) found else translated(found, lang)
                 }
                     .also { fetching[key] = it; if (quiet != null) quietOf[key] = quiet else quietOf.remove(key) }
         }
@@ -1071,6 +1077,12 @@ object TrackInfo {
         }
         lastSteps = "${track.artist}\u0000${track.title}" to (seconds(System.currentTimeMillis() - started) + ": " + steps)
         ArtistBase.enrich(context, known, lang, found)
+    }
+
+    /** The story comes from the cloud model (its source chosen, a key for it). */
+    private fun cloudTells(context: Context): Boolean {
+        val prefs = Prefs(context)
+        return prefs.infoSource == InfoSource.CLOUD && CloudBrain.order(prefs).isNotEmpty()
     }
 
     /** Fewer than a few facts about the artist in the story's language. */

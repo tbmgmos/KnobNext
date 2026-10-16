@@ -517,7 +517,7 @@ class TrackBubble(
                 var seconds = 0
                 while (true) {
                     if (refining && path.isEmpty()) status(service.getString(waiting, by, seconds))
-                    kotlinx.coroutines.delay(TICK_MS)
+                    kotlinx.coroutines.delay(CLOUD_TICK_MS)
                     seconds++
                 }
             } else null
@@ -1466,7 +1466,7 @@ class TrackBubble(
 
     private companion object {
         /** The seconds the cloud has been answering for, counted on the card. */
-        const val TICK_MS = 1_000L
+        const val CLOUD_TICK_MS = 1_000L
 
         /** A note beginning with these many characters of the line about the artist has it already. */
         const val LEAD_MATCH = 40
