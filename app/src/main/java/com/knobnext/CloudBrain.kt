@@ -184,7 +184,11 @@ object CloudBrain {
             HTTP_NO_MONEY -> "на счёте нет средств — пополните баланс$quoted"
             HTTP_QUOTA -> "лимит запросов исчерпан — попробуйте чуть позже$quoted"
             404 -> "модель «$model» не найдена$quoted"
-            400 -> "сервис отклонил запрос к «$model»$quoted"
+            400 -> if ("unknown model" in r.said.lowercase() || "model:" in r.said.lowercase()) {
+                "сервис не знает модель «$model» — проверьте название в поле «Модель» (например, claude-sonnet-5-5)"
+            } else {
+                "сервис отклонил запрос к «$model»$quoted"
+            }
             in BUSY, OVERLOADED -> "Claude сейчас перегружен — попробуйте чуть позже"
             else -> "ошибка ${r.code}$quoted"
         }

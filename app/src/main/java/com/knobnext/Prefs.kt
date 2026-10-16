@@ -445,10 +445,16 @@ class Prefs(context: Context) {
         sp.edit().remove("cloud_working_" + service.name).apply()
     }
 
-    fun cloudModel(service: CloudService): String = sp.getString("cloud_model_" + service.name, null).orEmpty()
+    fun cloudModel(service: CloudService): String = modelName(sp.getString("cloud_model_" + service.name, null).orEmpty())
 
     fun setCloudModel(service: CloudService, model: String) =
-        sp.edit().putString("cloud_model_" + service.name, model.trim()).remove("cloud_working_" + service.name).apply()
+        sp.edit().putString("cloud_model_" + service.name, modelName(model)).remove("cloud_working_" + service.name).apply()
+
+    /**
+     * A model's name as typed or pasted: its first word only. Pasted from a messenger it came with more
+     * ("claude-sonnet-5-5\n\nизменено 19:09"), and the service knew no model by that name.
+     */
+    private fun modelName(text: String): String = text.trim().split(Regex("\\s+")).firstOrNull().orEmpty().trim('«', '»', '"', '\'', '`')
 
     /** What told the last track story ("Gemini · gemini-2.5-flash · с поиском", "Википедия как есть"), and when. */
     var storyLast: String

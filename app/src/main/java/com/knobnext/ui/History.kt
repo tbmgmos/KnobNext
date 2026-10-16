@@ -656,8 +656,9 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
         OutlinedTextField(
             value = model,
             onValueChange = {
-                model = it.trim()
-                prefs.setCloudModel(service, model)
+                prefs.setCloudModel(service, it)
+                // What is kept is the name alone (a pasted note after it goes): the field shows just that.
+                model = if (it.trim().any { c -> c.isWhitespace() }) prefs.cloudModel(service) else it.trim()
             },
             label = { Text(stringResource(R.string.cloud_model)) },
             placeholder = { Text(service.defaultModel) },
