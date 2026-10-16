@@ -112,7 +112,16 @@ class StoryLiveTest {
         val context = RuntimeEnvironment.getApplication()
         println("\n===== Годы активности")
         for (artist in listOf("Current Joys", "Земфира", "David Bowie", "Nirvana", "Кино")) {
-            val d = Brainz.dates(artist, null, null)
+            // MusicBrainz turns away bursts (503): asked again a few seconds later.
+            var d: Brainz.Dates? = null
+            for (attempt in 1..3) {
+                d = Brainz.dates(artist, null, null)
+                if (d?.began != null) break
+                kotlinx.coroutines.delay(3_000)
+            }
+            val raw = Brainz.get("https://musicbrainz.org/ws/2/artist/?fmt=json&limit=1&query=" + java.net.URLEncoder.encode("artist:\"$artist\"", "UTF-8"))
+                ?.optJSONArray("artists")?.optJSONObject(0)
+            println("$artist в MusicBrainz: ${raw?.optString("name")}, тип ${raw?.optString("type")}, life-span ${raw?.optJSONObject("life-span")}")
             val facts = TrackInfo.facts(context, TrackInfo.Track("-", artist, null, null), "ru")
             val formed = facts?.artist.orEmpty().flatMap { it.facts }.filter { it.contains("образована") }
             println("$artist: начали ${d?.began}, закончили ${d?.ended}; «образована»: $formed")
