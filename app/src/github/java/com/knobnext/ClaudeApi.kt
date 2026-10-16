@@ -118,7 +118,7 @@ object ClaudeApi {
             .apiKey(key)
             .apply { if (base.isNotBlank()) baseUrl(base.trim().trimEnd('/')) }
             .timeout(Duration.ofSeconds(TIMEOUT_S))
-            .maxRetries(1)
+            .maxRetries(0)
             .build()
             .also { current = id to it }
     }

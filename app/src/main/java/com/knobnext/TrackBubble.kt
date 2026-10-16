@@ -501,17 +501,27 @@ class TrackBubble(
         noteView?.setText(if (more) R.string.bubble_loading_more else R.string.bubble_loading)
         val lang = prefs.infoLanguage.resolve()
         noteJob = scope.launch {
+            val job = coroutineContext[Job]
             // Read with the eyes: the facts are shown as soon as they are here, without waiting for a model
             // on the phone (that is for the voice). The cloud model takes longer: its facts first, its story after.
             val telling = async {
                 runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
             }
             val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
-            // The cloud takes a while (a search, a long answer): said at once, so the card does not look stuck.
-            if (cloud) {
-                status(service.getString(R.string.bubble_cloud_asking, prefs.cloudService.title))
+            // The cloud takes a while (a search, a long answer): said at once, with the seconds going by, so
+            // that the card does not look stuck.
+            val by = prefs.cloudService.title
+            var waiting = R.string.bubble_cloud_asking
+            val ticker = if (cloud) launch {
                 refining = true
-            }
+                var seconds = 0
+                while (true) {
+                    if (refining && path.isEmpty()) status(service.getString(waiting, by, seconds))
+                    kotlinx.coroutines.delay(TICK_MS)
+                    seconds++
+                }
+            } else null
+            try {
             // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
             var lead: String? = null
             fun show(text: String?, isLead: Boolean) {
@@ -521,7 +531,7 @@ class TrackBubble(
                 if (!telling.isActive || note != null || path.isNotEmpty() || !same(t)) return
                 if (isLead) lead = text
                 noteView?.text = text
-                status(service.getString(if (cloud) R.string.bubble_refining else R.string.bubble_more_coming))
+                if (cloud) waiting = R.string.bubble_refining else status(service.getString(R.string.bubble_more_coming))
                 refining = true
             }
             // At once: what the artist base already knows about them.
@@ -559,17 +569,22 @@ class TrackBubble(
             setNote(withLead(told))
             // The cloud did not answer in time and is still answering: the facts meanwhile, its story when it comes.
             if (cloud && TrackInfo.cloudLate(t, lang)) {
-                status(service.getString(R.string.bubble_cloud_late))
+                waiting = R.string.bubble_cloud_late
                 refining = true
                 val late = runCatching { TrackInfo.lateStory(service, t, prefs.infoLength, lang) }.getOrNull()
-                if (!same(t) || path.isNotEmpty()) return@launch
-                if (late == null) {
+                if (late != null && same(t)) {
+                    TrackInfo.lastSources = late.sources
+                    setNote(withLead(late.text))
+                }
+            }
+            } finally {
+                ticker?.cancel()
+                // However it ended (told, given up, the card closed or turned to an artist): the line saying the
+                // cloud is still answering goes, unless a newer note has taken over the card.
+                if (noteJob === job && refining) {
                     statusView?.visibility = View.GONE
                     refining = false
-                    return@launch
                 }
-                TrackInfo.lastSources = late.sources
-                setNote(withLead(late.text))
             }
         }
     }
@@ -1450,6 +1465,9 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
+        /** The seconds the cloud has been answering for, counted on the card. */
+        const val TICK_MS = 1_000L
+
         /** A note beginning with these many characters of the line about the artist has it already. */
         const val LEAD_MATCH = 40
 

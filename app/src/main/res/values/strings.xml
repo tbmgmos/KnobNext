@@ -976,9 +976,9 @@
     <string name="sum_base_on">своя база</string>
     <string name="sum_lb_on">ListenBrainz</string>
     <string name="sum_pocket_short">карман по кнопке питания</string>
-    <string name="bubble_refining">Это первые факты — облачная модель ещё рассказывает…</string>
-    <string name="bubble_cloud_asking">%1$s отвечает — это может занять до полуминуты…</string>
-    <string name="bubble_cloud_late">Пока факты — ответ облачной модели ещё идёт, заметка обновится сама…</string>
+    <string name="bubble_refining">Пока — первые факты. %1$s пишет рассказ… %2$d с</string>
+    <string name="bubble_cloud_asking">%1$s отвечает… %2$d с</string>
+    <string name="bubble_cloud_late">Пока — факты. Ответ %1$s ещё идёт, заметка обновится сама… %2$d с</string>
     <string name="bubble_more_coming">Это первые сведения — остальные источники ещё отвечают…</string>
     <string name="bubble_fact_sources">Сведения: %1$s</string>
     <string name="bubble_years">%1$s–%2$s</string>
