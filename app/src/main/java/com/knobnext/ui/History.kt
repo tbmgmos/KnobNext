@@ -561,8 +561,8 @@ private fun dayAndTime(at: Long): String =
     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(Date(at))
 
 /**
- * The cloud model: which service, its key (checked at once), and the model if not its usual one. Gemini
- * is first: its key is free, and it looks things up in Google itself.
+ * The cloud model: Claude or Groq, its key (checked at once), and the model if not its usual one; for
+ * Claude, the server it is asked at when not Anthropic itself.
  */
 @Composable
 fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
@@ -586,7 +586,6 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
                 )
             }
         }
-        Hint(stringResource(if (service.searches) R.string.cloud_searches else R.string.cloud_no_search))
         if (service == com.knobnext.CloudService.GROQ) {
             androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -627,8 +626,12 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
             context, stringResource(R.string.cloud_key, service.title), prefs.cloudKey(service), { prefs.setCloudKey(service, it) },
             getUrl = service.keyPage,
             // A gentle word when the key does not begin the way this service's keys do (it is checked anyway).
-            format = { key -> if (service.keyPrefix.none { key.startsWith(it) }) stringResource(R.string.cloud_key_prefix, service.title, service.keyPrefix.first()) else null },
-            check = { com.knobnext.CloudBrain.check(service, it) },
+            // A server in between has keys of its own making: not judged by Anthropic's.
+            format = { key ->
+                val ownServer = service == com.knobnext.CloudService.CLAUDE && prefs.claudeBase.isNotBlank()
+                if (!ownServer && service.keyPrefix.none { key.startsWith(it) }) stringResource(R.string.cloud_key_prefix, service.title, service.keyPrefix.first()) else null
+            },
+            check = { com.knobnext.CloudBrain.check(prefs, service, it) },
             formatBlocks = false,
         )
         var model by remember { mutableStateOf(prefs.cloudModel(service)) }
@@ -639,19 +642,34 @@ fun CloudKeys(s: com.knobnext.Settings, prefs: Prefs) {
                 prefs.setCloudModel(service, model)
             },
             label = { Text(stringResource(R.string.cloud_model)) },
-            placeholder = { Text(if (service == com.knobnext.CloudService.OPENROUTER) "…:free" else service.defaultModel) },
+            placeholder = { Text(service.defaultModel) },
             supportingText = {
                 Text(
                     when (service) {
-                        com.knobnext.CloudService.OPENROUTER -> stringResource(R.string.cloud_model_hint_free)
                         com.knobnext.CloudService.GROQ -> stringResource(R.string.cloud_model_hint_groq)
-                        else -> stringResource(R.string.cloud_model_hint, service.defaultModel)
+                        com.knobnext.CloudService.CLAUDE -> stringResource(R.string.cloud_model_hint_claude, service.defaultModel)
                     },
                 )
             },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         )
+        // A server in between (one that sells access to Claude): its address; blank, Anthropic itself.
+        if (service == com.knobnext.CloudService.CLAUDE) {
+            var base by remember { mutableStateOf(prefs.claudeBase) }
+            OutlinedTextField(
+                value = base,
+                onValueChange = {
+                    base = it.trim()
+                    prefs.claudeBase = base
+                },
+                label = { Text(stringResource(R.string.claude_base)) },
+                placeholder = { Text("https://api.anthropic.com") },
+                supportingText = { Text(stringResource(R.string.claude_base_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 

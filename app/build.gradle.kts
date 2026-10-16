@@ -89,6 +89,8 @@ dependencies {
     // Facts found only in another language, translated on the phone (the model is downloaded once, on Wi-Fi).
     // GitHub build only: the RuStore one has no network to download the model with.
     "githubImplementation"("com.google.mlkit:translate:17.0.3")
+    // Claude as the cloud model, through Anthropic's SDK. GitHub build only: the RuStore one has no network.
+    "githubImplementation"("com.anthropic:anthropic-java:2.73.0")
     // GitHub build only (it can download models): a local language model and offline speech recognition.
     "githubImplementation"("com.google.mediapipe:tasks-genai:0.10.27")
     "githubImplementation"("com.alphacephei:vosk-android:0.3.47")

@@ -215,10 +215,13 @@ class StoryLiveTest {
         assertTrue("карточка Nirvana пуста", ArtistBase.card(context, "Nirvana") != null)
     }
 
-    /** The cloud models the CI has keys for (GEMINI_API_KEY, GROQ_API_KEY): a story and a question each. */
+    /**
+     * The cloud models the CI has keys for (ANTHROPIC_API_KEY, with CLAUDE_BASE_URL for a server in
+     * between; GROQ_API_KEY): a story and a question each.
+     */
     @Test
     fun cloud() = runBlocking {
-        val keys = mapOf(CloudService.GEMINI to "GEMINI_API_KEY", CloudService.GROQ to "GROQ_API_KEY")
+        val keys = mapOf(CloudService.CLAUDE to "ANTHROPIC_API_KEY", CloudService.GROQ to "GROQ_API_KEY")
             .mapValues { System.getenv(it.value).orEmpty() }.filterValues { it.isNotBlank() }
         assumeTrue(System.getenv("LIVE_STORIES") == "1" && keys.isNotEmpty())
         val context = RuntimeEnvironment.getApplication()
@@ -226,10 +229,11 @@ class StoryLiveTest {
         prefs.devMode = true
         // Each service on its own: no switching to another, so that its own answer (or failure) shows.
         prefs.cloudFallback = false
+        prefs.claudeBase = System.getenv("CLAUDE_BASE_URL").orEmpty()
         for ((service, key) in keys) {
             prefs.cloudService = service
             prefs.setCloudKey(service, key)
-            println("\n===== Облако ${service.title}: ключ ${CloudBrain.check(service, key).javaClass.simpleName}")
+            println("\n===== Облако ${service.title}: ключ ${CloudBrain.check(prefs, service, key).let { c -> if (c is KeyCheck.Rejected) "Rejected ${c.http}: ${c.message}" else c.javaClass.simpleName }}")
             val track = TrackInfo.Track("The Man Who Sold the World", "Nirvana", "MTV Unplugged in New York", null)
             val story = TrackInfo.story(context, track, InfoLength.NORMAL, "ru", InfoSource.CLOUD) { println("   · $it") }
             println("рассказ: $story")

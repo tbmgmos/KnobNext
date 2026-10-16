@@ -352,8 +352,17 @@ class Prefs(context: Context) {
 
     /** The cloud model's service, and per service the person's key and the model (blank: its usual one). */
     var cloudService: CloudService
-        get() = CloudService.entries.firstOrNull { it.name == sp.getString("cloud_service", null) } ?: CloudService.GEMINI
+        // A service no longer offered (Gemini, OpenRouter…): Claude.
+        get() = CloudService.entries.firstOrNull { it.name == sp.getString("cloud_service", null) } ?: CloudService.CLAUDE
         set(v) = sp.edit().putString("cloud_service", v.name).apply()
+
+    /**
+     * Where Claude is asked: blank for Anthropic itself, or the address of a server that passes requests on
+     * to Claude (a reseller's, a proxy). Its key goes in Claude's key field.
+     */
+    var claudeBase: String
+        get() = sp.getString("claude_base", null).orEmpty()
+        set(v) = sp.edit().putString("claude_base", v.trim()).apply()
 
     /**
      * The experimental cloud model, switched on in "Voice and AI": its keys, the Cloud story source and its
