@@ -220,6 +220,10 @@ object TrackInfo {
         source: InfoSource,
         /** False for the round card: read with the eyes, it shows the facts rather than wait for a model on the phone. */
         model: Boolean = true,
+        /** "More" on the card: the cloud may search the web for it (a first note comes quicker without). */
+        deep: Boolean = false,
+        /** The cloud's answer as it is being written, for the card to show it growing. */
+        onText: ((String) -> Unit)? = null,
         note: (String) -> Unit,
     ): String? = coroutineScope {
         val started = System.currentTimeMillis()
@@ -285,10 +289,15 @@ object TrackInfo {
         if (cloud) {
             // The facts are its footing when they come quickly; the rest it looks up itself.
             // Slow to come: what the artist base has, at once.
-            val quick = withTimeoutOrNull(CLOUD_FACTS_WAIT_MS) { factsAhead.await() } ?: ArtistBase.enrich(context, track, lang, null)
+            // The card asks at once with what is here (saved facts come instantly): its reader is waiting.
+            val quick = withTimeoutOrNull(if (model) CLOUD_FACTS_WAIT_MS else CARD_FACTS_WAIT_MS) { factsAhead.await() }
+                ?: ArtistBase.enrich(context, track, lang, null)
             // Read on the card (its first facts already showing), the cloud is waited for longer than by the voice.
             val wait = if (model) CLOUD_STORY_WAIT_MS else CLOUD_CARD_WAIT_MS
-            val answer = fromCloud(context, track, quick, length, lang, history.told(), firstMeet, datesAhead, wait)
+            val answer = fromCloud(
+                context, track, quick, length, lang, history.told(), firstMeet, datesAhead, wait,
+                card = !model, search = deep, onText = onText,
+            )
             if (answer != null) {
                 found = quick
                 album = quick?.album ?: album
@@ -345,18 +354,30 @@ object TrackInfo {
         firstMeet: Boolean,
         datesAhead: kotlinx.coroutines.Deferred<Brainz.Dates?>?,
         wait: Long = CLOUD_STORY_WAIT_MS,
+        /** For the round card: the key facts about the artist first, the dates waited for briefly. */
+        card: Boolean = false,
+        search: Boolean = false,
+        onText: ((String) -> Unit)? = null,
     ): CloudBrain.Answer? {
         val prefs = Prefs(context)
         // The dates it is not to guess, as far as there is time for them (the voice is waiting). Asked with
         // the player's album at the start; when the player gave none and the facts found one, for that album.
-        val early = datesAhead?.let { withTimeoutOrNull(STORY_DATES_WAIT_MS) { it.await() } }
+        val datesWait = if (card) CARD_DATES_WAIT_MS else STORY_DATES_WAIT_MS
+        val early = datesAhead?.let { withTimeoutOrNull(datesWait) { it.await() } }
         val album = facts?.album ?: track.album
         val dates = if (early != null && (track.album != null || album == null || early.albumDate != null)) early
-        else within(STORY_DATES_WAIT_MS) { reference(context, track.artist, album, facts?.mbid) } ?: early
+        else within(datesWait) { reference(context, track.artist, album, facts?.mbid) } ?: early
         val prompt = buildString {
             appendTrack(track, facts?.album ?: track.album, facts?.year ?: track.year)
             reference(dates, track, facts, lang)
             footing(facts, lang)
+            // Read on the card: who they are comes first, in a sentence or two, the rest after it.
+            if (card && told.isEmpty()) {
+                appendLine(
+                    if (lang == "ru") "Начни с главного об исполнителе одним-двумя предложениями: кто это, откуда, в каком жанре, чем известен. Потом — остальное."
+                    else "Begin with the key facts about the artist in a sentence or two: who they are, where from, what genre, what they are known for. Then the rest.",
+                )
+            }
             appendLine(shape(length, facts?.album ?: track.album, lang, firstMeet, topic = null))
             appendTold(told, lang)
         }
@@ -365,7 +386,7 @@ object TrackInfo {
         val key = "${track.artist}\u0000${track.title}\u0000$lang"
         val late = lateAnswers.remove(key)?.takeIf { System.currentTimeMillis() - it.first < LATE_ANSWER_MS }?.second
         val asked = late ?: background.async {
-            CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS)
+            CloudBrain.ask(prefs, host(lang), prompt, length.sentences * TOKENS_PER_SENTENCE * CLOUD_TOKENS_FACTOR + EXTRA_TOKENS, search, onText)
         }
         val answer = withTimeoutOrNull(wait) { asked.await() } ?: return null.also {
             if (asked.isActive) {
@@ -1809,6 +1830,10 @@ object TrackInfo {
 
     /** How long the cloud model waits for the facts before it is asked without them. */
     private const val CLOUD_FACTS_WAIT_MS = 4_000L
+
+    /** The card asks the cloud sooner: the facts and dates there are by then, saved ones instantly. */
+    private const val CARD_FACTS_WAIT_MS = 1_500L
+    private const val CARD_DATES_WAIT_MS = 1_500L
 
     /** How long a story waits for the cloud model before it is told from the facts. */
     private const val CLOUD_STORY_WAIT_MS = 12_000L

@@ -504,14 +504,32 @@ class TrackBubble(
             val job = coroutineContext[Job]
             // Read with the eyes: the facts are shown as soon as they are here, without waiting for a model
             // on the phone (that is for the voice). The cloud model takes longer: its facts first, its story after.
+            val by = prefs.cloudService.title
+            var waiting = R.string.bubble_cloud_asking
+            // The cloud's answer as Claude writes it: shown growing, a few times a second at most.
+            val written = java.util.concurrent.atomic.AtomicReference<String?>(null)
+            val pending = java.util.concurrent.atomic.AtomicBoolean(false)
+            var spoke = false
+            val growing = Runnable {
+                pending.set(false)
+                val text = written.get() ?: return@Runnable
+                if (note == null && path.isEmpty() && same(t)) {
+                    spoke = true
+                    noteView?.text = text
+                    waiting = R.string.bubble_cloud_writing
+                }
+            }
             val telling = async {
-                runCatching { TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false) { log(it) } }.getOrNull()
+                runCatching {
+                    TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false, deep = more, onText = { text ->
+                        written.set(text)
+                        if (pending.compareAndSet(false, true)) handler.postDelayed(growing, GROW_MS)
+                    }) { log(it) }
+                }.getOrNull()
             }
             val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
             // The cloud takes a while (a search, a long answer): said at once, with the seconds going by, so
             // that the card does not look stuck.
-            val by = prefs.cloudService.title
-            var waiting = R.string.bubble_cloud_asking
             val ticker = if (cloud) launch {
                 refining = true
                 var seconds = 0
@@ -525,8 +543,8 @@ class TrackBubble(
             // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
             var lead: String? = null
             fun show(text: String?, isLead: Boolean) {
-                // "More": only the new note, nothing shown before it again.
-                if (more) return
+                // "More": only the new note, nothing shown before it again. Nor over the cloud's own words.
+                if (more || spoke) return
                 text ?: return
                 if (!telling.isActive || note != null || path.isNotEmpty() || !same(t)) return
                 if (isLead) lead = text
@@ -560,7 +578,8 @@ class TrackBubble(
             telling.invokeOnCompletion { early.cancel() }
             val told = telling.await()
             // The note under the line about the artist, unless it begins with it already.
-            val first = if (more) null else TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
+            // The cloud began with who they are itself: no line about them above it.
+            val first = if (more || spoke) null else TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
             fun withLead(text: String?) = when {
                 text == null -> first
                 first == null || text.contains(first.take(LEAD_MATCH)) -> text
@@ -579,6 +598,7 @@ class TrackBubble(
             }
             } finally {
                 ticker?.cancel()
+                handler.removeCallbacks(growing)
                 // However it ended (told, given up, the card closed or turned to an artist): the line saying the
                 // cloud is still answering goes, unless a newer note has taken over the card.
                 if (noteJob === job && refining) {
@@ -1467,6 +1487,9 @@ class TrackBubble(
     private companion object {
         /** The seconds the cloud has been answering for, counted on the card. */
         const val CLOUD_TICK_MS = 1_000L
+
+        /** The cloud's growing answer is put on the card at most this often. */
+        const val GROW_MS = 150L
 
         /** A note beginning with these many characters of the line about the artist has it already. */
         const val LEAD_MATCH = 40

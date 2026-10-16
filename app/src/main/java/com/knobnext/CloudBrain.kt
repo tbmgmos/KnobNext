@@ -62,15 +62,26 @@ object CloudBrain {
      * The same question asked twice at once (the spoken story and the round card's, for one track) is asked
      * once: free plans count tokens by the minute, and a second request would only use them up.
      */
-    fun ask(prefs: Prefs, system: String, prompt: String, maxTokens: Int = MAX_TOKENS): Answer? {
-        val key = "${order(prefs).joinToString { it.name }}:${system.hashCode()}:${prompt.hashCode()}:${prompt.length}:$maxTokens"
+    /**
+     * [search]: the model may look things up on the web (when switched on in the settings); a first note
+     * is quicker without. [onText]: the answer as it is being written (Claude streams it).
+     */
+    fun ask(
+        prefs: Prefs,
+        system: String,
+        prompt: String,
+        maxTokens: Int = MAX_TOKENS,
+        search: Boolean = true,
+        onText: ((String) -> Unit)? = null,
+    ): Answer? {
+        val key = "${order(prefs).joinToString { it.name }}:${system.hashCode()}:${prompt.hashCode()}:${prompt.length}:$maxTokens:$search"
         val lock = synchronized(asking) {
             if (asking.size > MAX_REMEMBERED) asking.clear()
             asking.getOrPut(key) { Any() }
         }
         synchronized(lock) {
             synchronized(answered) { answered[key] }?.takeIf { System.currentTimeMillis() - it.first < SAME_ANSWER_MS }?.let { return it.second }
-            val answer = askNow(prefs, system, prompt, maxTokens) ?: return null
+            val answer = askNow(prefs, system, prompt, maxTokens, search, onText) ?: return null
             synchronized(answered) {
                 if (answered.size > MAX_REMEMBERED) answered.clear()
                 answered[key] = System.currentTimeMillis() to answer
@@ -82,7 +93,7 @@ object CloudBrain {
     private val asking = HashMap<String, Any>()
     private val answered = HashMap<String, Pair<Long, Answer>>()
 
-    private fun askNow(prefs: Prefs, system: String, prompt: String, maxTokens: Int): Answer? {
+    private fun askNow(prefs: Prefs, system: String, prompt: String, maxTokens: Int, search: Boolean, onText: ((String) -> Unit)?): Answer? {
         usedHere.set(null)
         lastCode = 0
         val services = order(prefs)
@@ -93,7 +104,7 @@ object CloudBrain {
             val model = prefs.cloudModel(service).ifBlank { service.defaultModel }
             val answer = try {
                 when (service) {
-                    CloudService.CLAUDE -> claude(prefs, key, model, system, prompt, maxTokens)
+                    CloudService.CLAUDE -> claude(prefs, key, model, system, prompt, maxTokens, search, onText)
                     // Groq: with its search (Compound) when asked for, else the model that knows most of those it has.
                     CloudService.GROQ -> groq(prefs, key, system, prompt, maxTokens)
                 }
@@ -145,12 +156,22 @@ object CloudBrain {
      * Claude, through Anthropic's own SDK: at Anthropic, or at the server the person named (a service that
      * passes requests on to Claude). Its thinking is kept short: a few sentences are asked, and the voice waits.
      */
-    private fun claude(prefs: Prefs, key: String, model: String, system: String, prompt: String, maxTokens: Int): Answer? {
+    private fun claude(
+        prefs: Prefs,
+        key: String,
+        model: String,
+        system: String,
+        prompt: String,
+        maxTokens: Int,
+        search: Boolean,
+        onText: ((String) -> Unit)?,
+    ): Answer? {
         val started = System.currentTimeMillis()
-        val r = ClaudeApi.ask(key, prefs.claudeBase, model, system, prompt, maxOf(maxTokens, CLAUDE_MIN_TOKENS), prefs.claudeSearch)
+        val searching = prefs.claudeSearch && search
+        val r = ClaudeApi.ask(key, prefs.claudeBase, model, system, prompt, maxOf(maxTokens, CLAUDE_MIN_TOKENS), searching, onText)
         lastCode = r.code
         if (r.text != null) {
-            used(CloudService.CLAUDE, r.model ?: model, if (prefs.claudeSearch) r.sources.isNotEmpty() else null, System.currentTimeMillis() - started)
+            used(CloudService.CLAUDE, r.model ?: model, if (searching) r.sources.isNotEmpty() else null, System.currentTimeMillis() - started)
             return Answer(r.text, r.sources.map { (title, url) -> Source(title.ifBlank { url }, url) })
         }
         lastDetail = "HTTP ${r.code} за ${(System.currentTimeMillis() - started) / 1000} с: ${r.said.take(MAX_ERROR_CHARS)}"

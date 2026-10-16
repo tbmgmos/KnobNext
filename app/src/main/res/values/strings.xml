@@ -978,6 +978,7 @@
     <string name="sum_pocket_short">карман по кнопке питания</string>
     <string name="bubble_refining">Пока — первые факты. %1$s пишет рассказ… %2$d с</string>
     <string name="bubble_cloud_asking">%1$s отвечает… %2$d с</string>
+    <string name="bubble_cloud_writing">%1$s пишет… %2$d с</string>
     <string name="bubble_cloud_late">Пока — факты. Ответ %1$s ещё идёт, заметка обновится сама… %2$d с</string>
     <string name="bubble_more_coming">Это первые сведения — остальные источники ещё отвечают…</string>
     <string name="bubble_fact_sources">Сведения: %1$s</string>

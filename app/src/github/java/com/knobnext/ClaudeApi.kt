@@ -3,6 +3,7 @@ package com.knobnext
 import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.errors.AnthropicServiceException
+import com.anthropic.helpers.BetaMessageAccumulator
 import com.anthropic.models.beta.messages.BetaOutputConfig
 import com.anthropic.models.beta.messages.BetaMessage
 import com.anthropic.models.beta.messages.BetaStopReason
@@ -25,8 +26,20 @@ object ClaudeApi {
     /** Not an HTTP status: Claude declined to answer (its safeguards). */
     const val REFUSED = -2
 
-    /** [search]: Claude may look things up on the web (a few searches, paid apart from the tokens). */
-    fun ask(key: String, base: String, model: String, system: String, prompt: String, maxTokens: Int, search: Boolean): Reply {
+    /**
+     * [search]: Claude may look things up on the web (a few searches, paid apart from the tokens).
+     * [onText]: the answer as it is being written, all of it so far (streamed, as Claude's own app shows it).
+     */
+    fun ask(
+        key: String,
+        base: String,
+        model: String,
+        system: String,
+        prompt: String,
+        maxTokens: Int,
+        search: Boolean,
+        onText: ((String) -> Unit)? = null,
+    ): Reply {
         val official = base.isBlank()
         fun params(effort: Boolean, search: Boolean, before: List<BetaMessage>) = MessageCreateParams.builder()
             .model(model)
@@ -61,7 +74,7 @@ object ClaudeApi {
             var m: BetaMessage
             while (true) {
                 m = try {
-                    client(key, base).beta().messages().create(params(effort, searching, turns))
+                    stream(client(key, base), params(effort, searching, turns), onText)
                 } catch (e: AnthropicServiceException) {
                     val said = e.message.orEmpty().lowercase()
                     // An older model, or a server in between, that does not take the effort or the search:
@@ -89,6 +102,22 @@ object ClaudeApi {
         } catch (e: Exception) {
             Reply(null, null, 0, listOfNotNull(e.javaClass.simpleName, e.message).joinToString(": "))
         }
+    }
+
+    /** The answer streamed: [onText] gets the text so far as it grows; the whole message at the end. */
+    private fun stream(client: AnthropicClient, params: MessageCreateParams, onText: ((String) -> Unit)?): BetaMessage {
+        val all = BetaMessageAccumulator.create()
+        val text = StringBuilder()
+        client.beta().messages().createStreaming(params).use { response ->
+            response.stream().forEach { event ->
+                all.accumulate(event)
+                event.contentBlockDelta().orElse(null)?.delta()?.text()?.orElse(null)?.let { delta ->
+                    text.append(delta.text())
+                    onText?.let { runCatching { it(text.toString()) } }
+                }
+            }
+        }
+        return all.message()
     }
 
     /**

@@ -7,7 +7,16 @@ object ClaudeApi {
     const val REFUSED = -2
 
     @Suppress("UNUSED_PARAMETER")
-    fun ask(key: String, base: String, model: String, system: String, prompt: String, maxTokens: Int, search: Boolean): Reply =
+    fun ask(
+        key: String,
+        base: String,
+        model: String,
+        system: String,
+        prompt: String,
+        maxTokens: Int,
+        search: Boolean,
+        onText: ((String) -> Unit)? = null,
+    ): Reply =
         Reply(null, null, 0, "нет в этой сборке")
 
     @Suppress("UNUSED_PARAMETER")
