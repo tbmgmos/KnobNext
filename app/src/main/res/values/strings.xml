@@ -175,6 +175,8 @@
     <string name="trails_hint">Куда вы зашли по кругу в кружке: от исполнителя трека — карточка за карточкой.</string>
     <string name="trails_played">включали: %1$s</string>
     <string name="bubble_loading">Ищу сведения…</string>
+    <string name="bubble_loading_more">Ищу, что ещё рассказать…</string>
+    <string name="bubble_more_wait">Ещё рассказывается — подождите, заметка обновится сама</string>
     <string name="bubble_circle">Расширим круг</string>
     <string name="bubble_more">Ещё</string>
     <string name="bubble_fold">Свернуть</string>

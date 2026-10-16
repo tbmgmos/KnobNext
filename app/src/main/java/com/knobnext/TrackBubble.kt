@@ -459,7 +459,7 @@ class TrackBubble(
         box.addView(tools)
 
         val buttons = row(Gravity.END)
-        buttons.addView(button(service.getString(R.string.bubble_more)) { fetchNote() })
+        buttons.addView(button(service.getString(R.string.bubble_more)) { moreNote() })
         buttons.addView(button(service.getString(R.string.bubble_fold)) { collapse() })
         buttons.addView(button(service.getString(R.string.bubble_close)) { dismiss() })
         box.addView(buttons)
@@ -481,11 +481,24 @@ class TrackBubble(
     ).joinToString(" · ")
 
     /** The next note about the track: the same the voice would tell, and kept in the history the same way. */
-    private fun fetchNote() {
+    /**
+     * "More": the next note about the track, without the line about the artist again (it was the first
+     * thing shown, and seeing it again looked as if nothing happened). While a note is still being
+     * told, it is not asked for again: the one coming is waited for.
+     */
+    private fun moreNote() {
+        if (noteJob?.isActive == true) {
+            status(service.getString(R.string.bubble_more_wait))
+            return
+        }
+        fetchNote(more = true)
+    }
+
+    private fun fetchNote(more: Boolean = false) {
         val t = track ?: return
         noteJob?.cancel()
         note = null
-        noteView?.setText(R.string.bubble_loading)
+        noteView?.setText(if (more) R.string.bubble_loading_more else R.string.bubble_loading)
         val lang = prefs.infoLanguage.resolve()
         noteJob = scope.launch {
             // Read with the eyes: the facts are shown as soon as they are here, without waiting for a model
@@ -502,6 +515,8 @@ class TrackBubble(
             // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
             var lead: String? = null
             fun show(text: String?, isLead: Boolean) {
+                // "More": only the new note, nothing shown before it again.
+                if (more) return
                 text ?: return
                 if (!telling.isActive || note != null || path.isNotEmpty() || !same(t)) return
                 if (isLead) lead = text
@@ -535,7 +550,7 @@ class TrackBubble(
             telling.invokeOnCompletion { early.cancel() }
             val told = telling.await()
             // The note under the line about the artist, unless it begins with it already.
-            val first = TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
+            val first = if (more) null else TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
             fun withLead(text: String?) = when {
                 text == null -> first
                 first == null || text.contains(first.take(LEAD_MATCH)) -> text
