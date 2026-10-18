@@ -421,6 +421,24 @@ class Prefs(context: Context) {
         get() = sp.getInt("lb_queued", 0)
         set(v) = sp.edit().putInt("lb_queued", v).apply()
 
+    /**
+     * The card's parts the voice has told lately, by their keys (kept hashed: the keys hold characters
+     * the settings file cannot): the next telling takes another.
+     */
+    private fun voiceTold(): List<String> = sp.getString("voice_told", null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+
+    fun voiceTold(key: String): Boolean = sha1(key) in voiceTold()
+
+    fun markVoiceTold(key: String) {
+        val h = sha1(key)
+        sp.edit().putString("voice_told", (voiceTold() - h + h).takeLast(MAX_VOICE_TOLD).joinToString(",")).apply()
+    }
+
+    fun forgetVoiceTold(keys: Collection<String>) {
+        val gone = keys.map(::sha1).toSet()
+        sp.edit().putString("voice_told", voiceTold().filter { it !in gone }.joinToString(",")).apply()
+    }
+
     /** Claude may look things up on the web (a few searches per answer, paid per search). */
     var claudeSearch: Boolean
         get() = sp.getBoolean("claude_search", true)
@@ -1002,6 +1020,7 @@ class Prefs(context: Context) {
 
         @Volatile private var keysMoved = false
         private const val NO_SEARCH_KEPT_MS = 6L * 60 * 60 * 1000
+        private const val MAX_VOICE_TOLD = 500
 
         private val SEEK_PRESET = mapOf(
             Gesture.HOLD_UP to Action.SEEK_FORWARD,

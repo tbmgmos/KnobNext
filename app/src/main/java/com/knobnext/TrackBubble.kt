@@ -566,7 +566,7 @@ class TrackBubble(
                 }
             }
             try {
-                val written = withContext(Dispatchers.IO) { runCatching { TrackInfo.cloudSections(service, full, lang, wanted, facts) }.getOrNull() }
+                val written = withContext(Dispatchers.IO) { runCatching { TrackInfo.writeSections(service, full, lang, wanted, facts) }.getOrNull() }
                 written?.forEach { (kind, s) ->
                     parts[kind] = s
                     keep(kind, full, s)

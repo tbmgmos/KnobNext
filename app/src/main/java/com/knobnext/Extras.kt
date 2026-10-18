@@ -481,15 +481,31 @@ class Extras(private val context: Context, private val media: Media, private val
         pauseMusic()
         speaker.say(TrackInfo.header(context, track, lang))
         infoJob = scope.launch {
-            // What the card has written about the track (its general line and the track's part): told as it is,
-            // not asked for again. Otherwise the story.
-            val told = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { TrackInfo.cardStory(context, track, lang) }
-                ?: TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
-            if (told == null) {
-                speaker.say(context.getString(R.string.speak_info_none), resume, queue = true)
-                return@launch
+            // The general line at once (kept, or from the facts), then a part: the track's, the album's or the
+            // artist's, the next one not told yet, written by the cloud model meanwhile (the same request the
+            // card makes) or put together from the facts.
+            var generalSaid = false
+            var generalEnded = false
+            var endAfterGeneral = false
+            val part = runCatching {
+                TrackInfo.spokenParts(context, track, lang) { line ->
+                    generalSaid = true
+                    speaker.say(line, {
+                        generalEnded = true
+                        if (endAfterGeneral) resume()
+                    }, queue = true)
+                }
+            }.getOrNull()
+            when {
+                part != null -> speaker.say(part, resume, queue = true)
+                // Only the general line: the telling ends with it.
+                generalSaid -> if (generalEnded) resume() else endAfterGeneral = true
+                else -> {
+                    // Nothing in parts (offline, a build without network): the story as before.
+                    val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
+                    speaker.say(told ?: context.getString(R.string.speak_info_none), resume, queue = true)
+                }
             }
-            speaker.say(told, resume, queue = true)
         }
         return Outcome.done(context.getString(R.string.log_info_started))
     }

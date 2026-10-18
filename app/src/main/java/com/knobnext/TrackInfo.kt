@@ -1021,8 +1021,8 @@ object TrackInfo {
             )
             parts.forEach { appendLine(it) }
             appendLine(
-                if (ru) "Каждая часть — связный текст на русском, без списков. Если о части ничего достоверного не известно — пустая строка."
-                else "Each part is connected prose in English, no lists. If nothing reliable is known about a part, an empty string.",
+                if (ru) "Каждая часть — связный текст на русском, без списков, короткими предложениями без скобок: его и читают глазами, и слушают. Если о части ничего достоверного не известно — пустая строка."
+                else "Each part is connected prose in English, no lists, in short sentences without brackets: it is both read and heard. If nothing reliable is known about a part, an empty string.",
             )
         }
         val answer = withContext(Dispatchers.IO) {
@@ -1044,12 +1044,81 @@ object TrackInfo {
         }.toMap()
     }
 
-    /** What the voice tells when the card has written the track's part: the general line and that part. */
-    fun cardStory(context: Context, track: Track, lang: String): String? {
-        val trackPart = Sections.key(Sections.Kind.TRACK, track, lang)?.let { Sections.get(context, it) } ?: return null
-        val general = Sections.key(Sections.Kind.GENERAL, track, lang)?.let { Sections.get(context, it) }
-        return listOfNotNull(general?.text, trackPart.text).joinToString(" ")
+    /** Writes of the parts under way, by track: the card and the voice wait for the same request. */
+    private val writing = HashMap<String, kotlinx.coroutines.Deferred<Map<Sections.Kind, Sections.Section>?>>()
+
+    /**
+     * [cloudSections], asked once for a track however many wait for it (the card and the voice at once),
+     * and kept on the phone. What a request already under way did not write, the caller fills in.
+     */
+    suspend fun writeSections(context: Context, track: Track, lang: String, kinds: List<Sections.Kind>, facts: Facts?): Map<Sections.Kind, Sections.Section>? {
+        val key = "${track.artist}\u0000${Speech.cleanTitle(track.title)}\u0000$lang"
+        val running = synchronized(writing) {
+            writing[key]?.takeIf { it.isActive } ?: background.async {
+                cloudSections(context, track, lang, kinds, facts)?.also { written ->
+                    written.forEach { (kind, s) -> Sections.key(kind, track, lang)?.let { Sections.put(context, it, s) } }
+                }
+            }.also { writing[key] = it }
+        }
+        return try {
+            running.await()
+        } finally {
+            synchronized(writing) { if (writing[key] === running && !running.isActive) writing.remove(key) }
+        }
     }
+
+    /**
+     * What the voice tells after the opening line, in two steps. [general] gets the general line at once
+     * (kept, or from the facts), then the part returned is said: the next one not told yet of the track's,
+     * the album's and the artist's, so that the next telling says something new. A part is kept, or written
+     * now by the cloud model (the same request the card makes), else put together from the facts.
+     */
+    suspend fun spokenParts(context: Context, track: Track, lang: String, general: (String) -> Unit): String? {
+        val prefs = Prefs(context)
+        val cloud = prefs.infoSource == InfoSource.CLOUD && CloudBrain.order(prefs).isNotEmpty()
+        suspend fun kept(kind: Sections.Kind, t: Track) = withContext(Dispatchers.IO) {
+            Sections.key(kind, t, lang)?.let { Sections.get(context, it) }?.takeIf { !it.plain || !cloud || kind == Sections.Kind.GENERAL }
+        }
+        var said = false
+        kept(Sections.Kind.GENERAL, track)?.let { general(it.text); said = true }
+        val facts = withTimeoutOrNull(VOICE_FACTS_WAIT_MS) { runCatching { facts(context, track, lang) }.getOrNull() }
+        val full = if (track.album == null && facts?.album != null) track.copy(album = facts.album) else track
+        if (!said) {
+            general(facts, lang)?.let { line ->
+                general(line)
+                said = true
+                withContext(Dispatchers.IO) {
+                    Sections.key(Sections.Kind.GENERAL, track, lang)?.let { Sections.put(context, it, Sections.Section(line, null, System.currentTimeMillis())) }
+                }
+            }
+        }
+        // The next part not told yet; all of them told, the track's again.
+        val order = listOfNotNull(Sections.Kind.TRACK, Sections.Kind.ALBUM.takeIf { full.album != null }, Sections.Kind.ARTIST)
+        val keys = order.associateWith { Sections.key(it, full, lang) }
+        val chosen = order.firstOrNull { k -> keys[k]?.let { !prefs.voiceTold(it) } == true } ?: Sections.Kind.TRACK.also {
+            prefs.forgetVoiceTold(keys.values.filterNotNull())
+        }
+        val part = kept(chosen, full) ?: run {
+            val missing = order.filter { kept(it, full) == null }
+            val written = if (cloud && facts != null) withTimeoutOrNull(VOICE_PART_WAIT_MS) {
+                runCatching { writeSections(context, full, lang, missing, facts) }.getOrNull()
+            } else {
+                null
+            }
+            written?.get(chosen) ?: plainSection(chosen, facts, lang)?.let { text ->
+                Sections.Section(text, null, System.currentTimeMillis()).also { s ->
+                    // From the facts while there is no model: kept; with one, it is asked to write it next time.
+                    if (!cloud) withContext(Dispatchers.IO) { keys[chosen]?.let { Sections.put(context, it, s) } }
+                }
+            }
+        } ?: return null
+        keys[chosen]?.let { prefs.markVoiceTold(it) }
+        return part.text
+    }
+
+    /** The voice waits this long for the facts, and for the part the cloud model writes. */
+    private const val VOICE_FACTS_WAIT_MS = 6_000L
+    private const val VOICE_PART_WAIT_MS = 25_000L
 
     private const val GENERAL_SENTENCES = 2
     private const val SECTION_FACTS = 5
