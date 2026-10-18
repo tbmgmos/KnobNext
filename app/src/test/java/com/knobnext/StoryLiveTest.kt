@@ -105,6 +105,22 @@ class StoryLiveTest {
     }
 
     /** The dates the cloud model is given and held to: MusicBrainz's, and a wrong year taken out. */
+    /** The card's parts put together from the facts (no model): general, artist, album, track. */
+    @Test
+    fun parts() = runBlocking {
+        assumeTrue(System.getenv("LIVE_STORIES") == "1")
+        val context = RuntimeEnvironment.getApplication()
+        for (track in listOf(
+            TrackInfo.Track("Smells Like Teen Spirit", "Nirvana", "Nevermind", null),
+            TrackInfo.Track("Группа крови", "Кино", "Группа крови", null),
+            TrackInfo.Track("Helena", "My Chemical Romance", "Three Cheers for Sweet Revenge", null),
+        )) {
+            val facts = TrackInfo.facts(context, track, "ru")
+            println("\n===== Разделы: ${track.artist} — ${track.title}")
+            Sections.Kind.entries.forEach { kind -> println("[$kind] ${TrackInfo.plainSection(kind, facts, "ru") ?: "(нет)"}") }
+        }
+    }
+
     /** Years active: a singer's from their first record, not their birth; a band's from its forming. */
     @Test
     fun activeYears() = runBlocking {
