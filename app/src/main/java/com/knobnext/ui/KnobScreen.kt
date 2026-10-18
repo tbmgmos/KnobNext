@@ -1666,7 +1666,6 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
                         ConnectedChoice(
                             options = listOf(
                                 com.knobnext.InfoDelivery.VOICE to R.string.info_delivery_voice,
-                                com.knobnext.InfoDelivery.BUBBLE to R.string.info_delivery_bubble,
                                 com.knobnext.InfoDelivery.BOTH to R.string.info_delivery_both,
                             ),
                             selected = s.infoDelivery,

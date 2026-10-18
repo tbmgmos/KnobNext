@@ -110,10 +110,10 @@
     <string name="action_ask_gemini">Открыть в Gemini</string>
     <string name="action_track_info">Рассказать о треке</string>
     <string name="info_delivery">Как рассказывать</string>
-    <string name="info_delivery_hint">Кружком — без звука: на экране появляется карточка с заметкой о треке, исполнителями круга (их можно сразу включить в плеере) и кнопкой «Ещё». Видна и на экране блокировки. Тот же жест ещё раз закрывает её.</string>
+    <string name="info_delivery_hint">«Рассказать о треке» всегда говорит голосом: название, «Общее» и раздел о треке (в следующий раз — об альбоме, потом об исполнителе). «Голосом и кружком» — ещё и показывает карточку с разделами. Только карточку, без звука, — действие «Показать кружок»</string>
     <string name="info_delivery_voice">Голосом</string>
     <string name="info_delivery_bubble">Кружком</string>
-    <string name="info_delivery_both">Оба</string>
+    <string name="info_delivery_both">Голосом и кружком</string>
     <string name="bubble_auto">Сам на смене трека</string>
     <string name="bubble_auto_hint">Обложка нового трека на несколько секунд у края экрана. «Когда интересно» — только если исполнитель вам новый или есть история о самой песне: на обложке будет метка.</string>
     <string name="bubble_auto_off">Нет</string>

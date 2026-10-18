@@ -719,7 +719,10 @@ class Prefs(context: Context) {
 
     /** Whether the story is spoken, shown in the round card on screen, or both. */
     var infoDelivery: InfoDelivery
-        get() = InfoDelivery.entries.firstOrNull { it.name == sp.getString("info_delivery", null) } ?: InfoDelivery.VOICE
+        // "Shown, not told" is the "Show the card" action now: "Tell about the track" always speaks, and
+        // whoever had the card alone gets it with the voice.
+        get() = InfoDelivery.entries.firstOrNull { it.name == sp.getString("info_delivery", null) }
+            ?.let { if (it == InfoDelivery.BUBBLE) InfoDelivery.BOTH else it } ?: InfoDelivery.VOICE
         set(v) = sp.edit().putString("info_delivery", v.name).apply()
 
     /** When the round cover appears by itself as a new track starts (it was once a switch: on is "every"). */
