@@ -1709,6 +1709,19 @@ private fun LazyListScope.storySettings(ctx: PageContext) {
                 }
             }
             Hint(stringResource(R.string.info_hint))
+            // The card's kept parts and answers: how many, and a way to have them all written anew.
+            val here = LocalContext.current
+            var keptParts by remember { mutableStateOf(com.knobnext.Sections.count(here)) }
+            Hint(stringResource(R.string.sections_clear_hint, keptParts))
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    com.knobnext.Sections.clear(here)
+                    keptParts = 0
+                    android.widget.Toast.makeText(here, R.string.sections_cleared, android.widget.Toast.LENGTH_SHORT).show()
+                },
+                enabled = keptParts > 0,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) { Text(stringResource(R.string.sections_clear)) }
             // The RuStore build has no network: only the model on the phone can tell anything there.
             val network = LocalContext.current.resources.getBoolean(R.bool.network)
             if (!network) Hint(stringResource(R.string.info_no_network))

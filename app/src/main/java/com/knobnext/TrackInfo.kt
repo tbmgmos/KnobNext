@@ -399,29 +399,6 @@ object TrackInfo {
         return CloudBrain.Answer(text, checked.sources, checked.by)
     }
 
-    /** Whether the cloud's answer about [track] is still on its way, after its telling stopped waiting. */
-    fun cloudLate(track: Track, lang: String): Boolean =
-        lateAnswers["${track.artist}\u0000${track.title}\u0000$lang"]?.second?.isActive == true
-
-    /**
-     * The cloud's answer about [track] that came too late for its telling, checked like any other: for the
-     * card, which shows the facts meanwhile and puts the answer in their place when it comes.
-     */
-    suspend fun lateStory(context: Context, track: Track, length: InfoLength, lang: String): CloudBrain.Answer? {
-        val key = "${track.artist}\u0000${track.title}\u0000$lang"
-        val asked = lateAnswers[key]?.second ?: return null
-        val answer = withTimeoutOrNull(LATE_WAIT_MS) { asked.await() } ?: return null
-        lateAnswers.remove(key)
-        val facts = recent(track, lang)
-        val dates = within(STORY_DATES_WAIT_MS) { reference(context, track.artist, facts?.album ?: track.album, facts?.mbid) }
-        val checked = checked(answer, allowedYears(dates, track, facts), dates) ?: return null
-        val text = clean(checked.text, length, lang) ?: return null
-        return CloudBrain.Answer(text, checked.sources, checked.by)
-    }
-
-    /** A late answer is waited for this long more by the card (a search and a long answer take a while). */
-    private const val LATE_WAIT_MS = 60_000L
-
     /** Cloud answers that came too late for their telling, by track: the next telling takes them. */
     private val lateAnswers = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, kotlinx.coroutines.Deferred<CloudBrain.Answer?>>>()
     private const val LATE_ANSWER_MS = 30L * 60 * 1000
@@ -983,6 +960,100 @@ object TrackInfo {
         // A model that ignored the language is no better than none.
         return text.takeIf { it.length >= MIN_ANSWER_CHARS && inLanguage(it, lang) }
     }
+
+    // ---- The card's parts ----
+
+    /** Who the artist is in a sentence or two, from the facts: the article's opening, else its first facts. */
+    fun general(facts: Facts?, lang: String): String? {
+        facts ?: return null
+        val lines = facts.intro.filter { inLanguage(it, lang) }.take(GENERAL_SENTENCES)
+            .ifEmpty { aboutLines(facts, lang).filter { inLanguage(it, lang) }.take(GENERAL_SENTENCES) }
+        return lines.joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * A part of the card put together from the facts as found (no model, or the model did not answer):
+     * the artist's facts beyond the general line, the album's, the song's.
+     */
+    fun plainSection(kind: Sections.Kind, facts: Facts?, lang: String): String? {
+        facts ?: return null
+        val lines = when (kind) {
+            Sections.Kind.GENERAL -> return general(facts, lang)
+            Sections.Kind.ARTIST -> {
+                val said = general(facts, lang).orEmpty()
+                aboutLines(facts, lang).filterNot { said.contains(it.take(DUPLICATE_CHARS)) }
+            }
+            Sections.Kind.ALBUM -> brief(merged(facts.albumText, lang)).filter { standsAlone(it) }
+            Sections.Kind.TRACK -> brief(merged(facts.song, lang)).filter { standsAlone(it) }
+        }
+        return lines.take(SECTION_FACTS).joinToString(" ").takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * The parts [kinds] of the card written by the cloud model, in one request: a JSON object with a text
+     * for each. Its footing is what the open sources found (in any language: it retells), its dates the
+     * Reference's, checked as a story's are. It looks things up on the web only when the sources had
+     * little. Null when no model answered.
+     */
+    suspend fun cloudSections(context: Context, track: Track, lang: String, kinds: List<Sections.Kind>, facts: Facts?): Map<Sections.Kind, Sections.Section>? {
+        val prefs = Prefs(context)
+        if (kinds.isEmpty() || CloudBrain.order(prefs).isEmpty()) return null
+        val ru = lang == "ru"
+        val album = facts?.album ?: track.album
+        val dates = within(CARD_DATES_WAIT_MS) { reference(context, track.artist, album, facts?.mbid) }
+        val title = Speech.cleanTitle(track.title)
+        val parts = kinds.map { kind ->
+            val what = when (kind) {
+                Sections.Kind.GENERAL -> if (ru) "1–2 предложения: кто это, откуда, в каком жанре, чем известен" else "1–2 sentences: who they are, where from, what genre, what they are known for"
+                Sections.Kind.ARTIST -> if (ru) "3–5 предложений об исполнителе: история, состав, стиль, с кем связан и на кого повлиял" else "3–5 sentences about the artist: history, members, style, whom they are linked to and influenced"
+                Sections.Kind.ALBUM -> if (ru) "3–4 предложения об альбоме «${album.orEmpty()}»: когда и как вышел, чем важен" else "3–4 sentences about the album \"${album.orEmpty()}\": when and how it came out, why it matters"
+                Sections.Kind.TRACK -> if (ru) "3–4 предложения о песне «$title»: о чём она, как создавалась, что в ней интересного" else "3–4 sentences about the song \"$title\": what it is about, how it was made, what is interesting in it"
+            }
+            "\"${kind.name.lowercase(Locale.ROOT)}\": $what"
+        }
+        val prompt = buildString {
+            appendTrack(track, album, facts?.year ?: track.year)
+            reference(dates, track, facts, lang)
+            footing(facts, lang)
+            appendLine(
+                if (ru) "Разложи, что известно, по частям и ответь ТОЛЬКО JSON-объектом, без пояснений и без ``` — с ключами:"
+                else "Sort what is known into parts and answer ONLY with a JSON object, no comments and no ``` — with the keys:",
+            )
+            parts.forEach { appendLine(it) }
+            appendLine(
+                if (ru) "Каждая часть — связный текст на русском, без списков. Если о части ничего достоверного не известно — пустая строка."
+                else "Each part is connected prose in English, no lists. If nothing reliable is known about a part, an empty string.",
+            )
+        }
+        val answer = withContext(Dispatchers.IO) {
+            CloudBrain.ask(prefs, host(lang), prompt, SECTIONS_TOKENS, search = thin(facts, lang))
+        } ?: return null
+        val json = answer.text.let { t ->
+            val from = t.indexOf('{')
+            val to = t.lastIndexOf('}')
+            if (from < 0 || to <= from) null else runCatching { JSONObject(t.substring(from, to + 1)) }.getOrNull()
+        } ?: return null
+        val allowed = allowedYears(dates, track, facts)
+        val by = answer.by ?: prefs.cloudService.title
+        val now = System.currentTimeMillis()
+        return kinds.mapNotNull { kind ->
+            val text = json.optString(kind.name.lowercase(Locale.ROOT)).trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val checked = checked(CloudBrain.Answer(text, answer.sources), allowed, dates)?.text?.trim()?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            kind to Sections.Section(checked, by, now, answer.sources)
+        }.toMap()
+    }
+
+    /** What the voice tells when the card has written the track's part: the general line and that part. */
+    fun cardStory(context: Context, track: Track, lang: String): String? {
+        val trackPart = Sections.key(Sections.Kind.TRACK, track, lang)?.let { Sections.get(context, it) } ?: return null
+        val general = Sections.key(Sections.Kind.GENERAL, track, lang)?.let { Sections.get(context, it) }
+        return listOfNotNull(general?.text, trackPart.text).joinToString(" ")
+    }
+
+    private const val GENERAL_SENTENCES = 2
+    private const val SECTION_FACTS = 5
+    private const val SECTIONS_TOKENS = 3_000
 
     // ---- Facts ----
 

@@ -452,8 +452,8 @@ class Extras(private val context: Context, private val media: Media, private val
             if (card.shown) return Outcome.done(context.getString(R.string.log_bubble_shown))
             // The card could not be shown (the log says why): told instead, rather than nothing.
         }
-        // Told and shown: the card waits for the same story the voice tells.
-        card?.show(track, art, c, expand = true, fetchNote = false)
+        // Told and shown: the card shows its parts, the voice tells.
+        card?.show(track, art, c, expand = true)
         val lang = prefs.infoLanguage.resolve()
         val length = prefs.infoLength
         val source = prefs.infoSource
@@ -481,8 +481,10 @@ class Extras(private val context: Context, private val media: Media, private val
         pauseMusic()
         speaker.say(TrackInfo.header(context, track, lang))
         infoJob = scope.launch {
-            val told = TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
-            card?.setNote(told)
+            // What the card has written about the track (its general line and the track's part): told as it is,
+            // not asked for again. Otherwise the story.
+            val told = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { TrackInfo.cardStory(context, track, lang) }
+                ?: TrackInfo.story(context, track, length, lang, source) { log?.invoke(it) }
             if (told == null) {
                 speaker.say(context.getString(R.string.speak_info_none), resume, queue = true)
                 return@launch

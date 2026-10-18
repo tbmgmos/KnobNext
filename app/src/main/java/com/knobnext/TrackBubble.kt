@@ -154,7 +154,7 @@ class TrackBubble(
             card = ArtistBase.buildSoon(service, artist, lang)?.await() ?: return@launch
             showArtistLine(t, card.genres, card.began, card.ended, lang)
             // Nothing was found before the base gathered the artist (Discogs, MusicBrainz): told again with it.
-            if (!card.empty && same(t) && path.isEmpty() && noteJob?.isActive != true && note == service.getString(R.string.speak_info_none)) fetchNote()
+            if (!card.empty && same(t) && path.isEmpty() && sectionsJob?.isActive != true && parts.isEmpty()) loadSections(t, again = setOf(Sections.Kind.GENERAL))
         }
     }
 
@@ -174,9 +174,6 @@ class TrackBubble(
         }
     }
 
-    /** The facts are on the card while the cloud model still tells the story. */
-    private var refining = false
-
     /** Counts the cards closed or folded: a question's answer is shown only on the card it was asked on. */
     private var shownCard = 0
 
@@ -194,11 +191,7 @@ class TrackBubble(
     private var controller: MediaController? = null
     private var news: BubbleNews? = null
     private var expanded = false
-    private var noteJob: Job? = null
     private var circleJob: Job? = null
-
-    /** The note the track's card shows; null while it is being looked for. */
-    private var note: String? = null
     private var trackFacts: TrackInfo.Facts? = null
     private var trackRecord: Brainz.Record? = null
     private var recordJob: Job? = null
@@ -249,7 +242,6 @@ class TrackBubble(
             // person is reading: that stays, and "back" leads to the new track.
             setTrack(t, cover)
             news = null
-            note = null
             trackFacts = null
             trackRecord = null
             recordJob?.cancel()
@@ -275,7 +267,7 @@ class TrackBubble(
 
     /**
      * Shows [t]: just the round cover ([expand] false, gone again in a few seconds unless touched), or the
-     * card. [fetchNote]: the card looks the note up itself; otherwise it waits for [setNote]. [mark]: why
+     * card (it loads its parts itself; [fetchNote] is no longer needed). [mark]: why
      * it came by itself.
      */
     fun show(
@@ -292,7 +284,6 @@ class TrackBubble(
         setTrack(t.copy(album = t.album ?: known?.album, year = t.year ?: known?.year), cover ?: art.takeIf { sameTrack })
         news = mark ?: news.takeIf { sameTrack }
         if (!sameTrack) {
-            note = null
             trackFacts = null
             trackRecord = null
             recordJob?.cancel()
@@ -310,22 +301,6 @@ class TrackBubble(
         if (!expanded) collapse()
     }
 
-    /** The note to show in the card (null: nothing was found). */
-    fun setNote(text: String?) {
-        // The facts shown meanwhile are replaced: the line saying the model is still telling goes too.
-        if (refining) {
-            statusView?.visibility = View.GONE
-            refining = false
-        }
-        note = text ?: service.getString(R.string.speak_info_none)
-        // Kept for the track: shown again when the card comes back to it, rather than asked for anew.
-        track?.let { t -> if (text != null) synchronized(told) { told[keyOf(t)] = text } }
-        if (path.isEmpty()) {
-            noteView?.text = note
-            showSources(if (text != null) TrackInfo.lastSources else emptyList())
-        }
-        keepOpen()
-    }
 
     fun dismiss() {
         handler.removeCallbacks(hide)
@@ -454,28 +429,20 @@ class TrackBubble(
         tools.addView(tool(R.drawable.ic_bubble_later, R.string.bubble_later) { t.artist?.let { later(it, t.title, null) } })
         tools.addView(
             tool(R.drawable.ic_bubble_share, R.string.bubble_share) {
-                share(listOfNotNull(listOfNotNull(t.artist?.let(Speech::cleanArtist), Speech.cleanTitle(t.title)).joinToString(" — "), note))
+                share(listOfNotNull(listOfNotNull(t.artist?.let(Speech::cleanArtist), Speech.cleanTitle(t.title)).joinToString(" — "), noteView?.text?.toString()))
             },
         )
         tools.addView(tool(R.drawable.ic_bubble_wiki, R.string.bubble_wiki) { wiki(t.artist ?: t.title, trackFacts?.artistId) })
         box.addView(tools)
 
         val buttons = row(Gravity.END)
-        buttons.addView(button(service.getString(R.string.bubble_more)) { moreNote() })
         buttons.addView(button(service.getString(R.string.bubble_fold)) { collapse() })
         buttons.addView(button(service.getString(R.string.bubble_close)) { dismiss() })
         box.addView(buttons)
 
-        // This track's note, told before the card was folded or closed, or still being told: kept, not
-        // asked for again (the cloud is paid per answer). "Nothing found" is tried again.
-        val ours = noteKey == keyOf(t)
-        when {
-            ours && note != null && note != service.getString(R.string.speak_info_none) -> noteView?.text = note
-            ours && noteJob?.isActive == true -> noteView?.setText(R.string.bubble_loading)
-            fetchNote -> toldOrFetch(t)
-            note != null -> noteView?.text = note
-            else -> noteView?.setText(R.string.bubble_loading)
-        }
+        // The parts kept or being written for this track stay (folded or closed, the cloud is not asked
+        // again); another track's are loaded.
+        loadSections(t)
         loadTrackCircle(t)
         return framed(box)
     }
@@ -487,173 +454,191 @@ class TrackBubble(
         t.year ?: facts?.year ?: albumYear.takeIf { t.album != null || facts?.album == null },
     ).joinToString(" · ")
 
-    /** The next note about the track: the same the voice would tell, and kept in the history the same way. */
-    /**
-     * "More": the next note about the track, without the line about the artist again (it was the first
-     * thing shown, and seeing it again looked as if nothing happened). While a note is still being
-     * told, it is not asked for again: the one coming is waited for.
-     */
-    private fun moreNote() {
-        if (noteJob?.isActive == true) {
-            status(service.getString(R.string.bubble_more_wait))
-            return
-        }
-        fetchNote(more = true)
-    }
+    // ---- The track's parts: the general line at once, then the artist, the album and the track ----
 
     private fun keyOf(t: TrackInfo.Track) = "${t.artist}\u0000${t.title}"
 
+    /** The parts are written by the cloud model (the story's source is the cloud, with a key for it). */
+    private fun cloudWrites() = prefs.infoSource == com.knobnext.InfoSource.CLOUD && CloudBrain.order(prefs).isNotEmpty()
+
+    /** Whose parts [parts] are. */
+    private var sectionsFor: String? = null
+    private val parts = HashMap<Sections.Kind, Sections.Section>()
+    private val pending = HashSet<Sections.Kind>()
+    private var selected = Sections.Kind.GENERAL
+    private var sectionsJob: Job? = null
+    private var tabsRow: LinearLayout? = null
+
+    /** An answer to a question is on the card (no tab chosen); a tab brings the parts back. */
+    private var answering = false
+
+    /** The album the sources found when the player named none (its part is kept under it). */
+    private var foundAlbum: String? = null
+
     /**
-     * What was already told about [t] (on this card a while ago, or in the history: a story heard or read
-     * before) is shown as it is, not asked for again; "More" tells something new. Nothing told yet: the note.
+     * The card's parts for [t]: the kept ones at once; the general line as soon as the artist base or
+     * the first article gives it; the others written by the cloud model in one request (or put together
+     * from the facts without one). What is shown is never replaced: a part appears on its tab when it is
+     * ready. [again]: those parts are written anew ("refresh", a long press on the tab).
      */
-    private fun toldOrFetch(t: TrackInfo.Track) {
+    private fun loadSections(t: TrackInfo.Track, again: Set<Sections.Kind> = emptySet()) {
         val key = keyOf(t)
-        synchronized(told) { told[key] }?.let { return showTold(t, it) }
-        noteView?.setText(R.string.bubble_loading)
-        noteJob?.cancel()
-        noteKey = key
-        noteJob = scope.launch {
-            val saved = withContext(Dispatchers.IO) {
-                runCatching {
-                    val artist = t.artist?.takeIf { it.isNotBlank() } ?: return@runCatching null
-                    Journal.entry(service, Journal.key(artist))?.notes.orEmpty()
-                        .filter { Speech.cleanTitle(it.track).equals(Speech.cleanTitle(t.title), ignoreCase = true) && it.text.isNotBlank() }
-                        .maxByOrNull { it.at }?.text
-                }.getOrNull()
-            }
-            if (!same(t)) return@launch
-            if (saved != null) showTold(t, saved) else fetchNote()
+        if (sectionsFor != key) {
+            sectionsJob?.cancel()
+            sectionsFor = key
+            parts.clear()
+            pending.clear()
+            selected = Sections.Kind.GENERAL
+            answering = false
+            foundAlbum = null
+        } else if (again.isEmpty() && (sectionsJob?.isActive == true || parts.isNotEmpty())) {
+            return showSection()
         }
-    }
-
-    private fun showTold(t: TrackInfo.Track, text: String) {
-        noteKey = keyOf(t)
-        note = text
-        if (path.isEmpty()) {
-            noteView?.text = text
-            showSources(emptyList())
-        }
-    }
-
-    /** Whose note [note] is (or the one being told). */
-    private var noteKey: String? = null
-
-    private fun fetchNote(more: Boolean = false) {
-        val t = track ?: return
-        noteJob?.cancel()
-        note = null
-        noteKey = keyOf(t)
-        noteView?.setText(if (more) R.string.bubble_loading_more else R.string.bubble_loading)
+        sectionsJob?.cancel()
+        again.forEach { parts.remove(it) }
         val lang = prefs.infoLanguage.resolve()
-        noteJob = scope.launch {
-            val job = coroutineContext[Job]
-            // Read with the eyes: the facts are shown as soon as they are here, without waiting for a model
-            // on the phone (that is for the voice). The cloud model takes longer: its facts first, its story after.
-            val by = prefs.cloudService.title
-            var waiting = R.string.bubble_cloud_asking
-            // The cloud's answer as Claude writes it: shown growing, a few times a second at most.
-            val written = java.util.concurrent.atomic.AtomicReference<String?>(null)
-            val pending = java.util.concurrent.atomic.AtomicBoolean(false)
-            var spoke = false
-            val growing = Runnable {
-                pending.set(false)
-                val text = written.get() ?: return@Runnable
-                if (note == null && path.isEmpty() && same(t)) {
-                    spoke = true
-                    noteView?.text = text
-                    waiting = R.string.bubble_cloud_writing
+        val cloud = cloudWrites()
+        sectionsJob = scope.launch {
+            suspend fun kept(kind: Sections.Kind, track: TrackInfo.Track): Sections.Section? = withContext(Dispatchers.IO) {
+                val k = Sections.key(kind, track, lang) ?: return@withContext null
+                if (kind in again) {
+                    Sections.forget(service, k)
+                    return@withContext null
+                }
+                // Put together from the facts while no model could write it: written by the model now.
+                Sections.get(service, k)?.takeIf { !it.plain || !cloud || kind == Sections.Kind.GENERAL }
+            }
+            suspend fun keep(kind: Sections.Kind, track: TrackInfo.Track, section: Sections.Section) = withContext(Dispatchers.IO) {
+                Sections.key(kind, track, lang)?.let { Sections.put(service, it, section) }
+            }
+            fun plain(text: String) = Sections.Section(text, null, System.currentTimeMillis())
+
+            // What is kept: at once.
+            for (kind in Sections.Kind.entries) if (kind !in parts) kept(kind, t)?.let { parts[kind] = it }
+            showSection()
+            // The general line: the artist base's card, or the first article, whichever is here first.
+            val early = if (Sections.Kind.GENERAL in parts) null else launch {
+                val base = withContext(Dispatchers.IO) { ArtistBase.card(service, t.artist) }
+                    ?.takeIf { it.lang == lang }?.intro?.take(GENERAL_LINES)?.joinToString(" ")?.takeIf { it.isNotBlank() }
+                val line = base ?: TrackInfo.general(TrackInfo.earlyOf(t, lang).filterNotNull().first(), lang) ?: return@launch
+                if (Sections.Kind.GENERAL in parts) return@launch
+                val s = plain(line)
+                parts[Sections.Kind.GENERAL] = s
+                showSection()
+                keep(Sections.Kind.GENERAL, t, s)
+            }
+            // The facts (the kept ones at once), and the album they found.
+            val facts = withContext(Dispatchers.IO) { runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() }
+            early?.cancel()
+            val full = if (t.album == null && facts?.album != null) t.copy(album = facts.album) else t
+            foundAlbum = full.album
+            if (Sections.Kind.ALBUM !in parts && full.album != t.album) kept(Sections.Kind.ALBUM, full)?.let { parts[Sections.Kind.ALBUM] = it }
+            if (Sections.Kind.GENERAL !in parts) {
+                TrackInfo.general(facts, lang)?.let { line ->
+                    val s = plain(line)
+                    parts[Sections.Kind.GENERAL] = s
+                    keep(Sections.Kind.GENERAL, t, s)
                 }
             }
-            val telling = async {
-                runCatching {
-                    TrackInfo.story(service, t, prefs.infoLength, lang, prefs.infoSource, model = false, deep = more, onText = { text ->
-                        written.set(text)
-                        if (pending.compareAndSet(false, true)) handler.postDelayed(growing, GROW_MS)
-                    }) { log(it) }
-                }.getOrNull()
+            val wanted = listOfNotNull(
+                Sections.Kind.GENERAL,
+                Sections.Kind.ARTIST,
+                Sections.Kind.ALBUM.takeIf { full.album != null },
+                Sections.Kind.TRACK,
+            ).filter { it !in parts }
+            if (wanted.isEmpty()) return@launch showSection()
+            if (!cloud) {
+                wanted.forEach { kind -> TrackInfo.plainSection(kind, facts, lang)?.let { val s = plain(it); parts[kind] = s; keep(kind, full, s) } }
+                return@launch showSection()
             }
-            val cloud = prefs.infoSource == com.knobnext.InfoSource.CLOUD
-            // The cloud takes a while (a search, a long answer): said at once, with the seconds going by, so
-            // that the card does not look stuck.
-            val ticker = if (cloud) launch {
-                refining = true
+            // One request for all the parts missing; the seconds it takes are counted on the card.
+            pending += wanted
+            showSection()
+            val by = prefs.cloudService.title
+            val ticker = launch {
                 var seconds = 0
                 while (true) {
-                    if (refining && path.isEmpty() && expanded && root != null) status(service.getString(waiting, by, seconds))
+                    if (pending.isNotEmpty() && expanded && root != null && path.isEmpty()) {
+                        status(service.getString(R.string.bubble_parts_writing, by, seconds))
+                    }
                     kotlinx.coroutines.delay(CLOUD_TICK_MS)
                     seconds++
                 }
-            } else null
+            }
             try {
-            // Who the artist is, in a line: shown first, whatever comes first, and kept above the note.
-            var lead: String? = null
-            fun show(text: String?, isLead: Boolean) {
-                // "More": only the new note, nothing shown before it again. Nor over the cloud's own words.
-                if (more || spoke) return
-                text ?: return
-                if (!telling.isActive || note != null || path.isNotEmpty() || !same(t)) return
-                if (isLead) lead = text
-                noteView?.text = text
-                if (cloud) waiting = R.string.bubble_refining else status(service.getString(R.string.bubble_more_coming))
-                refining = true
-            }
-            // At once: what the artist base already knows about them.
-            launch {
-                val known = withContext(Dispatchers.IO) { ArtistBase.card(service, t.artist) }
-                    ?.takeIf { it.lang == lang }?.intro?.firstOrNull()
-                if (lead == null) show(known, isLead = true)
-            }
-            // The Wikipedia article about the artist, in a second or two: shown while the other sources answer.
-            val early = launch {
-                val facts = TrackInfo.earlyOf(t, lang).filterNotNull().first()
-                if (lead == null) {
-                    val about = TrackInfo.summary(facts, lang)
-                    if (about != null) show(about, isLead = true)
-                    else show(TrackInfo.preview(facts, lang) ?: TrackInfo.untranslated(facts), isLead = false)
+                val written = withContext(Dispatchers.IO) { runCatching { TrackInfo.cloudSections(service, full, lang, wanted, facts) }.getOrNull() }
+                written?.forEach { (kind, s) ->
+                    parts[kind] = s
+                    keep(kind, full, s)
                 }
-            }
-            if (cloud) launch {
-                val facts = runCatching { TrackInfo.facts(service, t, lang) }.getOrNull() ?: return@launch
-                early.cancel()
-                if (lead == null) TrackInfo.summary(facts, lang)?.let { lead = it }
-                val more = TrackInfo.preview(facts, lang) ?: TrackInfo.untranslated(facts)
-                show(listOfNotNull(lead, more?.takeUnless { p -> lead?.let { p.startsWith(it.take(LEAD_MATCH)) } == true })
-                    .joinToString("\n\n").ifBlank { null }, isLead = false)
-            }
-            telling.invokeOnCompletion { early.cancel() }
-            val told = telling.await()
-            // The note under the line about the artist, unless it begins with it already.
-            // The cloud began with who they are itself: no line about them above it.
-            val first = if (more || spoke) null else TrackInfo.recent(t, lang)?.let { TrackInfo.summary(it, lang) } ?: lead
-            fun withLead(text: String?) = when {
-                text == null -> first
-                first == null || text.contains(first.take(LEAD_MATCH)) -> text
-                else -> first + "\n\n" + text
-            }
-            // The track changed meanwhile (the card closed, another song): this note is not the card's any more.
-            if (!same(t)) return@launch
-            setNote(withLead(told))
-            // The cloud did not answer in time and is still answering: the facts meanwhile, its story when it comes.
-            if (cloud && TrackInfo.cloudLate(t, lang)) {
-                waiting = R.string.bubble_cloud_late
-                refining = true
-                val late = runCatching { TrackInfo.lateStory(service, t, prefs.infoLength, lang) }.getOrNull()
-                if (late != null && same(t)) {
-                    TrackInfo.lastSources = late.sources
-                    setNote(withLead(late.text))
-                }
-            }
+                if (written == null) log(service.getString(R.string.log_bubble_parts_failed, listOfNotNull(CloudBrain.lastError, CloudBrain.lastDetail).joinToString(" — ")))
+                // Not written (no answer, or nothing known): the facts as found, not kept, so the model is asked next time.
+                wanted.filter { it !in parts }.forEach { kind -> TrackInfo.plainSection(kind, facts, lang)?.let { parts[kind] = plain(it) } }
             } finally {
-                ticker?.cancel()
-                handler.removeCallbacks(growing)
-                // However it ended (told, given up, the card closed or turned to an artist): the line saying the
-                // cloud is still answering goes, unless a newer note has taken over the card.
-                if (noteJob === job && refining) {
-                    statusView?.visibility = View.GONE
-                    refining = false
-                }
+                ticker.cancel()
+                pending.clear()
+                statusView?.visibility = View.GONE
+                showSection()
             }
+        }
+    }
+
+    /** The chosen part on the card, the tabs with what is ready, and where it was found. */
+    private fun showSection() {
+        updateTabs()
+        if (path.isNotEmpty() || answering) return
+        val part = parts[selected]
+        noteView?.text = when {
+            part != null -> part.text
+            selected in pending -> service.getString(R.string.bubble_part_writing, prefs.cloudService.title)
+            sectionsJob?.isActive == true -> service.getString(R.string.bubble_loading)
+            else -> service.getString(R.string.bubble_part_none)
+        }
+        showSources(part?.sources.orEmpty())
+    }
+
+    /** "General · Artist · Album · Track": the chosen one lit, those being written marked, those with nothing left out. */
+    private fun updateTabs() {
+        val row = tabsRow ?: return
+        val t = track ?: return
+        row.removeAllViews()
+        val album = t.album ?: foundAlbum
+        val kinds = listOfNotNull(
+            Sections.Kind.GENERAL,
+            Sections.Kind.ARTIST,
+            Sections.Kind.ALBUM.takeIf { album != null || Sections.Kind.ALBUM in parts },
+            Sections.Kind.TRACK,
+        )
+        kinds.forEach { kind ->
+            val ready = kind in parts
+            val writing = kind in pending
+            // A part with nothing in it (found nowhere, written by no one) is not offered.
+            if (kind != Sections.Kind.GENERAL && !ready && !writing && sectionsJob?.isActive != true) return@forEach
+            val on = kind == selected && !answering
+            val label = service.getString(TAB_LABELS.getValue(kind)) + if (writing) " …" else ""
+            row.addView(
+                text(label, 13f, if (on) palette.onAccent else if (ready) TEXT else MUTED).apply {
+                    background = rounded(if (on) palette.accent else palette.chip, 16)
+                    setPadding(dp(12), dp(7), dp(12), dp(7))
+                    setOnClickListener {
+                        selected = kind
+                        answering = false
+                        showSection()
+                        keepOpen()
+                    }
+                    // A long press writes the part anew (a fact was wrong, or it was written from little).
+                    setOnLongClickListener {
+                        selected = kind
+                        answering = false
+                        loadSections(t, again = setOf(kind))
+                        status(service.getString(R.string.bubble_part_refresh))
+                        true
+                    }
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        marginEnd = dp(8)
+                    }
+                },
+            )
         }
     }
 
@@ -1215,6 +1200,9 @@ class TrackBubble(
     }
 
     private fun noteSection(box: LinearLayout) {
+        val tabs = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
+        tabsRow = tabs
+        box.addView(HorizontalScrollView(service).apply { isHorizontalScrollBarEnabled = false; addView(tabs) })
         // Read whole: the card scrolls when the note is long.
         val n = text(service.getString(R.string.bubble_loading), 14f, TEXT, lines = Int.MAX_VALUE).apply {
             ellipsize = null
@@ -1281,7 +1269,11 @@ class TrackBubble(
         val t = track ?: return
         val artist = path.lastOrNull()
         val key = "${artist ?: "${t.artist}\u0000${t.title}"}\u0000${q.name}"
-        val cached = answers[key]
+        // Kept on the phone like the parts: asked again (another day too), shown at once and not paid for.
+        val kept = "q\u0000$key\u0000${prefs.infoLanguage.resolve()}"
+        answering = true
+        updateTabs()
+        val cached = answers[key] ?: Sections.get(service, kept)?.let { CloudBrain.Answer(it.text, it.sources, it.by) }
         if (cached != null) return showAnswer(q, cached, artist)
         askJob?.cancel()
         noteView?.setText(R.string.bubble_asking)
@@ -1294,7 +1286,10 @@ class TrackBubble(
             // is kept for the next time the same is asked.
             val asking = scope.async(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { TrackInfo.ask(service, t.takeIf { artist == null }, artist, q, prefs.infoLanguage.resolve(), facts) }.getOrNull()
-                    ?.also { answers[key] = it }
+                    ?.also {
+                        answers[key] = it
+                        Sections.put(service, kept, Sections.Section(it.text, it.by, System.currentTimeMillis(), it.sources))
+                    }
             }
             val a = kotlinx.coroutines.withTimeoutOrNull(ASK_WAIT_MS) { asking.await() }
             // Closed meanwhile, or another track or artist on it now: the answer waits for its own card.
@@ -1533,20 +1528,18 @@ class TrackBubble(
     }.getOrNull()
 
     private companion object {
-        /** The notes told lately, by track: the card shows them again rather than asking anew. */
-        val told = object : LinkedHashMap<String, String>() {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > MAX_TOLD
-        }
-        const val MAX_TOLD = 50
-
-        /** The seconds the cloud has been answering for, counted on the card. */
+        /** The seconds the cloud has been writing the parts for, counted on the card. */
         const val CLOUD_TICK_MS = 1_000L
 
-        /** The cloud's growing answer is put on the card at most this often. */
-        const val GROW_MS = 150L
+        /** The general line from the artist base's card: its first sentences. */
+        const val GENERAL_LINES = 2
 
-        /** A note beginning with these many characters of the line about the artist has it already. */
-        const val LEAD_MATCH = 40
+        val TAB_LABELS = mapOf(
+            Sections.Kind.GENERAL to R.string.bubble_tab_general,
+            Sections.Kind.ARTIST to R.string.bubble_tab_artist,
+            Sections.Kind.ALBUM to R.string.bubble_tab_album,
+            Sections.Kind.TRACK to R.string.bubble_tab_track,
+        )
 
         /** How the sources are named on the card. */
         val SOURCE_NAMES = mapOf(
